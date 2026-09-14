@@ -88,12 +88,12 @@ func TestSnapshotIncludesRecordsBeforeBotJoined(t *testing.T) {
 		},
 		{
 			contains: []string{"c.logical_date BETWEEN ? AND ?", "c.id<=?", "c.deleted_at IS NULL"},
-			args:     []any{int64(1), "2026-09-09", "2026-09-09", int64(4)}, columns: 6,
+			args:     []any{int64(1), "2026-09-09", "2026-09-09", int64(4)}, columns: 8,
 			rows: [][]driver.Value{
-				{int64(1), int64(1), "张三", "daily_devotion", "", ""},
-				{int64(2), int64(2), "李四", "daily_devotion", "", ""},
-				{int64(3), int64(3), "王五", "daily_devotion", "", ""},
-				{int64(4), int64(4), "赵六", "daily_devotion", "", ""},
+				{int64(1), int64(1), "张三", "daily_devotion", "", "", "", ""},
+				{int64(2), int64(2), "李四", "daily_devotion", "", "", "", ""},
+				{int64(3), int64(3), "王五", "daily_devotion", "", "", "", ""},
+				{int64(4), int64(4), "赵六", "daily_devotion", "", "", "", ""},
 			},
 		},
 	}}

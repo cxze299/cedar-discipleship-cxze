@@ -100,6 +100,7 @@ func TestCheckinSourceSnapshot(t *testing.T) {
 		{"daily historical", "daily_devotion", date.AddDate(0, 0, -1), nil, false, nil, ""},
 		{"weekly current", "weekly_book", start, int64(7), false, nil, "本周任务\n1 张三 【新】基督"},
 		{"weekly video", "weekly_video", start, int64(7), false, nil, "本周任务\n1 张三 【新】视频"},
+		{"weekly audio", "weekly_video", start, int64(7), false, nil, "本周任务\n1 张三 【新】音频"},
 		{"weekly previous despite current date", "weekly_book", date, int64(6), false, nil, ""},
 		{"deleted record", "", date, nil, true, nil, ""},
 		{"database error", "", date, nil, false, errors.New("db unavailable"), ""},
@@ -137,9 +138,15 @@ func TestCheckinSourceSnapshot(t *testing.T) {
 					fragments = append(fragments, "c.week_id=?", "current_task.week_id=?",
 						"current_ta.asset_id=checked_ta.asset_id", "checked_ta.group_id=c.group_id")
 				}
+				content, mediaType, mediaName := `{"book_name":"基督是一切"}`, "", ""
+				if tt.name == "weekly audio" {
+					content, mediaType, mediaName = "", "audio/mpeg", "lesson.mp3"
+				}
 				steps = append(steps, queryStep{
-					contains: fragments, args: args, columns: 6,
-					rows: [][]driver.Value{{int64(42), int64(2), "张三", tt.taskType, "title", `{"book_name":"基督是一切"}`}},
+					contains: fragments, args: args, columns: 8,
+					rows: [][]driver.Value{{
+						int64(42), int64(2), "张三", tt.taskType, "title", content, mediaType, mediaName,
+					}},
 				})
 			}
 			connector := &sourceConnector{t: t, steps: steps}

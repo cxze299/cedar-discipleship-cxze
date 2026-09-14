@@ -68,6 +68,7 @@ func TestInferTaskBindingType(t *testing.T) {
 		{name: "JPEG image without outline in name", fileName: "week-12.jpeg", want: "image"},
 		{name: "WebP image", fileName: "diagram.webp", want: "image"},
 		{name: "video", fileName: "lesson.mp4", want: "video"},
+		{name: "MP3 audio", fileName: "lesson.mp3", want: "audio"},
 		{name: "markdown", fileName: "lesson.md", want: "markdown"},
 		{name: "PDF reading", fileName: "lesson.pdf", want: "reading"},
 	}

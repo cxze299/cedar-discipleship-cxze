@@ -5,6 +5,14 @@ import (
 	"testing"
 )
 
+func TestInferTaskBindingTypeKeepsWeeklyAudio(t *testing.T) {
+	t.Parallel()
+
+	if got := InferTaskBindingType("weekly_video", "", "lesson.mp3"); got != "audio" {
+		t.Fatalf("InferTaskBindingType() = %q, want audio", got)
+	}
+}
+
 func TestMatchingTodayRecordWeeklyVideoMatchesSameTaskAcrossDates(t *testing.T) {
 	taskID := uint64(11)
 	weekID := uint64(7)

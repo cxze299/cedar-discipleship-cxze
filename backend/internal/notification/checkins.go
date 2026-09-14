@@ -17,11 +17,12 @@ type Event struct {
 }
 
 type Entry struct {
-	RecordID uint64
-	UserID   uint64
-	Name     string
-	TaskType string
-	BookName string
+	RecordID  uint64
+	UserID    uint64
+	Name      string
+	TaskType  string
+	BookName  string
+	MediaKind string
 }
 
 type Snapshot struct {
@@ -65,6 +66,9 @@ func FormatCheckins(entries []Entry, recordID uint64, daily bool) string {
 				key = "book:" + key
 			case "weekly_video":
 				key, label = "video", "视频"
+				if entry.MediaKind == "audio" {
+					key, label = "audio", "音频"
+				}
 			default:
 				continue
 			}

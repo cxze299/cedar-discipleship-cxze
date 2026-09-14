@@ -61,10 +61,10 @@ export const RESOURCE_CATEGORIES: ResourceCategoryDefinition[] = [
   },
   {
     key: 'video',
-    label: '视频',
-    uploadLabel: '视频文件',
-    groupLabel: '视频',
-    groupDescription: '视频与播放材料',
+    label: '音视频',
+    uploadLabel: '音视频文件',
+    groupLabel: '音视频',
+    groupDescription: '音频、视频与播放材料',
     uploadable: true,
   },
   {
@@ -120,6 +120,10 @@ export function resourceCategorySort(left?: unknown, right?: unknown): number {
   const leftIndex = RESOURCE_CATEGORIES.findIndex((item) => item.key === leftKey);
   const rightIndex = RESOURCE_CATEGORIES.findIndex((item) => item.key === rightKey);
   return (leftIndex < 0 ? 999 : leftIndex) - (rightIndex < 0 ? 999 : rightIndex) || leftKey.localeCompare(rightKey);
+}
+
+export function isWeeklyMediaResource(item?: ResourceLike): boolean {
+  return item?.type === 'video' || item?.type === 'audio';
 }
 
 export function resourceCategoryGroups() {

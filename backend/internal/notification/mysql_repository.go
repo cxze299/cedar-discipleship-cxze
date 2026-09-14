@@ -190,11 +190,20 @@ func (s *CheckinSource) periodSnapshot(ctx context.Context, event Event, start, 
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT c.id,c.user_id,
 		       COALESCE(NULLIF(m.member_name,''),NULLIF(u.display_name,''),u.username),
-		       c.task_type,COALESCE(t.title,''),COALESCE(t.content,'')
+		       c.task_type,COALESCE(t.title,''),COALESCE(t.content,''),
+		       COALESCE(media_asset.mime_type,''),COALESCE(media_asset.original_name,'')
 		FROM checkin_records c
 		JOIN users u ON u.id=c.user_id
 		JOIN group_members m ON m.group_id=c.group_id AND m.user_id=c.user_id AND m.status=1
 		LEFT JOIN study_tasks t ON t.id=c.task_id AND t.group_id=c.group_id AND t.week_id=c.week_id
+		LEFT JOIN task_assets media_ta
+		  ON media_ta.group_id=c.group_id AND media_ta.task_id=c.task_id
+		 AND media_ta.id=(
+			SELECT MIN(selected_ta.id) FROM task_assets selected_ta
+			WHERE selected_ta.group_id=c.group_id AND selected_ta.task_id=c.task_id
+		 )
+		LEFT JOIN assets media_asset
+		  ON media_asset.id=media_ta.asset_id AND media_asset.group_id=media_ta.group_id
 		WHERE c.group_id=? AND `+period+` AND `+cutoff+`
 		  AND c.deleted_at IS NULL AND c.status='done' AND `+where+`
 		ORDER BY c.checkin_time,c.id`, args...)
@@ -205,11 +214,21 @@ func (s *CheckinSource) periodSnapshot(ctx context.Context, event Event, start, 
 	var entries []Entry
 	for rows.Next() {
 		var entry Entry
-		var title, content string
-		if err := rows.Scan(&entry.RecordID, &entry.UserID, &entry.Name, &entry.TaskType, &title, &content); err != nil {
+		var title, content, mediaType, mediaName string
+		if err := rows.Scan(
+			&entry.RecordID,
+			&entry.UserID,
+			&entry.Name,
+			&entry.TaskType,
+			&title,
+			&content,
+			&mediaType,
+			&mediaName,
+		); err != nil {
 			return Snapshot{}, fmt.Errorf("scan notification summary: %w", err)
 		}
 		entry.BookName = bookName(title, content)
+		entry.MediaKind = notificationMediaKind(mediaType, mediaName, content)
 		entries = append(entries, entry)
 	}
 	if err := rows.Err(); err != nil {
@@ -225,6 +244,22 @@ func (s *CheckinSource) periodSnapshot(ctx context.Context, event Event, start, 
 		Topic:     topic,
 		Version:   topic + ":" + end,
 	}, nil
+}
+
+func notificationMediaKind(mimeType, fileName, content string) string {
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(mimeType)), "audio/") {
+		return "audio"
+	}
+	for _, value := range []string{fileName, content} {
+		value = strings.ToLower(strings.TrimSpace(value))
+		value = strings.SplitN(strings.SplitN(value, "?", 2)[0], "#", 2)[0]
+		for _, suffix := range []string{".aac", ".flac", ".m4a", ".ma4", ".mp3", ".ogg", ".opus", ".wav", ".weba"} {
+			if strings.HasSuffix(value, suffix) {
+				return "audio"
+			}
+		}
+	}
+	return "video"
 }
 
 func bookName(title, content string) string {

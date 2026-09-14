@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -726,13 +727,16 @@ func firstTaskAsset(raw any) map[string]any {
 }
 
 func InferTaskBindingType(taskType, urlValue, fileName string) string {
+	value := strings.ToLower(firstNonEmpty(fileName, urlValue))
+	if isAudioBinding(value) {
+		return "audio"
+	}
 	switch taskType {
 	case "weekly_video":
 		return "video"
 	case "weekly_outline":
 		return "image"
 	}
-	value := strings.ToLower(firstNonEmpty(fileName, urlValue))
 	switch {
 	case strings.HasSuffix(value, ".md"):
 		return "markdown"
@@ -742,6 +746,19 @@ func InferTaskBindingType(taskType, urlValue, fileName string) string {
 		return "image"
 	default:
 		return "pdf"
+	}
+}
+
+func isAudioBinding(value string) bool {
+	value = strings.SplitN(strings.SplitN(strings.TrimSpace(value), "?", 2)[0], "#", 2)[0]
+	if strings.HasPrefix(value, "audio/") {
+		return true
+	}
+	switch filepath.Ext(value) {
+	case ".aac", ".flac", ".m4a", ".ma4", ".mp3", ".ogg", ".opus", ".wav", ".weba":
+		return true
+	default:
+		return false
 	}
 }
 

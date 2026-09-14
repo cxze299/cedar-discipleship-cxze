@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   RESOURCE_UPLOAD_CATEGORIES,
+  isWeeklyMediaResource,
   mergeResourceAssets,
   normalizeResourceCategory,
   resourceCategoryGroupKey,
@@ -30,6 +31,12 @@ describe('resource runtime helpers', () => {
     expect(resourceSelectionValue({ asset_id: 193, url: '/api/assets/193/download' })).toBe('asset:193');
     expect(resourceSelectionValue({ url: 'https://mouss.synology.me:7399/api/assets/193/download' })).toBe('asset:193');
     expect(resourceSelectionValue({ url: 'https://mouss.synology.me:7399/newtestament.md' })).toBe('url:https://mouss.synology.me:7399/newtestament.md');
+  });
+
+  it('allows video and audio resources in weekly media tasks', () => {
+    expect(isWeeklyMediaResource({ type: 'video' })).toBe(true);
+    expect(isWeeklyMediaResource({ type: 'audio' })).toBe(true);
+    expect(isWeeklyMediaResource({ type: 'reading' })).toBe(false);
   });
 
   it('deduplicates resources by database asset id', () => {

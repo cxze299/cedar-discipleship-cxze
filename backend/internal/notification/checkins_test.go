@@ -65,6 +65,13 @@ func TestFormatCheckins(t *testing.T) {
 			id: 2, want: "本周任务\n1 张三 基\n2 张三 【新】视频",
 		},
 		{
+			name: "audio task uses audio label",
+			entries: []Entry{
+				{RecordID: 1, UserID: 10, Name: "张三", TaskType: "weekly_video", MediaKind: "audio"},
+			},
+			id: 1, want: "本周任务\n1 张三 【新】音频",
+		},
+		{
 			name: "same book merges with new marker",
 			entries: []Entry{
 				{RecordID: 1, UserID: 10, Name: "张三", TaskType: "weekly_book", BookName: "基督是一切"},

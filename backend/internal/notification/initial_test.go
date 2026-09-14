@@ -279,25 +279,25 @@ func TestInitialSnapshot(t *testing.T) {
 		{
 			name: "daily includes existing people", kind: "daily",
 			rows: [][]driver.Value{
-				{int64(1), int64(1), "张三", "daily_devotion", "", ""},
-				{int64(2), int64(2), "李四", "daily_devotion", "", ""},
+				{int64(1), int64(1), "张三", "daily_devotion", "", "", "", ""},
+				{int64(2), int64(2), "李四", "daily_devotion", "", "", "", ""},
 			},
 			want: "每日灵修\n1 张三\n2 李四", wantVersion: "daily:2026-09-09",
 		},
 		{
 			name: "weekly groups books and video", kind: "weekly",
 			rows: [][]driver.Value{
-				{int64(1), int64(1), "张三", "weekly_book", "基督是一切", ""},
-				{int64(2), int64(1), "张三", "weekly_video", "", ""},
-				{int64(3), int64(2), "李四", "weekly_book", "史剧", ""},
+				{int64(1), int64(1), "张三", "weekly_book", "基督是一切", "", "", ""},
+				{int64(2), int64(1), "张三", "weekly_video", "", "", "video/mp4", "lesson.mp4"},
+				{int64(3), int64(2), "李四", "weekly_book", "史剧", "", "", ""},
 			},
 			want: "本周任务\n1 张三 基督 视频\n2 李四 史剧", wantVersion: "weekly:2026-09-13",
 		},
 		{
 			name: "carried video and repeated completion merge", kind: "weekly",
 			rows: [][]driver.Value{
-				{int64(1), int64(1), "张三", "weekly_video", "", ""},
-				{int64(2), int64(1), "张三", "weekly_video", "", ""},
+				{int64(1), int64(1), "张三", "weekly_video", "", "", "video/mp4", "lesson.mp4"},
+				{int64(2), int64(1), "张三", "weekly_video", "", "", "video/mp4", "lesson.mp4"},
 			},
 			want: "本周任务\n1 张三 视频", wantVersion: "weekly:2026-09-13",
 		},
@@ -335,7 +335,7 @@ func TestInitialSnapshot(t *testing.T) {
 				} else {
 					fragments = append(fragments, "c.task_type='daily_devotion'")
 				}
-				step := queryStep{contains: fragments, args: args, columns: 6, rows: tt.rows}
+				step := queryStep{contains: fragments, args: args, columns: 8, rows: tt.rows}
 				if tt.dbError {
 					step.err = errors.New("database unavailable")
 				}

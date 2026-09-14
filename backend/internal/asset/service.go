@@ -300,7 +300,7 @@ func (s *Service) uploadedLibrarySections(ctx context.Context, groupID uint64) (
 		case "book":
 			label = "上传 PDF 读物"
 		case "video":
-			label = "上传视频"
+			label = "上传音视频"
 		case "handout":
 			label = "上传讲义"
 		case "outline":
@@ -502,6 +502,8 @@ func sanitizeUploadName(name string) string {
 func inferTaskBindingType(taskType, urlValue, fileName string) string {
 	text := strings.ToLower(strings.TrimSpace(firstNonEmpty(fileName, urlValue, taskType)))
 	switch {
+	case strings.HasPrefix(text, "audio/") || hasAudioExtension(text):
+		return "audio"
 	case strings.Contains(text, "video") || strings.HasSuffix(text, ".mp4") || strings.HasSuffix(text, ".webm") || strings.HasSuffix(text, ".mov") || strings.HasSuffix(text, ".m4v"):
 		return "video"
 	case strings.Contains(text, "outline") || strings.Contains(text, "提纲") || hasImageExtension(text):
@@ -510,6 +512,15 @@ func inferTaskBindingType(taskType, urlValue, fileName string) string {
 		return "markdown"
 	default:
 		return "reading"
+	}
+}
+
+func hasAudioExtension(value string) bool {
+	switch filepath.Ext(strings.TrimSpace(value)) {
+	case ".aac", ".flac", ".m4a", ".ma4", ".mp3", ".ogg", ".opus", ".wav", ".weba":
+		return true
+	default:
+		return false
 	}
 }
 

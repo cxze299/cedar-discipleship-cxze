@@ -1293,15 +1293,16 @@ function currentTaskOptions() {
     }
   }
   if (shouldRenderWeeklyTask(week.video_enabled, videoTasks)) {
+    const weeklyMediaType = videoLinks[0]?.type === 'audio' ? 'audio' : 'video';
     tasks.push({
       type: 'weekly_video',
       taskID: Number(videoTasks[0]?.id || 0),
       weekID: Number(week.id || 0),
-      title: videoLinks[0]?.title || videoTasks[0]?.title || '本周视频',
-      icon: '视频',
+      title: videoLinks[0]?.title || videoTasks[0]?.title || (weeklyMediaType === 'audio' ? '本周音频' : '本周视频'),
+      icon: weeklyMediaType === 'audio' ? '音频' : '视频',
       part: '',
-      detail: videoLinks[0]?.title || videoTasks[0]?.title || '本周视频',
-      summary: '必看视频',
+      detail: videoLinks[0]?.title || videoTasks[0]?.title || (weeklyMediaType === 'audio' ? '本周音频' : '本周视频'),
+      summary: weeklyMediaType === 'audio' ? '必听音频' : '必看视频',
       contentURL: videoLinks[0]?.url || '',
       contentLinks: videoLinks,
     });

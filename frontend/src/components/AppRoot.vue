@@ -8,6 +8,7 @@ import { downloadErrorMessage } from '../runtime/downloads';
 import { filterSharedResources } from '../runtime/resourceGovernance';
 import {
   RESOURCE_UPLOAD_CATEGORIES,
+  isWeeklyMediaResource,
   normalizeResourceCategory,
   resourceCategoryGroupKey,
   resourceCategoryGroups,
@@ -140,7 +141,7 @@ const markdownFileOptions = computed(() => {
 const readingOptions = computed(() => libraryItems.value.filter((item) => (
   ['book', 'passage', 'markdown'].includes(normalizeResourceCategory(item.category))
 )));
-const videoOptions = computed(() => libraryItems.value.filter((item) => item.type === 'video'));
+const videoOptions = computed(() => libraryItems.value.filter(isWeeklyMediaResource));
 const outlineOptions = computed(() => libraryItems.value.filter((item) => (
   item.type === 'image' || item.type === 'outline' || item.category === 'outline'
 )));
@@ -915,7 +916,7 @@ async function selectCalendarDate(day) {
                     </div>
                     <div class="admin-checkbox-row">
                       <label class="admin-toggle"><input type="checkbox" :checked="enabledFlag(weekDraft.book_enabled)" @change="updateWeekDraftField('book_enabled', $event.target.checked)" /><span>书籍</span></label>
-                      <label class="admin-toggle"><input type="checkbox" :checked="enabledFlag(weekDraft.video_enabled)" @change="updateWeekDraftField('video_enabled', $event.target.checked)" /><span>视频</span></label>
+                      <label class="admin-toggle"><input type="checkbox" :checked="enabledFlag(weekDraft.video_enabled)" @change="updateWeekDraftField('video_enabled', $event.target.checked)" /><span>音视频</span></label>
                       <label class="admin-toggle"><input type="checkbox" :checked="enabledFlag(weekDraft.verse_enabled)" @change="updateWeekDraftField('verse_enabled', $event.target.checked)" /><span>背经</span></label>
                       <label class="admin-toggle"><input type="checkbox" :checked="enabledFlag(weekDraft.outline_enabled)" @change="updateWeekDraftField('outline_enabled', $event.target.checked)" /><span>提纲</span></label>
                     </div>
@@ -944,7 +945,7 @@ async function selectCalendarDate(day) {
                     </Transition>
                     <Transition name="admin-task-section">
                       <div v-if="enabledFlag(weekDraft.video_enabled)" class="admin-binding-list">
-                        <div class="admin-field-label">视频文件</div>
+                        <div class="admin-field-label">音视频文件</div>
                         <div v-for="(item, index) in weekDraft.videos || []" :key="`video-${index}`" class="admin-binding-row video-binding-row">
                           <select :value="weekBindingSelectionValue(item, videoOptions)" @change="applyBindingSelection('videos', index, $event.target.value)">
                             <option value="">不挂载文件</option>

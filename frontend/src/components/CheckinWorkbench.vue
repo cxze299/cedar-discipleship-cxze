@@ -31,7 +31,7 @@ const {
 const legend = [
   { key: 'daily_devotion', label: '灵修' },
   { key: 'weekly_book', label: '书籍' },
-  { key: 'weekly_video', label: '视频' },
+  { key: 'weekly_video', label: '音视频' },
   { key: 'weekly_outline', label: '背大纲' },
 ];
 
@@ -309,7 +309,7 @@ async function exportStatsChart() {
                     v-if="statCount(member, 'weekly_video') && (!activeLegend || activeLegend.key === 'weekly_video')"
                     class="bar-segment video"
                     :style="{ height: `${statPercent(member, 'weekly_video')}%` }"
-                    :title="`视频 ${statCount(member, 'weekly_video')} 次`"
+                    :title="`音视频 ${statCount(member, 'weekly_video')} 次`"
                   ></span>
                   <span
                     v-if="statCount(member, 'weekly_outline') && (!activeLegend || activeLegend.key === 'weekly_outline')"
