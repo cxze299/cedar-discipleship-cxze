@@ -824,7 +824,7 @@ function classifyViewerResource(item) {
   const type = String(item?.type || inferResourceType(item?.url || item?.original_name || item?.title || '')).toLowerCase();
   const category = normalizeResourceCategory(item?.category);
   const text = `${item?.title || ''} ${item?.original_name || ''} ${category}`.toLowerCase();
-  if (type === 'video') return 'video';
+  if (isMediaResourceType(type)) return 'video';
   if (category === 'mentor' || text.includes('mentor') || text.includes('导读') || text.includes('内容概要') || text.includes('圣经纵览的目的与价值')) return 'mentor';
   if (['handout', 'share', 'ppt'].includes(category)) return 'handout';
   if (category === 'book') return 'book';
@@ -832,6 +832,10 @@ function classifyViewerResource(item) {
   if (text.includes('讲义') || text.includes('ppt') || text.includes('handout')) return 'handout';
   if (type === 'pdf') return 'passage';
   return '';
+}
+
+function isMediaResourceType(type) {
+  return type === 'video' || type === 'audio';
 }
 
 function matchViewerResourceToTitle(item, title) {
@@ -879,12 +883,12 @@ function buildMountedSeriesLinks(title) {
     .filter((item) => item.url);
 }
 
-function buildVideoViewerSections(target) {
-  const currentVideo = viewerResourceLink({
-    title: target.title || '本周视频',
+function buildMediaViewerSections(target) {
+  const currentMedia = viewerResourceLink({
+    title: target.title || '本周音视频',
     url: target.sourceURL || target.url,
-    type: 'video',
-  }, target.title || '本周视频');
+    type: target.type || 'video',
+  }, target.title || '本周音视频');
   const mountedCompanions = buildMountedSeriesLinks(target.title);
   const related = state.assets
     .filter((asset, index, arr) => asset?.id && arr.findIndex((other) => other?.id === asset.id) === index)
@@ -896,7 +900,7 @@ function buildVideoViewerSections(target) {
     if (titleKey) return `${item?.category || 'unknown'}:${titleKey}`;
     return `${item?.category || 'unknown'}:${normalizeSearchText(item?.url || '')}`;
   };
-  const unique = [currentVideo, ...mountedCompanions, ...related].filter((item, index, arr) => {
+  const unique = [currentMedia, ...mountedCompanions, ...related].filter((item, index, arr) => {
     if (!item?.url) return false;
     return arr.findIndex((other) => dedupeKey(other) === dedupeKey(item)) === index;
   });
@@ -1045,7 +1049,7 @@ export async function openContentTarget(target) {
       originalName,
       externalURL: '',
       pageRange,
-      relatedSections: target.relatedSections || buildVideoViewerSections({
+      relatedSections: target.relatedSections || buildMediaViewerSections({
         ...target,
         sourceURL,
         url: sourceAPIPath,
@@ -1106,7 +1110,7 @@ export async function openContentTarget(target) {
         revokeURL: objectURL,
         externalURL: target.hideExternalLink ? '' : objectURL,
         pageRange,
-        relatedSections: target.relatedSections || (blobType === 'video' ? buildVideoViewerSections({ ...target, sourceURL, url: viewerURL, type: blobType, title }) : []),
+        relatedSections: target.relatedSections || (isMediaResourceType(blobType) ? buildMediaViewerSections({ ...target, sourceURL, url: viewerURL, type: blobType, title }) : []),
       };
       syncViewerStore();
     }
@@ -1145,7 +1149,7 @@ export async function openContentTarget(target) {
     originalName,
     externalURL: target.hideExternalLink ? '' : sourceURL,
     pageRange,
-    relatedSections: target.relatedSections || (type === 'video' ? buildVideoViewerSections({ ...target, sourceURL, url: viewerURL, type, title }) : []),
+    relatedSections: target.relatedSections || (isMediaResourceType(type) ? buildMediaViewerSections({ ...target, sourceURL, url: viewerURL, type, title }) : []),
   };
   syncViewerStore();
   render();

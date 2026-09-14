@@ -49,6 +49,7 @@ const relatedSections = computed(() => {
   return Array.isArray(sections) ? sections : [];
 });
 
+const isMediaViewer = computed(() => ['video', 'audio'].includes(viewer.value?.type));
 const hasRelatedSidebar = computed(() => relatedSections.value.length > 0);
 const activeSection = computed(() => {
   return relatedSections.value.find((section) => section.items?.some((item) => sameViewerItem(item, viewer.value))) || null;
@@ -353,7 +354,7 @@ function downloadCurrent() {
         class="viewer-body"
         :class="{
           'viewer-body-split': hasRelatedSidebar,
-          'viewer-body-video': viewer.type === 'video',
+          'viewer-body-video': isMediaViewer,
         }"
       >
           <aside v-if="hasRelatedSidebar" class="viewer-sidebar">
@@ -395,8 +396,7 @@ function downloadCurrent() {
         <div
           class="viewer-main"
           :class="{
-            'viewer-main-video': viewer.type === 'video',
-            'viewer-main-audio': viewer.type === 'audio',
+            'viewer-main-video': isMediaViewer,
             'viewer-main-pdf': viewer.type === 'pdf',
           }"
         >
@@ -470,7 +470,7 @@ function downloadCurrent() {
               当前浏览器音频输出异常，已切换为静音播放；需要声音时可使用下载查看。
             </p>
           </div>
-          <div v-else-if="viewer.type === 'audio'" class="viewer-audio-shell">
+          <div v-else-if="viewer.type === 'audio'" class="viewer-video-shell viewer-audio-shell">
             <audio class="viewer-audio" :src="viewer.url" controls></audio>
           </div>
           <PdfViewer
