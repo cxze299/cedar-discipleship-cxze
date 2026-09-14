@@ -1,4 +1,6 @@
 const reloadParameter = '_appv';
+const retryParameter = '_appv_retry';
+const maxReloadAttempts = 2;
 
 export async function refreshForNewVersion() {
   if (import.meta.env.DEV) return false;
@@ -15,17 +17,26 @@ export async function refreshForNewVersion() {
     const manifest = await response.json();
     const latestVersion = String(manifest?.version || '').trim();
     if (!latestVersion || latestVersion === currentVersion) {
-      if (currentURL.searchParams.has(reloadParameter)) {
+      if (
+        currentURL.searchParams.has(reloadParameter)
+        || currentURL.searchParams.has(retryParameter)
+      ) {
         currentURL.searchParams.delete(reloadParameter);
+        currentURL.searchParams.delete(retryParameter);
         window.history.replaceState(null, '', currentURL);
       }
       return false;
     }
 
-    if (currentURL.searchParams.get(reloadParameter) === latestVersion) {
+    const markedVersion = currentURL.searchParams.get(reloadParameter);
+    const attempts = markedVersion === latestVersion
+      ? Number(currentURL.searchParams.get(retryParameter) || 0)
+      : 0;
+    if (attempts >= maxReloadAttempts) {
       return false;
     }
     currentURL.searchParams.set(reloadParameter, latestVersion);
+    currentURL.searchParams.set(retryParameter, String(attempts + 1));
     window.location.replace(currentURL.toString());
     return true;
   } catch {
@@ -49,5 +60,7 @@ export function installVersionRefresh() {
 
   void check();
   window.addEventListener('pageshow', check);
+  window.addEventListener('focus', check);
+  window.addEventListener('online', check);
   document.addEventListener('visibilitychange', checkWhenVisible);
 }
