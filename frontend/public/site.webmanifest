@@ -1,0 +1,17 @@
+{
+  "id": "/",
+  "name": "Cedar Discipleship",
+  "short_name": "Cedar",
+  "start_url": "/launch",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f7f7f3",
+  "theme_color": "#f7f7f3",
+  "icons": [
+    {
+      "src": "/site-avatar.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

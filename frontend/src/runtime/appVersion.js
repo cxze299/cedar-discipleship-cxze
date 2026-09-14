@@ -1,6 +1,7 @@
 const reloadParameter = '_appv';
 const retryParameter = '_appv_retry';
 const maxReloadAttempts = 2;
+const foregroundCheckIntervalMs = 15_000;
 
 export async function refreshForNewVersion() {
   if (import.meta.env.DEV) return false;
@@ -63,4 +64,7 @@ export function installVersionRefresh() {
   window.addEventListener('focus', check);
   window.addEventListener('online', check);
   document.addEventListener('visibilitychange', checkWhenVisible);
+  window.setInterval(() => {
+    if (document.visibilityState === 'visible') void check();
+  }, foregroundCheckIntervalMs);
 }
