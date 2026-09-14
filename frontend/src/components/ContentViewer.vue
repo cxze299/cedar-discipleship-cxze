@@ -279,7 +279,7 @@ function downloadCurrent() {
     <div class="viewer-modal" :class="{ 'viewer-modal-pdf': viewer.type === 'pdf' }">
       <div class="viewer-head">
         <div class="viewer-head-copy">
-          <h2>{{ viewer.title }}</h2>
+          <h2 :title="viewer.title">{{ viewer.title }}</h2>
         </div>
         <div class="viewer-actions">
           <div v-if="viewer.type === 'markdown'" class="reader-controls">

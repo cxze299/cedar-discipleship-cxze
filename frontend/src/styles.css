@@ -5352,12 +5352,19 @@ textarea::placeholder {
   padding-right: 64px;
 }
 
+.viewer-head-copy {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .viewer-close-button {
   position: absolute;
   top: 14px;
   right: 14px;
+  z-index: 2;
   width: 38px;
   height: 38px;
+  flex: 0 0 38px;
   color: var(--muted);
 }
 
@@ -5386,6 +5393,11 @@ textarea::placeholder {
   font-size: 23px;
   font-weight: 720;
   letter-spacing: -0.025em;
+}
+
+.viewer-head h2 {
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .viewer-body {
@@ -6151,7 +6163,7 @@ textarea::placeholder {
   }
 
   .viewer-head {
-    padding: 17px 15px 14px;
+    padding: 17px 52px 14px 15px;
   }
 
   .viewer-body {
