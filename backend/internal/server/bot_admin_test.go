@@ -15,28 +15,40 @@ import (
 )
 
 type fakeBotManager struct {
-	chats       []notificationdomain.Chat
-	bindings    []notificationdomain.Binding
+	robots      []notificationdomain.RobotStatus
+	robotIDs    []string
 	assignments []notificationdomain.Binding
 	err         error
 }
 
-func (m *fakeBotManager) Chats(context.Context) ([]notificationdomain.Chat, error) {
-	return m.chats, m.err
-}
-
-func (m *fakeBotManager) Bindings() []notificationdomain.Binding {
-	return m.bindings
+func (m *fakeBotManager) Robots(context.Context) []notificationdomain.RobotStatus {
+	return m.robots
 }
 
 func (m *fakeBotManager) Assign(
 	_ context.Context,
+	robotID string,
 	target notificationdomain.Target,
 	groupID uint64,
 	_ time.Time,
 ) error {
+	m.robotIDs = append(m.robotIDs, robotID)
 	m.assignments = append(m.assignments, notificationdomain.Binding{Target: target, GroupID: groupID})
 	return m.err
+}
+
+func (m *fakeBotManager) BindingGroupID(robotID string, chatID int64) uint64 {
+	for _, robot := range m.robots {
+		if robot.ID != robotID {
+			continue
+		}
+		for _, binding := range robot.Bindings {
+			if binding.ChatID == chatID {
+				return binding.GroupID
+			}
+		}
+	}
+	return 0
 }
 
 func TestBotManagementRequiresSuperAdmin(t *testing.T) {
@@ -54,11 +66,16 @@ func TestBotManagementRequiresSuperAdmin(t *testing.T) {
 func TestBotManagementListsJoinedChatsAndBindings(t *testing.T) {
 	t.Parallel()
 	manager := &fakeBotManager{
-		chats: []notificationdomain.Chat{
-			{ChatID: 20, ChatType: 3, Title: "2026 bible study"},
-		},
-		bindings: []notificationdomain.Binding{
-			{Target: notificationdomain.Target{ChatID: 20, ChatType: 3}, GroupID: 1},
+		robots: []notificationdomain.RobotStatus{
+			{
+				ID: "primary", Name: "主机器人", State: "healthy", Authenticated: true,
+				Chats: []notificationdomain.Chat{
+					{ChatID: 20, ChatType: 3, Title: "2026 bible study", GroupID: 1},
+				},
+				Bindings: []notificationdomain.Binding{
+					{Target: notificationdomain.Target{ChatID: 20, ChatType: 3}, GroupID: 1},
+				},
+			},
 		},
 	}
 	app := &app{botManager: manager}
@@ -72,17 +89,15 @@ func TestBotManagementListsJoinedChatsAndBindings(t *testing.T) {
 		t.Fatalf("status = %d body=%s", response.Code, response.Body)
 	}
 	var payload struct {
-		Configured bool `json:"configured"`
-		Chats      []struct {
-			ChatID  int64  `json:"chat_id"`
-			GroupID uint64 `json:"group_id"`
-		} `json:"chats"`
-		StudyGroups []userdomain.Group `json:"study_groups"`
+		Configured  bool                             `json:"configured"`
+		Robots      []notificationdomain.RobotStatus `json:"robots"`
+		StudyGroups []userdomain.Group               `json:"study_groups"`
 	}
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if !payload.Configured || len(payload.Chats) != 1 || payload.Chats[0].GroupID != 1 ||
+	if !payload.Configured || len(payload.Robots) != 1 || len(payload.Robots[0].Chats) != 1 ||
+		payload.Robots[0].Chats[0].GroupID != 1 ||
 		len(payload.StudyGroups) != 1 {
 		t.Fatalf("payload = %#v", payload)
 	}
@@ -95,15 +110,20 @@ func TestBotBindingValidatesAndAssigns(t *testing.T) {
 		body       string
 		wantStatus int
 		wantCalls  int
+		wantRobot  string
+		managerErr error
 	}{
-		{"assign", `{"chat_id":20,"chat_type":3,"group_id":1}`, http.StatusOK, 1},
-		{"unbind", `{"chat_id":20,"chat_type":3,"group_id":0}`, http.StatusOK, 1},
-		{"unknown study group", `{"chat_id":20,"chat_type":3,"group_id":2}`, http.StatusBadRequest, 0},
-		{"direct chat", `{"chat_id":20,"chat_type":1,"group_id":1}`, http.StatusBadRequest, 0},
+		{"assign", `{"robot_id":"primary","chat_id":20,"chat_type":3,"group_id":1}`, http.StatusOK, 1, "primary", nil},
+		{"legacy default robot", `{"chat_id":20,"chat_type":3,"group_id":1}`, http.StatusOK, 1, "default", nil},
+		{"unbind", `{"robot_id":"primary","chat_id":20,"chat_type":3,"group_id":0}`, http.StatusOK, 1, "primary", nil},
+		{"unknown robot", `{"robot_id":"missing","chat_id":20,"chat_type":3,"group_id":1}`, http.StatusNotFound, 1, "missing", notificationdomain.ErrRobotNotFound},
+		{"authentication failed", `{"robot_id":"primary","chat_id":20,"chat_type":3,"group_id":1}`, http.StatusBadGateway, 1, "primary", notificationdomain.ErrRobotAuthentication},
+		{"unknown study group", `{"robot_id":"primary","chat_id":20,"chat_type":3,"group_id":2}`, http.StatusBadRequest, 0, "", nil},
+		{"direct chat", `{"robot_id":"primary","chat_id":20,"chat_type":1,"group_id":1}`, http.StatusBadRequest, 0, "", nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			manager := &fakeBotManager{}
+			manager := &fakeBotManager{err: tt.managerErr}
 			app := &app{
 				botManager: manager,
 				audits:     auditdomain.NewService(notificationAuditRepository{}),
@@ -116,6 +136,9 @@ func TestBotBindingValidatesAndAssigns(t *testing.T) {
 			app.handleBotBinding(response, request)
 			if response.Code != tt.wantStatus || len(manager.assignments) != tt.wantCalls {
 				t.Fatalf("status=%d calls=%d body=%s", response.Code, len(manager.assignments), response.Body)
+			}
+			if tt.wantCalls == 1 && manager.robotIDs[0] != tt.wantRobot {
+				t.Fatalf("robot ID = %q, want %q", manager.robotIDs[0], tt.wantRobot)
 			}
 		})
 	}

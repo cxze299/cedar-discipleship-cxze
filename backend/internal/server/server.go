@@ -63,9 +63,9 @@ type app struct {
 		Enqueue(notificationdomain.Event) error
 	}
 	botManager interface {
-		Chats(context.Context) ([]notificationdomain.Chat, error)
-		Bindings() []notificationdomain.Binding
-		Assign(context.Context, notificationdomain.Target, uint64, time.Time) error
+		Robots(context.Context) []notificationdomain.RobotStatus
+		Assign(context.Context, string, notificationdomain.Target, uint64, time.Time) error
+		BindingGroupID(string, int64) uint64
 	}
 }
 
@@ -80,6 +80,7 @@ type config struct {
 	BootstrapDisplayName string
 	TokenTTL             string
 	RefreshTokenTTL      string
+	PotatoRobots         string
 	PotatoBotToken       string
 	PotatoGroups         string
 	NotificationDir      string
@@ -174,29 +175,31 @@ func Run() error {
 	if err := a.bootstrapSuperAdmin(cfg); err != nil {
 		return err
 	}
-	targets, err := notificationdomain.ParseTargets(cfg.PotatoBotToken, cfg.PotatoGroups)
+	robotConfigs, err := notificationdomain.ParseRobotConfigs(
+		cfg.PotatoRobots,
+		cfg.PotatoBotToken,
+		cfg.PotatoGroups,
+	)
 	if err != nil {
 		return err
 	}
-	if cfg.PotatoBotToken != "" {
-		client, err := notificationdomain.NewPotatoClient(cfg.PotatoBotToken)
-		if err != nil {
-			return err
-		}
-		manager, err := notificationdomain.NewManager(
-			cfg.NotificationDir, targets, notificationdomain.NewCheckinSource(db, loc), client,
+	if len(robotConfigs) > 0 {
+		fleet, err := notificationdomain.NewFleet(
+			cfg.NotificationDir,
+			robotConfigs,
+			notificationdomain.NewCheckinSource(db, loc),
 		)
 		if err != nil {
 			return err
 		}
-		if err := manager.EnqueueInitial(time.Now().UTC()); err != nil {
+		if err := fleet.EnqueueInitial(time.Now().UTC()); err != nil {
 			return fmt.Errorf("enqueue initial notification progress: %w", err)
 		}
-		a.notifications = manager
-		a.botManager = manager
+		a.notifications = fleet
+		a.botManager = fleet
 		notificationContext, stopNotifications := context.WithCancel(context.Background())
 		var workers sync.WaitGroup
-		workers.Go(func() { manager.Run(notificationContext) })
+		workers.Go(func() { fleet.Run(notificationContext) })
 		defer func() {
 			stopNotifications()
 			workers.Wait()
@@ -230,6 +233,7 @@ func loadConfig() config {
 		BootstrapDisplayName: env("BOOTSTRAP_SUPERADMIN_DISPLAY_NAME", "超级管理员"),
 		TokenTTL:             env("AGP_TOKEN_TTL", "15m"),
 		RefreshTokenTTL:      env("AGP_REFRESH_TOKEN_TTL", "8760h"),
+		PotatoRobots:         env("AGP_POTATO_ROBOTS", ""),
 		PotatoBotToken:       env("AGP_POTATO_BOT_TOKEN", ""),
 		PotatoGroups:         env("AGP_POTATO_GROUPS", ""),
 		NotificationDir:      env("AGP_NOTIFICATION_DIR", "./data/notifications"),
@@ -249,7 +253,7 @@ func validateConfig(cfg config) error {
 	if _, err := parseRefreshTokenTTL(cfg.RefreshTokenTTL); err != nil {
 		return err
 	}
-	if _, err := notificationdomain.ParseTargets(cfg.PotatoBotToken, cfg.PotatoGroups); err != nil {
+	if _, err := notificationdomain.ParseRobotConfigs(cfg.PotatoRobots, cfg.PotatoBotToken, cfg.PotatoGroups); err != nil {
 		return err
 	}
 	return nil

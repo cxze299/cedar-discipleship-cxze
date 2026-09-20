@@ -55,6 +55,7 @@ services:
       AGP_RESOURCE_ROOT: "/data/agp/resources"
       AGP_MIGRATIONS_DIR: "/app/migrations"
       AGP_LOG_FILE: "/var/log/cedar/backend.log"
+      AGP_POTATO_ROBOTS: "${AGP_POTATO_ROBOTS:-}"
       AGP_POTATO_BOT_TOKEN: "${AGP_POTATO_BOT_TOKEN:-}"
       AGP_POTATO_GROUPS: "${AGP_POTATO_GROUPS:-}"
       AGP_NOTIFICATION_DIR: "/data/agp/notifications"

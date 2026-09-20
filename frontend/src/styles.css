@@ -5208,6 +5208,47 @@ textarea::placeholder {
   overflow: hidden;
 }
 
+.bot-robot-section + .bot-robot-section {
+  border-top: 2px solid var(--line);
+}
+
+.bot-robot-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 20px;
+  align-items: center;
+  padding: 16px 18px;
+  background: var(--surface-muted);
+}
+
+.bot-robot-status {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--primary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.bot-robot-status.is-degraded,
+.bot-robot-status.is-unavailable,
+.bot-robot-error {
+  color: var(--red);
+}
+
+.bot-robot-metrics {
+  grid-column: 1 / -1;
+  font-size: 12px;
+}
+
+.bot-robot-error {
+  padding: 10px 18px;
+  border-top: 1px solid var(--line);
+  background: rgba(180, 35, 24, 0.06);
+  font-size: 13px;
+  font-weight: 650;
+}
+
 .bot-chat-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(220px, 320px);
@@ -8510,6 +8551,15 @@ button.ministry-join-button {
 }
 
 @media (max-width: 640px) {
+  .bot-robot-header {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 14px;
+  }
+
+  .bot-robot-metrics {
+    grid-column: auto;
+  }
+
   .bot-chat-row {
     grid-template-columns: minmax(0, 1fr);
     gap: 12px;

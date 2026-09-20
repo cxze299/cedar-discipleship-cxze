@@ -395,7 +395,7 @@ NAS 文件目录建议：
 
 数据库只保存 `storage_path` 和元数据。访问文件时走后端接口，例如 `GET /api/assets/{id}/download`，由后端校验用户是否属于该小组。
 
-`assets.checksum_sha256` 仅用于完整性校验和重复检测提示，不做跨组去重：各小组按 `group_id` 独立存储文件，即使内容相同也分别保存，以保证小组隔离和迁移独立性。
+日常上传仍按 `group_id` 创建自有资源。旧项目迁移会使用 `checksum_sha256 + file_size` 做精确跨组判重：命中时通过 `asset_bindings` 和 `asset_dependencies` 导入已有共享资源，不复制物理文件；没有跨组命中时才创建当前小组的自有资源。
 
 ### 6.5 打卡记录
 

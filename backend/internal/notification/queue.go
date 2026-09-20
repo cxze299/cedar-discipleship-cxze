@@ -30,6 +30,12 @@ type Queue struct {
 	mu      sync.Mutex
 }
 
+type QueueStats struct {
+	Pending   int `json:"pending"`
+	Completed int `json:"completed"`
+	Failed    int `json:"failed"`
+}
+
 type job struct {
 	Event            Event     `json:"event"`
 	Target           Target    `json:"target"`
@@ -105,6 +111,26 @@ func (q *Queue) SetTargets(targets map[uint64][]Target) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	q.targets = cloneTargets(targets)
+}
+
+func (q *Queue) Stats() (QueueStats, error) {
+	var stats QueueStats
+	for state, target := range map[string]*int{
+		"pending":   &stats.Pending,
+		"completed": &stats.Completed,
+		"failed":    &stats.Failed,
+	} {
+		entries, err := os.ReadDir(filepath.Join(q.dir, state))
+		if err != nil {
+			return QueueStats{}, fmt.Errorf("read %s notification queue: %w", state, err)
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() && filepath.Ext(entry.Name()) == ".json" {
+				(*target)++
+			}
+		}
+	}
+	return stats, nil
 }
 
 func (q *Queue) WakeInitial(groupID uint64, now time.Time) error {

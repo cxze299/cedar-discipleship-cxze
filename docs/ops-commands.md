@@ -388,7 +388,7 @@ EXECUTE_IMPORT=true \
 ./scripts/migrate-legacy-project.sh
 ```
 
-正式导入会写入新学习小组、成员、周任务、任务资源绑定和打卡记录，并迁移本组独有资料文件。其他小组已共享的同名同类资源会优先复用。
+正式导入会写入新学习小组、成员、周任务、任务资源绑定和打卡记录，并迁移本组独有资料文件。资源按 `SHA-256 + 文件字节长度` 精确判重；跨组命中时通过有效共享授权导入，不复制物理文件。
 
 迁移报告会输出到：
 
@@ -400,6 +400,7 @@ data/migration-reports/
 
 - `config.json` 导入 `study_groups`、`group_settings`、`users`、`group_members`、`user_group_roles`、`study_weeks`、`study_tasks`、`assets`、`task_assets`。
 - `records.json` 导入 `checkin_records`。
+- 目标小组已存在时复用原记录并保留其启停状态。
 - 成员账号由系统按中文姓名生成拼音。
 - `daily=done` -> `daily_devotion`。
 - `book=done` -> `weekly_book`。

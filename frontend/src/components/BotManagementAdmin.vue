@@ -1,13 +1,13 @@
 <script setup>
 import { onMounted, ref } from 'vue';
-import { Bot, RefreshCw } from '@lucide/vue';
+import { Bot, CircleAlert, CircleCheck, RefreshCw } from '@lucide/vue';
 import { api, toast as showToast } from '../legacy-app';
 
 const configured = ref(false);
-const chats = ref([]);
+const robots = ref([]);
 const studyGroups = ref([]);
 const loading = ref(false);
-const savingChatID = ref(0);
+const savingBinding = ref('');
 
 onMounted(load);
 
@@ -16,24 +16,25 @@ async function load() {
   try {
     const result = await api('/super-admin/bot-management');
     configured.value = result.configured === true;
-    chats.value = result.chats || [];
+    robots.value = result.robots || [];
     studyGroups.value = result.study_groups || [];
   } catch (error) {
-    showToast(error.message === 'bot_groups_failed' ? '机器人群聊读取失败' : error.message);
+    showToast(error.message);
   } finally {
     loading.value = false;
   }
 }
 
-async function assign(chat, event) {
+async function assign(robot, chat, event) {
   const groupID = Number(event.target.value || 0);
   const previousGroupID = Number(chat.group_id || 0);
   chat.group_id = groupID;
-  savingChatID.value = chat.chat_id;
+  savingBinding.value = `${robot.id}:${chat.chat_id}`;
   try {
     await api('/super-admin/bot-bindings', {
       method: 'PUT',
       body: JSON.stringify({
+        robot_id: robot.id,
         chat_id: chat.chat_id,
         chat_type: chat.chat_type,
         group_id: groupID,
@@ -45,12 +46,24 @@ async function assign(chat, event) {
     chat.group_id = previousGroupID;
     showToast({
       bot_chat_not_found: '机器人已不在该群聊中',
+      robot_not_found: '机器人配置不存在',
+      robot_authentication_failed: '机器人认证失败',
       study_group_not_found: '学习小组不存在',
       bot_binding_save_failed: '群聊绑定保存失败',
     }[error.message] || error.message);
   } finally {
-    savingChatID.value = 0;
+    savingBinding.value = '';
   }
+}
+
+function checkedAt(value) {
+  if (!value) return '';
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value));
 }
 </script>
 
@@ -69,32 +82,60 @@ async function assign(chat, event) {
       </button>
     </div>
 
-    <div v-if="loading && !chats.length" class="empty">正在读取机器人群聊…</div>
+    <div v-if="loading && !robots.length" class="empty">正在读取机器人状态…</div>
     <div v-else-if="!configured" class="empty">机器人尚未配置</div>
     <div v-else class="card bot-management">
-      <div v-if="!chats.length" class="empty">机器人尚未加入群聊</div>
-      <div v-for="chat in chats" v-else :key="chat.chat_id" class="bot-chat-row">
-        <div class="bot-chat-main">
-          <span class="bot-chat-icon"><Bot :size="18" /></span>
-          <div>
-            <strong>{{ chat.title }}</strong>
-            <div class="muted">{{ chat.chat_type === 3 ? '超级群' : '普通群' }} · {{ chat.chat_id }}</div>
+      <section v-for="robot in robots" :key="robot.id" class="bot-robot-section">
+        <header class="bot-robot-header">
+          <div class="bot-chat-main">
+            <span class="bot-chat-icon"><Bot :size="18" /></span>
+            <div>
+              <strong>{{ robot.name }}</strong>
+              <div class="muted">
+                {{ robot.identity?.username ? `@${robot.identity.username}` : robot.id }}
+              </div>
+            </div>
           </div>
+          <div class="bot-robot-status" :class="`is-${robot.state}`">
+            <CircleCheck v-if="robot.state === 'healthy'" :size="16" />
+            <CircleAlert v-else :size="16" />
+            <span>{{ robot.state === 'healthy' ? '运行正常' : robot.state === 'degraded' ? '部分异常' : '不可用' }}</span>
+          </div>
+          <div class="bot-robot-metrics muted">
+            待发送 {{ robot.queue?.pending || 0 }} · 失败 {{ robot.queue?.failed || 0 }} ·
+            {{ checkedAt(robot.last_checked_at) }}
+          </div>
+        </header>
+
+        <div v-if="robot.error_code" class="bot-robot-error">
+          {{ robot.error_code === 'authentication_failed' ? '认证失败' : robot.error_code === 'chat_list_failed' ? '群聊读取失败' : '队列状态读取失败' }}
         </div>
-        <label class="admin-field bot-group-binding">
-          <span class="admin-field-label">对应学习小组</span>
-          <select
-            :value="chat.group_id || 0"
-            :disabled="savingChatID === chat.chat_id"
-            @change="assign(chat, $event)"
-          >
-            <option :value="0">未绑定</option>
-            <option v-for="group in studyGroups" :key="group.id" :value="group.id">
-              {{ group.name }}
-            </option>
-          </select>
-        </label>
-      </div>
+        <div v-if="!robot.chats?.length" class="empty">机器人尚未加入群聊</div>
+        <div v-for="chat in robot.chats" v-else :key="chat.chat_id" class="bot-chat-row">
+          <div class="bot-chat-main">
+            <span class="bot-chat-icon"><Bot :size="18" /></span>
+            <div>
+              <strong>{{ chat.title }}</strong>
+              <div class="muted">
+                {{ chat.joined ? (chat.chat_type === 3 ? '超级群' : '普通群') : '已不在群聊' }} · {{ chat.chat_id }}
+              </div>
+            </div>
+          </div>
+          <label class="admin-field bot-group-binding">
+            <span class="admin-field-label">对应学习小组</span>
+            <select
+              :value="chat.group_id || 0"
+              :disabled="savingBinding === `${robot.id}:${chat.chat_id}`"
+              @change="assign(robot, chat, $event)"
+            >
+              <option :value="0">未绑定</option>
+              <option v-for="group in studyGroups" :key="group.id" :value="group.id">
+                {{ group.name }}
+              </option>
+            </select>
+          </label>
+        </div>
+      </section>
     </div>
   </section>
 </template>
