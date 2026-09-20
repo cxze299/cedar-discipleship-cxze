@@ -97,6 +97,7 @@ export function inferAssetContentType(input: {
   category?: unknown;
 }, fallback = 'iframe'): string {
   const explicitType = String(input.type || '').trim().toLowerCase();
+  if (['book', 'mentor', 'passage'].includes(explicitType)) return 'pdf';
   if (explicitType) return explicitType;
   const attachment = classifyAttachment({
     filename: input.original_name || input.title,

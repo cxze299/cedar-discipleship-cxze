@@ -42,6 +42,10 @@ describe('content runtime helpers', () => {
   it('classifies attachments into previewable and download-only types', () => {
     expect(classifyAttachment({ filename: '主日信息.pdf' })).toEqual({ action: 'preview', type: 'pdf' });
     expect(inferAssetContentType({
+      type: 'book',
+      original_name: '圣经救赎史剧综览-2',
+    })).toBe('pdf');
+    expect(inferAssetContentType({
       original_name: '圣经救赎史剧综览-2',
       mime_type: 'application/pdf',
     })).toBe('pdf');

@@ -995,13 +995,21 @@ function buildViewerURL(url, type, pageRange = '', sourceURL = '') {
   return `${url}${separator}page=${encodeURIComponent(startPage)}&zoom=page-width`;
 }
 
+function normalizeViewerType(type, sourceURL = '', pageRange = '') {
+  const raw = String(type || '').trim().toLowerCase();
+  if (['book', 'mentor', 'passage'].includes(raw)) return 'pdf';
+  const apiPath = sameOriginAPIPath(sourceURL, window.location.origin) || String(sourceURL || '');
+  if (!raw && pageRange && /^\/api\/assets\/\d+\/(?:download|range)\b/.test(apiPath)) return 'pdf';
+  return raw;
+}
+
 function resolveContentSourceURL(target) {
   const originalURL = String(target.url || '').trim();
   const originalAPIPath = sameOriginAPIPath(originalURL, window.location.origin);
   const sourceForMatch = originalAPIPath || originalURL;
   const pageRange = target.pageRange || extractPdfPageRange(target.title || target.label || '');
   const assetMatch = String(sourceForMatch).match(/^\/api\/assets\/(\d+)\/download$/);
-  const type = String(target.type || (pageRange && assetMatch ? 'pdf' : inferResourceType(target.url))).toLowerCase();
+  const type = normalizeViewerType(target.type || (pageRange && assetMatch ? 'pdf' : inferResourceType(target.url)), sourceForMatch, pageRange);
   if (type !== 'pdf' || !pageRange) return target.url;
   if (assetMatch) {
     return `/api/assets/${assetMatch[1]}/range?pages=${encodeURIComponent(pageRange)}`;
@@ -1039,10 +1047,10 @@ export async function openContentTarget(target) {
   const sourceURL = resolveContentSourceURL(target);
   const sourceAPIPath = sameOriginAPIPath(sourceURL, window.location.origin);
   const downloadURL = target.downloadURL || target.url;
-  const type = String(target.type || inferResourceType(target.url)).toLowerCase();
   const originalName = target.original_name || target.filename || '';
   const downloadSource = target.downloadSource || 'learning';
   const pageRange = target.pageRange || extractPdfPageRange(title);
+  const type = normalizeViewerType(target.type || inferResourceType(target.url), sourceURL, pageRange);
   const videoAssetMatch = type === 'video'
     ? String(sourceAPIPath || '').match(/^\/api\/assets\/(\d+)\/download$/)
     : null;
@@ -1177,7 +1185,8 @@ export async function openViewerItemInNewWindow(item, popup = null) {
   try {
     const sourceURL = resolveContentSourceURL(item);
     const sourceAPIPath = sameOriginAPIPath(sourceURL, window.location.origin);
-    const type = String(item.type || inferResourceType(item.url)).toLowerCase();
+    const pageRange = item.pageRange || extractPdfPageRange(item.title || '');
+    const type = normalizeViewerType(item.type || inferResourceType(item.url), sourceURL, pageRange);
     const videoAssetMatch = type === 'video'
       ? String(sourceAPIPath || '').match(/^\/api\/assets\/(\d+)\/download$/)
       : null;
@@ -1196,7 +1205,7 @@ export async function openViewerItemInNewWindow(item, popup = null) {
       const blob = await res.blob();
       const blobType = inferResourceTypeFromMime(blob.type, type);
       const objectURL = URL.createObjectURL(blob);
-      const finalURL = buildViewerURL(objectURL, blobType, item.pageRange || extractPdfPageRange(item.title || ''), sourceAPIPath);
+      const finalURL = buildViewerURL(objectURL, blobType, pageRange, sourceAPIPath);
       if (popup && !popup.closed) {
         popup.location.replace(finalURL);
       } else {
@@ -1204,7 +1213,7 @@ export async function openViewerItemInNewWindow(item, popup = null) {
       }
       return;
     }
-    const finalURL = buildViewerURL(sourceURL, type, item.pageRange || extractPdfPageRange(item.title || ''), sourceURL);
+    const finalURL = buildViewerURL(sourceURL, type, pageRange, sourceURL);
     const absoluteURL = new URL(finalURL, window.location.origin).toString();
     if (popup && !popup.closed) {
       popup.location.replace(absoluteURL);
