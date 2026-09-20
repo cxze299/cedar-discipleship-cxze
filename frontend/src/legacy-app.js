@@ -996,10 +996,11 @@ function resolveContentSourceURL(target) {
   const originalAPIPath = sameOriginAPIPath(originalURL, window.location.origin);
   const type = String(target.type || inferResourceType(target.url)).toLowerCase();
   const sourceForMatch = originalAPIPath || originalURL;
-  if (type !== 'pdf' || !target.pageRange) return target.url;
+  const pageRange = target.pageRange || extractPdfPageRange(target.title || target.label || '');
+  if (type !== 'pdf' || !pageRange) return target.url;
   const assetMatch = String(sourceForMatch).match(/^\/api\/assets\/(\d+)\/download$/);
   if (assetMatch) {
-    return `/api/assets/${assetMatch[1]}/range?pages=${encodeURIComponent(target.pageRange)}`;
+    return `/api/assets/${assetMatch[1]}/range?pages=${encodeURIComponent(pageRange)}`;
   }
   return sourceForMatch;
 }

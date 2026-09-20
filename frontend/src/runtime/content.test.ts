@@ -32,6 +32,7 @@ describe('content runtime helpers', () => {
 
   it('parses and normalizes PDF page ranges', () => {
     expect(extractPdfPageRange('阅读 12-18 页')).toBe('12-18');
+    expect(extractPdfPageRange('圣经救赎史剧综览-2 196-198页')).toBe('196-198');
     expect(extractPdfPageRange('阅读 18 至 12 页')).toBe('18-18');
     expect(parsePdfPageRangeParts('第 9 页')).toEqual({ pageStart: '9', pageEnd: '9' });
     expect(applyPdfPageRangeToTitle('读物 3-4页', '8', '6')).toBe('读物 8-8页');
