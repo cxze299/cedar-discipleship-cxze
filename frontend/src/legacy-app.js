@@ -22,6 +22,7 @@ import {
   extractNumberedContentSection,
   extractWeeklyContentSection,
   extractPdfPageRange,
+  inferAssetContentType,
   isPlainObject,
   markdownToSafeHTML,
   normalizePageField,
@@ -825,7 +826,10 @@ function normalizeResourceSeriesKey(value) {
 }
 
 function classifyViewerResource(item) {
-  const type = String(item?.type || inferResourceType(item?.url || item?.original_name || item?.title || '')).toLowerCase();
+  const type = inferAssetContentType(
+    item || {},
+    inferResourceType(item?.url || item?.original_name || item?.title || ''),
+  );
   const category = normalizeResourceCategory(item?.category);
   const text = `${item?.title || ''} ${item?.original_name || ''} ${category}`.toLowerCase();
   if (isMediaResourceType(type)) return 'video';
@@ -856,7 +860,7 @@ function viewerResourceLink(item, fallbackTitle = '') {
       id: `asset-${assetID}`,
       title: item.title || item.original_name || fallbackTitle || '资源',
       url: `/api/assets/${assetID}/download`,
-      type: item.type || inferResourceType(item.original_name || item.title || '', 'iframe'),
+      type: inferAssetContentType(item, 'iframe'),
       category: classifyViewerResource(item),
     };
   }
@@ -1453,7 +1457,7 @@ function findTodayHubTask(task, hubTasks) {
 function firstTaskAssetLink(task, fallbackTitle = '') {
   const asset = (task?.assets || [])[0];
   if (!asset?.id) return null;
-  const type = inferResourceType(asset.original_name || asset.title, 'iframe');
+  const type = inferAssetContentType(asset, 'iframe');
   return {
     label: fallbackTitle ? `打开 ${fallbackTitle}` : '打开内容',
     title: fallbackTitle || asset.title || asset.original_name || '内容',
@@ -1558,7 +1562,7 @@ function bestAssetLinksForTitle(title, task) {
     .filter((asset, index, arr) => assetDownloadURL(asset) && arr.findIndex((other) => assetDownloadURL(other) === assetDownloadURL(asset)) === index)
     .filter((asset) => matchViewerResourceToTitle(asset, title))
     .map((asset) => {
-      const type = inferResourceType(asset.original_name || asset.title, 'iframe');
+      const type = inferAssetContentType(asset, 'iframe');
       return {
         label: asset.title || asset.original_name || '打开内容',
         title,

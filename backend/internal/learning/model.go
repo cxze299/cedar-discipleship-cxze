@@ -39,6 +39,7 @@ type TaskAsset struct {
 	Category     string
 	Title        string
 	OriginalName string
+	MimeType     string
 	UsageType    string
 }
 

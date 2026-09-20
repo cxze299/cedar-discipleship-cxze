@@ -9,6 +9,7 @@ import {
   extractNumberedContentSection,
   extractWeeklyContentSection,
   extractPdfPageRange,
+  inferAssetContentType,
   markdownToSafeHTML,
   normalizeSearchText,
   parsePdfPageRangeParts,
@@ -39,6 +40,14 @@ describe('content runtime helpers', () => {
 
   it('classifies attachments into previewable and download-only types', () => {
     expect(classifyAttachment({ filename: '主日信息.pdf' })).toEqual({ action: 'preview', type: 'pdf' });
+    expect(inferAssetContentType({
+      original_name: '圣经救赎史剧综览-2',
+      mime_type: 'application/pdf',
+    })).toBe('pdf');
+    expect(inferAssetContentType({
+      original_name: '圣经救赎史剧综览-2',
+      category: 'book',
+    })).toBe('pdf');
     expect(classifyAttachment({ filename: '录音.m4a' })).toEqual({ action: 'preview', type: 'audio' });
     expect(classifyAttachment({ mimeType: 'video/mp4', filename: '现场记录' })).toEqual({ action: 'preview', type: 'video' });
     expect(classifyAttachment({ filename: '服事安排.pptx' })).toEqual({ action: 'download', type: 'download' });

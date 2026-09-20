@@ -89,6 +89,36 @@ export function classifyAttachment(input: { filename?: unknown; mimeType?: unkno
   return { action: 'download', type: 'download' };
 }
 
+export function inferAssetContentType(input: {
+  type?: unknown;
+  original_name?: unknown;
+  title?: unknown;
+  mime_type?: unknown;
+  category?: unknown;
+}, fallback = 'iframe'): string {
+  const explicitType = String(input.type || '').trim().toLowerCase();
+  if (explicitType) return explicitType;
+  const attachment = classifyAttachment({
+    filename: input.original_name || input.title,
+    mimeType: input.mime_type,
+  });
+  if (attachment.action === 'preview') return attachment.type;
+  switch (String(input.category || '').trim().toLowerCase()) {
+    case 'book':
+    case 'mentor':
+    case 'passage':
+      return 'pdf';
+    case 'markdown':
+      return 'markdown';
+    case 'outline':
+      return 'image';
+    case 'video':
+      return 'video';
+    default:
+      return fallback;
+  }
+}
+
 export function weeklyTitleFromContent(input: {
   title?: unknown;
   weekly_checkin?: unknown;

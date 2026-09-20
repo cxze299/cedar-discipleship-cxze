@@ -790,6 +790,7 @@ func taskAssetMaps(assets []TaskAsset) []map[string]any {
 			"category":      asset.Category,
 			"title":         asset.Title,
 			"original_name": asset.OriginalName,
+			"mime_type":     asset.MimeType,
 			"usage_type":    asset.UsageType,
 		})
 	}

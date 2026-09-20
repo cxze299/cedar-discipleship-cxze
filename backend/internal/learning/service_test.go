@@ -5,6 +5,22 @@ import (
 	"testing"
 )
 
+func TestTaskAssetMapsIncludesMIMEType(t *testing.T) {
+	t.Parallel()
+
+	got := taskAssetMaps([]TaskAsset{{
+		ID:           7,
+		Category:     "book",
+		Title:        "圣经救赎史剧综览-2",
+		OriginalName: "圣经救赎史剧综览-2",
+		MimeType:     "application/pdf",
+		UsageType:    "reading",
+	}})
+	if len(got) != 1 || got[0]["mime_type"] != "application/pdf" {
+		t.Fatalf("taskAssetMaps() = %#v, want MIME type", got)
+	}
+}
+
 func TestInferTaskBindingTypeKeepsWeeklyAudio(t *testing.T) {
 	t.Parallel()
 
