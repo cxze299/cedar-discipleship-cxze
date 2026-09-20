@@ -15,6 +15,7 @@ import {
 } from './runtime/date';
 import {
   applyPdfPageRangeToTitle,
+  assetDownloadURLWithPageRange,
   buildReaderPageURL,
   buildWeeklyVerseContentLink,
   deepMerge,
@@ -25,9 +26,11 @@ import {
   inferAssetContentType,
   isPlainObject,
   markdownToSafeHTML,
+  normalizeContentViewerType,
   normalizePageField,
   normalizeSearchText,
   parsePdfPageRangeParts,
+  resolvePdfPageRange,
   sameOriginAPIPath,
   shouldRenderWeeklyTask,
   weeklyTitleFromContent,
@@ -771,12 +774,17 @@ async function refreshHomeStats() {
 
 export async function openTaskContent(task, link = null) {
   const baseTarget = link || (task.contentLinks || [])[0] || (task.contentURL ? { url: task.contentURL, title: task.title } : null);
-  const pageRange = baseTarget?.pageRange
-    || extractPdfPageRange(task.title || task.detail || task.part || '')
-    || extractPdfPageRange(baseTarget?.title || baseTarget?.label || '');
+  const taskFallback = task.type === 'weekly_checkin' && link
+    ? ''
+    : resolvePdfPageRange(task);
+  const pageRange = resolvePdfPageRange({ pageRange: baseTarget?.pageRange }, baseTarget)
+    || taskFallback;
   const target = baseTarget ? {
     ...baseTarget,
     pageRange,
+    taskType: task.type,
+    taskID: task.taskID,
+    weekID: task.weekID,
     hideExternalLink: ['weekly_book', 'weekly_video'].includes(task.type),
   } : null;
   if (!target?.url && !target?.content) {
@@ -895,12 +903,29 @@ function buildMountedSeriesLinks(title) {
     .filter((item) => item.url);
 }
 
+function currentWeeklyBookContentLinks() {
+  const week = state.bootstrap?.current_week || {};
+  const bookTasks = (state.bootstrap?.current_tasks || [])
+    .filter((task) => task.task_type === 'weekly_book');
+  return buildWeeklyBookEntries(bookTasks, week.title, currentWeekConfigPlan())
+    .flatMap((book) => book.contentLinks || [])
+    .filter((item) => item?.url)
+    .map((item) => ({
+      ...item,
+      category: 'book',
+      id: item.id || `weekly-book-${normalizeSearchText(item.url)}-${normalizeSearchText(item.title || item.label)}`,
+      title: item.title || item.label || '本周书籍',
+    }));
+}
+
 function buildMediaViewerSections(target) {
   const currentMedia = viewerResourceLink({
     title: target.title || '本周音视频',
     url: target.sourceURL || target.url,
     type: target.type || 'video',
   }, target.title || '本周音视频');
+  const includeWeeklyBooks = String(target.taskType || '').startsWith('weekly_') || Number(target.weekID || 0) > 0;
+  const weeklyBookLinks = includeWeeklyBooks ? currentWeeklyBookContentLinks() : [];
   const mountedCompanions = buildMountedSeriesLinks(target.title);
   const related = state.assets
     .filter((asset, index, arr) => asset?.id && arr.findIndex((other) => other?.id === asset.id) === index)
@@ -908,11 +933,14 @@ function buildMediaViewerSections(target) {
     .map((asset) => viewerResourceLink(asset, target.title))
     .filter((item) => item.url);
   const dedupeKey = (item) => {
+    const apiPath = sameOriginAPIPath(item?.url || item?.sourceURL || '', window.location.origin) || String(item?.url || item?.sourceURL || '');
+    const assetMatch = apiPath.match(/^\/api\/assets\/(\d+)\/(?:download|range)\b/);
+    if (assetMatch) return `${item?.category || 'unknown'}:asset:${assetMatch[1]}`;
     const titleKey = normalizeSearchText(`${item?.title || ''} ${item?.original_name || ''}`);
     if (titleKey) return `${item?.category || 'unknown'}:${titleKey}`;
     return `${item?.category || 'unknown'}:${normalizeSearchText(item?.url || '')}`;
   };
-  const unique = [currentMedia, ...mountedCompanions, ...related].filter((item, index, arr) => {
+  const unique = [currentMedia, ...weeklyBookLinks, ...mountedCompanions, ...related].filter((item, index, arr) => {
     if (!item?.url) return false;
     return arr.findIndex((other) => dedupeKey(other) === dedupeKey(item)) === index;
   });
@@ -996,25 +1024,18 @@ function buildViewerURL(url, type, pageRange = '', sourceURL = '') {
 }
 
 function normalizeViewerType(type, sourceURL = '', pageRange = '') {
-  const raw = String(type || '').trim().toLowerCase();
-  if (['book', 'mentor', 'passage'].includes(raw)) return 'pdf';
-  const apiPath = sameOriginAPIPath(sourceURL, window.location.origin) || String(sourceURL || '');
-  if (!raw && pageRange && /^\/api\/assets\/\d+\/(?:download|range)\b/.test(apiPath)) return 'pdf';
-  return raw;
+  return normalizeContentViewerType(type, sourceURL, pageRange, window.location.origin);
 }
 
 function resolveContentSourceURL(target) {
   const originalURL = String(target.url || '').trim();
   const originalAPIPath = sameOriginAPIPath(originalURL, window.location.origin);
   const sourceForMatch = originalAPIPath || originalURL;
-  const pageRange = target.pageRange || extractPdfPageRange(target.title || target.label || '');
+  const pageRange = resolvePdfPageRange({ pageRange: target.pageRange }, target);
   const assetMatch = String(sourceForMatch).match(/^\/api\/assets\/(\d+)\/download$/);
   const type = normalizeViewerType(target.type || (pageRange && assetMatch ? 'pdf' : inferResourceType(target.url)), sourceForMatch, pageRange);
   if (type !== 'pdf' || !pageRange) return target.url;
-  if (assetMatch) {
-    return `/api/assets/${assetMatch[1]}/range?pages=${encodeURIComponent(pageRange)}`;
-  }
-  return sourceForMatch;
+  return assetDownloadURLWithPageRange(sourceForMatch, pageRange, window.location.origin);
 }
 
 export function closeViewer() {
@@ -1046,11 +1067,13 @@ export async function openContentTarget(target) {
   }
   const sourceURL = resolveContentSourceURL(target);
   const sourceAPIPath = sameOriginAPIPath(sourceURL, window.location.origin);
-  const downloadURL = target.downloadURL || target.url;
   const originalName = target.original_name || target.filename || '';
   const downloadSource = target.downloadSource || 'learning';
-  const pageRange = target.pageRange || extractPdfPageRange(title);
+  const pageRange = resolvePdfPageRange({ pageRange: target.pageRange }, target, { title });
   const type = normalizeViewerType(target.type || inferResourceType(target.url), sourceURL, pageRange);
+  const downloadURL = type === 'pdf' && pageRange
+    ? sourceURL
+    : target.downloadURL || target.url;
   const videoAssetMatch = type === 'video'
     ? String(sourceAPIPath || '').match(/^\/api\/assets\/(\d+)\/download$/)
     : null;
@@ -1185,7 +1208,7 @@ export async function openViewerItemInNewWindow(item, popup = null) {
   try {
     const sourceURL = resolveContentSourceURL(item);
     const sourceAPIPath = sameOriginAPIPath(sourceURL, window.location.origin);
-    const pageRange = item.pageRange || extractPdfPageRange(item.title || '');
+    const pageRange = resolvePdfPageRange({ pageRange: item.pageRange }, item);
     const type = normalizeViewerType(item.type || inferResourceType(item.url), sourceURL, pageRange);
     const videoAssetMatch = type === 'video'
       ? String(sourceAPIPath || '').match(/^\/api\/assets\/(\d+)\/download$/)
@@ -1231,7 +1254,7 @@ export function openCurrentViewerInNewPage(item) {
     item?.sourceURL || item?.downloadURL || item?.url || '',
     window.location.origin,
   );
-  const pageRange = item?.pageRange || extractPdfPageRange(item?.title || '');
+  const pageRange = resolvePdfPageRange({ pageRange: item?.pageRange }, item);
   const readerURL = buildReaderPageURL({
     sourceURL: sourceAPIPath,
     title: item?.title || 'PDF 资料',
@@ -1468,18 +1491,29 @@ function findTodayHubTask(task, hubTasks) {
   }) || null;
 }
 
+function titleWithPageRange(title, pageRange) {
+  const text = String(title || '').trim();
+  if (!text || !pageRange || extractPdfPageRange(text)) return text;
+  return `${text} ${pageRange}页`;
+}
+
 function firstTaskAssetLink(task, fallbackTitle = '') {
   const asset = (task?.assets || [])[0];
   if (!asset?.id) return null;
   const type = inferAssetContentType(asset, 'iframe');
+  const pageRange = resolvePdfPageRange({ title: fallbackTitle }, task, asset);
+  const title = titleWithPageRange(
+    fallbackTitle || asset.title || asset.original_name || '内容',
+    pageRange,
+  );
   return {
-    label: fallbackTitle ? `打开 ${fallbackTitle}` : '打开内容',
-    title: fallbackTitle || asset.title || asset.original_name || '内容',
+    label: title || '打开内容',
+    title: title || '内容',
     url: assetDownloadURL(asset),
     type,
-    pageRange: extractPdfPageRange(fallbackTitle || asset.title || asset.original_name || ''),
+    pageRange,
     weeklySection: task?.task_type === 'weekly_book' && type === 'markdown',
-    sectionTitle: fallbackTitle,
+    sectionTitle: title,
   };
 }
 
@@ -1562,13 +1596,15 @@ function currentWeekConfigPlan() {
 
 function bestAssetLinksForTitle(title, task) {
   const directURL = String(task?.content || '').trim();
+  const pageRange = resolvePdfPageRange({ title }, task);
+  const displayTitle = titleWithPageRange(title, pageRange) || title;
   if (isPlayableContentURL(directURL)) {
     return [{
-      label: '读物内容',
-      title,
+      label: displayTitle || '读物内容',
+      title: displayTitle,
       url: directURL,
       type: inferResourceType(directURL, 'iframe'),
-      pageRange: extractPdfPageRange(title),
+      pageRange,
     }];
   }
   const localAssets = [...(task?.assets || []), ...state.assets];
@@ -1578,13 +1614,13 @@ function bestAssetLinksForTitle(title, task) {
     .map((asset) => {
       const type = inferAssetContentType(asset, 'iframe');
       return {
-        label: asset.title || asset.original_name || '打开内容',
-        title,
+        label: displayTitle || asset.title || asset.original_name || '打开内容',
+        title: displayTitle || title,
         url: assetDownloadURL(asset),
         type,
-        pageRange: extractPdfPageRange(title),
+        pageRange,
         weeklySection: task?.task_type === 'weekly_book' && type === 'markdown',
-        sectionTitle: title,
+        sectionTitle: displayTitle || title,
       };
     });
   if (matched.length) return matched;
@@ -1598,11 +1634,19 @@ function buildWeeklyBookEntries(bookTasks, weekTitle, configPlan = null) {
   if (!bookTasks.length && configuredReadings.length) {
     return configuredReadings.map((reading, index) => {
       const task = bookTaskForReading(bookTasks, reading, index);
+      const pageRange = resolvePdfPageRange(reading);
+      const displayTitle = titleWithPageRange(reading.title, pageRange) || reading.title;
       return {
         taskID: Number(task?.id || 0),
-        title: reading.title,
+        title: displayTitle || reading.title,
         contentLinks: reading.url
-          ? [{ label: '读物内容', title: reading.title, url: reading.url, type: reading.type || 'pdf', pageRange: extractPdfPageRange(reading.title) }]
+          ? [{
+            label: displayTitle || '读物内容',
+            title: displayTitle || reading.title,
+            url: reading.url,
+            type: reading.type || 'pdf',
+            pageRange,
+          }]
           : bestAssetLinksForTitle(reading.title, task),
       };
     });
@@ -1615,7 +1659,8 @@ function buildWeeklyBookEntries(bookTasks, weekTitle, configPlan = null) {
     }];
   }
   return bookTasks.map((task) => {
-    const title = String(task.title || weekTitle || '周读物').trim() || '周读物';
+    const pageRange = resolvePdfPageRange(task, task.title || weekTitle || '');
+    const title = titleWithPageRange(String(task.title || weekTitle || '周读物').trim() || '周读物', pageRange);
     return {
       taskID: Number(task.id || 0),
       title,

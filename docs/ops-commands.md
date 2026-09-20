@@ -396,7 +396,7 @@ EXECUTE_IMPORT=true \
 data/migration-reports/
 ```
 
-当前导入规则：
+导入规则：
 
 - `config.json` 导入 `study_groups`、`group_settings`、`users`、`group_members`、`user_group_roles`、`study_weeks`、`study_tasks`、`assets`、`task_assets`。
 - `records.json` 导入 `checkin_records`。

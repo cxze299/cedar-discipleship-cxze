@@ -92,7 +92,7 @@ RESOURCE_LEGACY_ASSETS_ROOT=/volume1/docker/zw1-checkin/data/assets
 - `RESOURCE_MIGRATION_DRY_RUN_ONLY=true`：只写入数据，不复制资源文件。
 - `RESOURCE_LEGACY_ASSETS_ROOT`：旧项目存在额外上传目录时指定。
 
-旧版本的 `PREFER_SHARED_ASSETS` 参数仍可传入，但不再按文件名或标题判重。迁移必须在资源文件阶段取得实际文件内容后，按上述指纹规则决定导入或复制。
+`migrate-json --prefer-shared-assets` 仅作为无行为影响的 CLI 兼容参数保留。资源迁移始终在资源文件阶段读取实际文件内容，并按上述指纹规则决定导入或复制。
 
 ## 验收清单
 

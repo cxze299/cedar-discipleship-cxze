@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyPdfPageRangeToTitle,
+  assetDownloadURLWithPageRange,
   buildReaderPageURL,
   buildWeeklyVerseContentLink,
   classifyAttachment,
@@ -9,11 +10,14 @@ import {
   extractNumberedContentSection,
   extractWeeklyContentSection,
   extractPdfPageRange,
+  extractPdfPageRangeFromMetadata,
   inferAssetContentType,
   markdownToSafeHTML,
+  normalizeContentViewerType,
   normalizeSearchText,
   parsePdfPageRangeParts,
   parseReaderPageRequest,
+  resolvePdfPageRange,
   sameOriginAPIPath,
   shouldRenderWeeklyTask,
   videoMediaErrorMessage,
@@ -37,6 +41,20 @@ describe('content runtime helpers', () => {
     expect(parsePdfPageRangeParts('第 9 页')).toEqual({ pageStart: '9', pageEnd: '9' });
     expect(applyPdfPageRangeToTitle('读物 3-4页', '8', '6')).toBe('读物 8-8页');
     expect(applyPdfPageRangeToTitle('读物 3-4页', '', '')).toBe('读物');
+  });
+
+  it('derives PDF page ranges from migrated reading metadata', () => {
+    const metadata = '{"book_name":"基督是一切","page_start":36,"page_end":40,"source_title":"《基督是一切》36-40页"}';
+    expect(extractPdfPageRangeFromMetadata(metadata)).toBe('36-40');
+    expect(resolvePdfPageRange({
+      title: '基督是一切-江守道',
+      content: metadata,
+    })).toBe('36-40');
+    expect(resolvePdfPageRange({ pageRange: '175-179' })).toBe('175-179');
+    expect(resolvePdfPageRange('2026')).toBe('');
+    expect(resolvePdfPageRange({
+      content: '{"page_start":88,"page_end":80}',
+    })).toBe('88-88');
   });
 
   it('classifies attachments into previewable and download-only types', () => {
@@ -209,5 +227,38 @@ describe('content runtime helpers', () => {
       pageRange: '',
     }, 'http://localhost:5114')).toBe('');
     expect(parseReaderPageRequest('?reader_source=https://example.com/book.pdf')).toBeNull();
+  });
+
+  it('converts asset downloads to ranged PDF downloads when pages are known', () => {
+    expect(assetDownloadURLWithPageRange(
+      '/api/assets/22/download',
+      '88-96',
+      'http://localhost:5114',
+    )).toBe('/api/assets/22/range?pages=88-96');
+    expect(assetDownloadURLWithPageRange(
+      'http://localhost:5114/api/assets/22/download',
+      '88-96',
+      'http://localhost:5114',
+    )).toBe('/api/assets/22/range?pages=88-96');
+    expect(assetDownloadURLWithPageRange(
+      '/api/assets/22/download',
+      '',
+      'http://localhost:5114',
+    )).toBe('/api/assets/22/download');
+  });
+
+  it('treats ranged asset links as PDFs even when their fallback type is iframe', () => {
+    expect(normalizeContentViewerType(
+      'iframe',
+      '/api/assets/22/download',
+      '88-96',
+      'http://localhost:5114',
+    )).toBe('pdf');
+    expect(normalizeContentViewerType(
+      'iframe',
+      'https://example.com/book',
+      '88-96',
+      'http://localhost:5114',
+    )).toBe('iframe');
   });
 });

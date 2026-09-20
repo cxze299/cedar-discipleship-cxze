@@ -57,6 +57,32 @@ export function parseReaderPageRequest(search: unknown): ReaderPageRequest | nul
   };
 }
 
+export function assetDownloadURLWithPageRange(value: unknown, pageRange: unknown, origin = ''): string {
+  const originalURL = String(value || '').trim();
+  const apiPath = sameOriginAPIPath(originalURL, origin);
+  const sourceURL = apiPath || originalURL;
+  const range = resolvePdfPageRange({ pageRange });
+  const assetMatch = sourceURL.match(/^\/api\/assets\/(\d+)\/download$/);
+  if (!assetMatch || !range) return sourceURL;
+  return `/api/assets/${assetMatch[1]}/range?pages=${encodeURIComponent(range)}`;
+}
+
+export function normalizeContentViewerType(
+  value: unknown,
+  sourceURL: unknown = '',
+  pageRange: unknown = '',
+  origin = '',
+): string {
+  const type = String(value || '').trim().toLowerCase();
+  if (['book', 'mentor', 'passage'].includes(type)) return 'pdf';
+
+  const apiPath = sameOriginAPIPath(sourceURL, origin) || String(sourceURL || '');
+  const hasAssetPageRange = Boolean(resolvePdfPageRange({ pageRange }))
+    && /^\/api\/assets\/\d+\/(?:download|range)\b/.test(apiPath);
+  if (hasAssetPageRange && ['', 'download', 'iframe'].includes(type)) return 'pdf';
+  return type;
+}
+
 export type AttachmentPresentation = {
   action: 'preview' | 'download';
   type: 'pdf' | 'image' | 'video' | 'audio' | 'markdown' | 'download';
@@ -321,6 +347,70 @@ export function extractPdfPageRange(value: unknown): string {
   const start = Math.max(1, Number(match[1] || 1));
   const end = Math.max(start, Number(match[2] || match[1] || start));
   return `${start}-${end}`;
+}
+
+function normalizePdfPageRange(value: unknown): string {
+  const raw = String(value ?? '').trim();
+  const match = raw.match(/^(\d{1,4})(?:\s*[-~—–至到]\s*(\d{1,4}))?$/);
+  if (!match) return extractPdfPageRange(raw);
+  const start = Math.max(1, Number(match[1] || 1));
+  const end = Math.max(start, Number(match[2] || match[1] || start));
+  return `${start}-${end}`;
+}
+
+export function extractPdfPageRangeFromMetadata(value: unknown): string {
+  let metadata: PlainRecord | null = null;
+  if (isPlainObject(value)) {
+    metadata = value;
+  } else {
+    const raw = String(value || '').trim();
+    if (!raw.startsWith('{')) return '';
+    try {
+      const parsed = JSON.parse(raw);
+      metadata = isPlainObject(parsed) ? parsed : null;
+    } catch {
+      return '';
+    }
+  }
+  if (!metadata) return '';
+
+  for (const key of ['source_title', 'sourceTitle', 'title']) {
+    const pageRange = extractPdfPageRange(metadata[key]);
+    if (pageRange) return pageRange;
+  }
+  return composePdfPageRange(
+    metadata.page_start ?? metadata.pageStart,
+    metadata.page_end ?? metadata.pageEnd,
+  );
+}
+
+export function resolvePdfPageRange(...sources: unknown[]): string {
+  for (const source of sources) {
+    if (isPlainObject(source)) {
+      for (const key of ['pageRange', 'page_range', 'pages']) {
+        const pageRange = normalizePdfPageRange(source[key]);
+        if (pageRange) return pageRange;
+      }
+      const fieldRange = composePdfPageRange(
+        source.page_start ?? source.pageStart,
+        source.page_end ?? source.pageEnd,
+      );
+      if (fieldRange) return fieldRange;
+      for (const key of ['source_title', 'sourceTitle', 'title', 'label', 'detail', 'part']) {
+        const pageRange = extractPdfPageRange(source[key]);
+        if (pageRange) return pageRange;
+      }
+      const metadataRange = extractPdfPageRangeFromMetadata(source.content ?? source.metadata);
+      if (metadataRange) return metadataRange;
+      continue;
+    }
+
+    const pageRange = extractPdfPageRange(source);
+    if (pageRange) return pageRange;
+    const metadataRange = extractPdfPageRangeFromMetadata(source);
+    if (metadataRange) return metadataRange;
+  }
+  return '';
 }
 
 export function parsePdfPageRangeParts(value: unknown): { pageStart: string; pageEnd: string } {

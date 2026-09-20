@@ -1,11 +1,13 @@
 package learning
 
 type TaskBinding struct {
-	TaskID  uint64 `json:"task_id,omitempty"`
-	Title   string `json:"title"`
-	URL     string `json:"url"`
-	Type    string `json:"type"`
-	AssetID uint64 `json:"asset_id"`
+	TaskID    uint64 `json:"task_id,omitempty"`
+	Title     string `json:"title"`
+	URL       string `json:"url"`
+	Type      string `json:"type"`
+	AssetID   uint64 `json:"asset_id"`
+	PageStart string `json:"page_start,omitempty"`
+	PageEnd   string `json:"page_end,omitempty"`
 }
 
 type WeekInput struct {

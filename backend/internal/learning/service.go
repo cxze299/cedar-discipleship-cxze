@@ -3,10 +3,13 @@ package learning
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,6 +21,8 @@ var (
 	ErrWeekNotFound    = errors.New("week_not_found")
 	ErrWeekHasCheckins = errors.New("week_has_checkins")
 )
+
+var taskBindingPageRangePattern = regexp.MustCompile(`([0-9]{1,4})\s*(?:[-~—–至到]\s*([0-9]{1,4}))?\s*页`)
 
 type Service struct {
 	repo     Repository
@@ -236,9 +241,10 @@ func BuildTaskDrafts(input WeekInput, existingVerseTitle string) []TaskDraft {
 			if strings.TrimSpace(reading.Title) == "" && reading.AssetID == 0 && strings.TrimSpace(reading.URL) == "" {
 				continue
 			}
+			title := taskBindingTitleWithPageRange(reading)
 			tasks = append(tasks, TaskDraft{
 				TaskType:  "weekly_book",
-				Title:     firstNonEmpty(strings.TrimSpace(reading.Title), "周读物"),
+				Title:     title,
 				Content:   strings.TrimSpace(reading.URL),
 				SortOrder: order,
 				AssetID:   reading.AssetID,
@@ -294,7 +300,10 @@ func WeekTitle(input WeekInput) string {
 	parts := make([]string, 0, 3)
 	if input.BookEnabled {
 		for _, reading := range input.Readings {
-			if title := strings.TrimSpace(reading.Title); title != "" {
+			if strings.TrimSpace(reading.Title) == "" && reading.AssetID == 0 && strings.TrimSpace(reading.URL) == "" {
+				continue
+			}
+			if title := taskBindingTitleWithPageRange(reading); title != "" {
 				parts = append(parts, title)
 			}
 		}
@@ -323,6 +332,18 @@ func WeeklyVerseTaskTitle(input WeekInput, existingTitle string) string {
 		return ""
 	}
 	return firstNonEmpty(strings.TrimSpace(input.VerseRef), strings.TrimSpace(existingTitle), "背经")
+}
+
+func taskBindingTitleWithPageRange(binding TaskBinding) string {
+	title := firstNonEmpty(strings.TrimSpace(binding.Title), "周读物")
+	if taskBindingPageRangePattern.MatchString(title) {
+		return title
+	}
+	start, end := normalizeTaskBindingPages(binding.PageStart, binding.PageEnd)
+	if start == "" {
+		return title
+	}
+	return strings.TrimSpace(title + " " + start + "-" + end + "页")
 }
 
 func SplitWeekTaskBindings(tasks []map[string]any) ([]TaskBinding, []TaskBinding, TaskBinding) {
@@ -365,14 +386,25 @@ func WeekMap(week Week) map[string]any {
 func TaskMaps(tasks []Task) []map[string]any {
 	out := make([]map[string]any, 0, len(tasks))
 	for _, task := range tasks {
-		out = append(out, map[string]any{
+		item := map[string]any{
 			"id":        task.ID,
 			"task_type": task.TaskType,
 			"title":     task.Title,
 			"content":   task.Content,
 			"enabled":   task.Enabled,
 			"assets":    taskAssetMaps(task.Assets),
-		})
+		}
+		if task.TaskType == "weekly_book" {
+			start, end, sourceTitle := readingPageRangeParts(task.Title, task.Content)
+			if start != "" {
+				item["page_start"] = start
+				item["page_end"] = end
+			}
+			if sourceTitle != "" {
+				item["source_title"] = sourceTitle
+			}
+		}
+		out = append(out, item)
 	}
 	return out
 }
@@ -688,11 +720,12 @@ func weekVO(week Week, readings, videos []TaskBinding, outline TaskBinding) Week
 }
 
 func taskBindingFromMap(task map[string]any) TaskBinding {
+	content := asString(task["content"])
 	binding := TaskBinding{
 		TaskID: mapUint64(task, "id"),
 		Title:  asString(task["title"]),
-		URL:    asString(task["content"]),
-		Type:   InferTaskBindingType(asString(task["task_type"]), asString(task["content"]), ""),
+		URL:    content,
+		Type:   InferTaskBindingType(asString(task["task_type"]), content, ""),
 	}
 	if asset := firstTaskAsset(task["assets"]); asset != nil {
 		assetID := mapUint64(asset, "id")
@@ -705,7 +738,98 @@ func taskBindingFromMap(task map[string]any) TaskBinding {
 		}
 		binding.Type = InferTaskBindingType(asString(task["task_type"]), binding.URL, firstNonEmpty(asString(asset["original_name"]), asString(asset["title"])))
 	}
+	if asString(task["task_type"]) == "weekly_book" {
+		start, end, sourceTitle := readingPageRangeParts(binding.Title, content)
+		if sourceTitle != "" && !taskBindingPageRangePattern.MatchString(binding.Title) {
+			binding.Title = sourceTitle
+		}
+		binding.PageStart = start
+		binding.PageEnd = end
+	}
 	return binding
+}
+
+type readingPageMetadata struct {
+	PageStart   int    `json:"page_start"`
+	PageEnd     int    `json:"page_end"`
+	SourceTitle string `json:"source_title"`
+}
+
+func readingPageRangeParts(title, content string) (string, string, string) {
+	if start, end := pageRangePartsFromTitle(title); start != "" {
+		return start, end, ""
+	}
+	metadata := readingPageMetadata{}
+	raw := strings.TrimSpace(content)
+	if !strings.HasPrefix(raw, "{") || json.Unmarshal([]byte(raw), &metadata) != nil {
+		return "", "", ""
+	}
+	if start, end := pageRangePartsFromTitle(metadata.SourceTitle); start != "" {
+		return start, end, strings.TrimSpace(metadata.SourceTitle)
+	}
+	start, end := normalizeTaskBindingPages(metadata.PageStart, metadata.PageEnd)
+	if start == "" {
+		return "", "", strings.TrimSpace(metadata.SourceTitle)
+	}
+	return start, end, strings.TrimSpace(metadata.SourceTitle)
+}
+
+func pageRangePartsFromTitle(title string) (string, string) {
+	match := taskBindingPageRangePattern.FindStringSubmatch(title)
+	if len(match) == 0 {
+		return "", ""
+	}
+	start, _ := strconv.Atoi(match[1])
+	end := start
+	if match[2] != "" {
+		parsedEnd, _ := strconv.Atoi(match[2])
+		if parsedEnd > end {
+			end = parsedEnd
+		}
+	}
+	if start < 1 {
+		return "", ""
+	}
+	return strconv.Itoa(start), strconv.Itoa(end)
+}
+
+func normalizeTaskBindingPages(startValue, endValue any) (string, string) {
+	start := positivePageNumber(startValue)
+	if start == 0 {
+		return "", ""
+	}
+	end := positivePageNumber(endValue)
+	if end < start {
+		end = start
+	}
+	return strconv.Itoa(start), strconv.Itoa(end)
+}
+
+func positivePageNumber(value any) int {
+	switch typed := value.(type) {
+	case int:
+		if typed > 0 {
+			return typed
+		}
+	case int64:
+		if typed > 0 {
+			return int(typed)
+		}
+	case uint64:
+		if typed > 0 {
+			return int(typed)
+		}
+	case float64:
+		if typed >= 1 {
+			return int(typed)
+		}
+	case string:
+		parsed, err := strconv.Atoi(strings.TrimSpace(typed))
+		if err == nil && parsed > 0 {
+			return parsed
+		}
+	}
+	return 0
 }
 
 func taskContentURL(task map[string]any) string {
