@@ -1,10 +1,14 @@
 package notification
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -154,5 +158,113 @@ func TestFleetScopesStatusAndBindingsByRobot(t *testing.T) {
 		if status.Chats[0].GroupID != fleet.BindingGroupID(status.ID, 20) {
 			t.Fatalf("chat binding = %#v", status.Chats[0])
 		}
+	}
+}
+
+func TestFleetRegisterPersistsRobotAndKeepsTokenServerSide(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/getMe":
+			_, _ = io.WriteString(w, `{"ok":true,"result":{"id":101,"first_name":"Primary Bot","username":"primary_bot"}}`)
+		case "/getGroups":
+			_, _ = io.WriteString(w, `{"ok":true,"result":{"Groups":[],"SuperGroups":[]}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	fleet, err := NewFleet(t.TempDir(), nil, &fakeSource{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	configureClient := func(client *PotatoClient) {
+		client.identityEndpoint = server.URL + "/getMe"
+		client.groupsEndpoint = server.URL + "/getGroups"
+	}
+	newClient := newPotatoClient
+	t.Cleanup(func() { newPotatoClient = newClient })
+	newPotatoClient = func(token string) (*PotatoClient, error) {
+		client, err := newClient(token)
+		if err != nil {
+			return nil, err
+		}
+		configureClient(client)
+		return client, nil
+	}
+
+	status, err := fleet.Register(t.Context(), RobotRegistration{Token: "123:secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.ID != "primary_bot" || status.Name != "Primary Bot" || !status.Authenticated {
+		t.Fatalf("status = %#v", status)
+	}
+	data, err := os.ReadFile(filepath.Join(fleet.dir, "robots.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(filepath.Join(fleet.dir, "robots.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("robots.json mode = %o, want 600", info.Mode().Perm())
+	}
+	var stored struct {
+		Robots []struct {
+			ID    string `json:"id"`
+			Name  string `json:"name"`
+			Token string `json:"token"`
+		} `json:"robots"`
+	}
+	if err := json.Unmarshal(data, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.Robots) != 1 || stored.Robots[0].Token != "123:secret" {
+		t.Fatalf("stored = %#v", stored)
+	}
+	payload, err := json.Marshal(status)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(payload), "secret") {
+		t.Fatalf("status leaked token: %s", payload)
+	}
+}
+
+func TestFleetRegisterRejectsDuplicateIDAndToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/getMe":
+			_, _ = io.WriteString(w, `{"ok":true,"result":{"id":101,"first_name":"Primary Bot","username":"primary_bot"}}`)
+		case "/getGroups":
+			_, _ = io.WriteString(w, `{"ok":true,"result":{"Groups":[],"SuperGroups":[]}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	newClient := newPotatoClient
+	t.Cleanup(func() { newPotatoClient = newClient })
+	newPotatoClient = func(token string) (*PotatoClient, error) {
+		client, err := newClient(token)
+		if err != nil {
+			return nil, err
+		}
+		client.identityEndpoint = server.URL + "/getMe"
+		client.groupsEndpoint = server.URL + "/getGroups"
+		return client, nil
+	}
+
+	fleet, err := NewFleet(t.TempDir(), []RobotConfig{{ID: "existing", Name: "existing", Token: "999:secret"}}, &fakeSource{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fleet.Register(t.Context(), RobotRegistration{ID: "existing", Token: "123:secret"}); err != ErrRobotAlreadyExists {
+		t.Fatalf("duplicate ID error = %v", err)
+	}
+	if _, err := fleet.Register(t.Context(), RobotRegistration{ID: "newbot", Token: "999:secret"}); err != ErrRobotTokenExists {
+		t.Fatalf("duplicate token error = %v", err)
 	}
 }

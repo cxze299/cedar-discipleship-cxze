@@ -88,7 +88,13 @@ type PotatoClient struct {
 	client           *http.Client
 }
 
+var newPotatoClient = newPotatoClientWithToken
+
 func NewPotatoClient(token string) (*PotatoClient, error) {
+	return newPotatoClient(token)
+}
+
+func newPotatoClientWithToken(token string) (*PotatoClient, error) {
 	if !tokenPattern.MatchString(token) {
 		return nil, errors.New("invalid AGP_POTATO_BOT_TOKEN")
 	}

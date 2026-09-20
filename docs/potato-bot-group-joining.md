@@ -198,4 +198,56 @@ Content-Type: application/json
 }
 ```
 
-机器人注册和 Token 轮换通过服务端 `AGP_POTATO_ROBOTS` 配置及受控部署完成，不提供把 Token 写入数据库的管理接口。
+### 新增机器人
+
+```text
+POST /api/super-admin/bot-robots
+Authorization: Bearer <access_token>
+Content-Type: application/json
+```
+
+```json
+{
+  "id": "primary",
+  "name": "主机器人",
+  "token": "123:secret"
+}
+```
+
+`token` 必填；`id` 和 `name` 可省略。省略 `id` 时，服务端会在 `getMe` 验证通过后根据机器人用户名生成稳定 ID；省略 `name` 时使用机器人名称或用户名。
+
+新增时服务端会：
+
+1. 校验 Token 格式。
+2. 调用 Potato `getMe` 验证 Token。
+3. 拒绝重复机器人 ID、重复 Token 或超过 32 个机器人。
+4. 将页面新增的机器人写入 `${AGP_NOTIFICATION_DIR}/robots.json`，文件权限为 `0600`。
+5. 立即启动该机器人的独立通知队列。
+
+响应：
+
+```json
+{
+  "robot": {
+    "id": "primary",
+    "name": "主机器人",
+    "state": "healthy",
+    "authenticated": true,
+    "identity": {
+      "id": 10100427,
+      "first_name": "Primary Bot",
+      "username": "primary_bot"
+    },
+    "last_checked_at": "2026-09-20T03:30:00Z",
+    "queue": {
+      "pending": 0,
+      "completed": 0,
+      "failed": 0
+    },
+    "chats": [],
+    "bindings": []
+  }
+}
+```
+
+Token 只保存在后端配置文件，不会出现在 API 响应、审计日志或前端状态中。部署环境变量中的机器人仍由部署配置管理；如果环境变量与页面保存的机器人使用同一个 ID，环境变量优先生效。

@@ -227,9 +227,9 @@ MYSQL_PASSWORD=agp \
 AGP_POTATO_ROBOTS='{"primary":{"name":"主机器人","token":"123:secret","groups":{"1":{"chat_id":12345678,"chat_type":2}}},"backup":{"name":"备用机器人","token":"456:secret"}}'
 ```
 
-`groups` 仅用于机器人首次启动时导入绑定。之后由超级管理员在“管理后台 → 机器人管理”中查看每个机器人的认证状态、队列状态和已加入群聊，并设置对应学习小组。同一机器人的一个群聊只能绑定一个学习小组；不同机器人可以使用相同的群聊 ID。
+`groups` 仅用于机器人首次启动时导入绑定。之后由超级管理员在“管理后台 → 机器人管理”中新增机器人、查看每个机器人的认证状态、队列状态和已加入群聊，并设置对应学习小组。同一机器人的一个群聊只能绑定一个学习小组；不同机器人可以使用相同的群聊 ID。
 
-机器人 ID 使用小写字母开头，可包含小写字母、数字、`_` 和 `-`，最多配置 32 个机器人。未设置 `AGP_POTATO_ROBOTS` 时，系统继续读取原有的 `AGP_POTATO_BOT_TOKEN` 和 `AGP_POTATO_GROUPS`，并注册为 `default` 机器人。该机器人的现有绑定、队列和已发送状态仍保存在 `${AGP_NOTIFICATION_DIR}`；其他机器人保存在 `${AGP_NOTIFICATION_DIR}/robots/{robot_id}`。所有 Token 只保存在服务端环境中。
+机器人 ID 使用小写字母开头，可包含小写字母、数字、`_` 和 `-`，最多配置 32 个机器人。未设置 `AGP_POTATO_ROBOTS` 时，系统继续读取原有的 `AGP_POTATO_BOT_TOKEN` 和 `AGP_POTATO_GROUPS`，并注册为 `default` 机器人。该机器人的现有绑定、队列和已发送状态仍保存在 `${AGP_NOTIFICATION_DIR}`；其他机器人保存在 `${AGP_NOTIFICATION_DIR}/robots/{robot_id}`。页面新增的机器人 Token 保存在 `${AGP_NOTIFICATION_DIR}/robots.json`，文件权限为 `0600`，API 和前端状态不会返回 Token。
 
 Potato 不提供机器人主动加入指定群聊的 API。需先允许机器人被加入群聊，再由群管理员在 Potato 客户端中完成添加。接口、参数、认证、响应、权限和限流说明见 [Potato 机器人加入群聊能力](docs/potato-bot-group-joining.md)。
 

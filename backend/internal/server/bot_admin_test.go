@@ -18,6 +18,8 @@ type fakeBotManager struct {
 	robots      []notificationdomain.RobotStatus
 	robotIDs    []string
 	assignments []notificationdomain.Binding
+	registered  []notificationdomain.RobotRegistration
+	register    notificationdomain.RobotStatus
 	err         error
 }
 
@@ -37,6 +39,14 @@ func (m *fakeBotManager) Assign(
 	return m.err
 }
 
+func (m *fakeBotManager) Register(
+	_ context.Context,
+	req notificationdomain.RobotRegistration,
+) (notificationdomain.RobotStatus, error) {
+	m.registered = append(m.registered, req)
+	return m.register, m.err
+}
+
 func (m *fakeBotManager) BindingGroupID(robotID string, chatID int64) uint64 {
 	for _, robot := range m.robots {
 		if robot.ID != robotID {
@@ -49,6 +59,70 @@ func (m *fakeBotManager) BindingGroupID(robotID string, chatID int64) uint64 {
 		}
 	}
 	return 0
+}
+
+func TestBotRobotRegistersWithoutExposingToken(t *testing.T) {
+	t.Parallel()
+
+	manager := &fakeBotManager{register: notificationdomain.RobotStatus{
+		ID: "primary", Name: "主机器人", State: "healthy", Authenticated: true,
+		Identity: notificationdomain.RobotIdentity{ID: 101, Username: "primary_bot"},
+	}}
+	app := &app{
+		botManager: manager,
+		audits:     auditdomain.NewService(notificationAuditRepository{}),
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/super-admin/bot-robots", strings.NewReader(
+		`{"id":"primary","name":"主机器人","token":"123:secret"}`,
+	))
+	request = request.WithContext(context.WithValue(request.Context(), currentUserKey, currentUser{
+		ID: 1, IsSuperAdmin: true,
+	}))
+	response := httptest.NewRecorder()
+	app.handleBotRobot(response, request)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body)
+	}
+	if len(manager.registered) != 1 || manager.registered[0].Token != "123:secret" {
+		t.Fatalf("registered = %#v", manager.registered)
+	}
+	if strings.Contains(response.Body.String(), "secret") {
+		t.Fatalf("response leaked token: %s", response.Body)
+	}
+}
+
+func TestBotRobotMapsRegistrationErrors(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		err        error
+		wantStatus int
+	}{
+		{"invalid", notificationdomain.ErrInvalidRobotConfig, http.StatusBadRequest},
+		{"auth", notificationdomain.ErrRobotAuthentication, http.StatusBadGateway},
+		{"duplicate id", notificationdomain.ErrRobotAlreadyExists, http.StatusConflict},
+		{"duplicate token", notificationdomain.ErrRobotTokenExists, http.StatusConflict},
+		{"limit", notificationdomain.ErrRobotLimitExceeded, http.StatusConflict},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app := &app{
+				botManager: &fakeBotManager{err: tt.err},
+				audits:     auditdomain.NewService(notificationAuditRepository{}),
+			}
+			request := httptest.NewRequest(http.MethodPost, "/api/super-admin/bot-robots", strings.NewReader(
+				`{"token":"123:secret"}`,
+			))
+			request = request.WithContext(context.WithValue(request.Context(), currentUserKey, currentUser{
+				ID: 1, IsSuperAdmin: true,
+			}))
+			response := httptest.NewRecorder()
+			app.handleBotRobot(response, request)
+			if response.Code != tt.wantStatus {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body)
+			}
+		})
+	}
 }
 
 func TestBotManagementRequiresSuperAdmin(t *testing.T) {

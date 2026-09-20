@@ -18,11 +18,52 @@ func (a *app) handleBotManagement(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	robots := a.botManager.Robots(r.Context())
 	writeJSON(w, http.StatusOK, map[string]any{
-		"configured":   true,
-		"robots":       a.botManager.Robots(r.Context()),
+		"configured":   len(robots) > 0,
+		"robots":       robots,
 		"study_groups": user.Groups,
 	})
+}
+
+func (a *app) handleBotRobot(w http.ResponseWriter, r *http.Request) {
+	if a.botManager == nil {
+		writeError(w, http.StatusServiceUnavailable, "bot_not_configured")
+		return
+	}
+	var req struct {
+		ID    string `json:"id"`
+		Name  string `json:"name"`
+		Token string `json:"token"`
+	}
+	if !readJSON(w, r, &req) {
+		return
+	}
+	status, err := a.botManager.Register(r.Context(), notificationdomain.RobotRegistration{
+		ID: req.ID, Name: req.Name, Token: req.Token,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, notificationdomain.ErrInvalidRobotConfig):
+			writeError(w, http.StatusBadRequest, err.Error())
+		case errors.Is(err, notificationdomain.ErrRobotAuthentication):
+			writeError(w, http.StatusBadGateway, err.Error())
+		case errors.Is(err, notificationdomain.ErrRobotAlreadyExists),
+			errors.Is(err, notificationdomain.ErrRobotTokenExists),
+			errors.Is(err, notificationdomain.ErrRobotLimitExceeded):
+			writeError(w, http.StatusConflict, err.Error())
+		default:
+			writeError(w, http.StatusInternalServerError, "bot_robot_save_failed")
+		}
+		return
+	}
+	user := mustUser(r)
+	a.audit(0, user.ID, "create_bot_robot", "potato_robot", 0,
+		nil,
+		map[string]any{"robot_id": status.ID, "name": status.Name},
+		r,
+	)
+	writeJSON(w, http.StatusCreated, map[string]any{"robot": status})
 }
 
 func (a *app) handleBotBinding(w http.ResponseWriter, r *http.Request) {

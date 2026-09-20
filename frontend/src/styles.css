@@ -5208,6 +5208,35 @@ textarea::placeholder {
   overflow: hidden;
 }
 
+.bot-registration {
+  display: grid;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.bot-registration-heading {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  font-weight: 760;
+}
+
+.bot-registration-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.4fr) minmax(180px, 0.9fr) minmax(160px, 0.8fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.bot-registration-button {
+  min-width: 92px;
+  min-height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
 .bot-robot-section + .bot-robot-section {
   border-top: 2px solid var(--line);
 }
@@ -8551,6 +8580,14 @@ button.ministry-join-button {
 }
 
 @media (max-width: 640px) {
+  .bot-registration-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .bot-registration-button {
+    width: 100%;
+  }
+
   .bot-robot-header {
     grid-template-columns: minmax(0, 1fr);
     padding: 14px;

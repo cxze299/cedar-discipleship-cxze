@@ -64,6 +64,7 @@ type app struct {
 	}
 	botManager interface {
 		Robots(context.Context) []notificationdomain.RobotStatus
+		Register(context.Context, notificationdomain.RobotRegistration) (notificationdomain.RobotStatus, error)
 		Assign(context.Context, string, notificationdomain.Target, uint64, time.Time) error
 		BindingGroupID(string, int64) uint64
 	}
@@ -183,28 +184,26 @@ func Run() error {
 	if err != nil {
 		return err
 	}
-	if len(robotConfigs) > 0 {
-		fleet, err := notificationdomain.NewFleet(
-			cfg.NotificationDir,
-			robotConfigs,
-			notificationdomain.NewCheckinSource(db, loc),
-		)
-		if err != nil {
-			return err
-		}
-		if err := fleet.EnqueueInitial(time.Now().UTC()); err != nil {
-			return fmt.Errorf("enqueue initial notification progress: %w", err)
-		}
-		a.notifications = fleet
-		a.botManager = fleet
-		notificationContext, stopNotifications := context.WithCancel(context.Background())
-		var workers sync.WaitGroup
-		workers.Go(func() { fleet.Run(notificationContext) })
-		defer func() {
-			stopNotifications()
-			workers.Wait()
-		}()
+	fleet, err := notificationdomain.NewFleet(
+		cfg.NotificationDir,
+		robotConfigs,
+		notificationdomain.NewCheckinSource(db, loc),
+	)
+	if err != nil {
+		return err
 	}
+	if err := fleet.EnqueueInitial(time.Now().UTC()); err != nil {
+		return fmt.Errorf("enqueue initial notification progress: %w", err)
+	}
+	a.notifications = fleet
+	a.botManager = fleet
+	notificationContext, stopNotifications := context.WithCancel(context.Background())
+	var workers sync.WaitGroup
+	workers.Go(func() { fleet.Run(notificationContext) })
+	defer func() {
+		stopNotifications()
+		workers.Wait()
+	}()
 	cacheContext, stopCache := context.WithCancel(context.Background())
 	defer stopCache()
 	go a.runTodayCacheMaintenance(cacheContext)
@@ -406,6 +405,7 @@ func (a *app) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/super-admin/groups/{id}/leaders", a.auth(a.requireSuper(a.handleSuperSetLeader)))
 	mux.HandleFunc("DELETE /api/super-admin/groups/{id}/leaders/{user_id}", a.auth(a.requireSuper(a.handleSuperUnsetLeader)))
 	mux.HandleFunc("GET /api/super-admin/bot-management", a.auth(a.requireSuper(a.handleBotManagement)))
+	mux.HandleFunc("POST /api/super-admin/bot-robots", a.auth(a.requireSuper(a.handleBotRobot)))
 	mux.HandleFunc("PUT /api/super-admin/bot-bindings", a.auth(a.requireSuper(a.handleBotBinding)))
 }
 

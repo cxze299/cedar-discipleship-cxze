@@ -1,6 +1,6 @@
 <script setup>
 import { onMounted, ref } from 'vue';
-import { Bot, CircleAlert, CircleCheck, RefreshCw } from '@lucide/vue';
+import { Bot, CircleAlert, CircleCheck, KeyRound, Plus, RefreshCw } from '@lucide/vue';
 import { api, toast as showToast } from '../legacy-app';
 
 const configured = ref(false);
@@ -8,6 +8,8 @@ const robots = ref([]);
 const studyGroups = ref([]);
 const loading = ref(false);
 const savingBinding = ref('');
+const savingRobot = ref(false);
+const newRobot = ref({ id: '', name: '', token: '' });
 
 onMounted(load);
 
@@ -56,6 +58,39 @@ async function assign(robot, chat, event) {
   }
 }
 
+async function createRobot() {
+  const payload = {
+    id: newRobot.value.id.trim(),
+    name: newRobot.value.name.trim(),
+    token: newRobot.value.token.trim(),
+  };
+  if (!payload.token) {
+    showToast('请输入机器人 Token');
+    return;
+  }
+  savingRobot.value = true;
+  try {
+    await api('/super-admin/bot-robots', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    newRobot.value = { id: '', name: '', token: '' };
+    showToast('机器人已新增');
+    await load();
+  } catch (error) {
+    showToast({
+      invalid_robot_config: '机器人配置无效',
+      robot_authentication_failed: '机器人认证失败',
+      robot_already_exists: '机器人 ID 已存在',
+      robot_token_exists: '机器人 Token 已存在',
+      robot_limit_exceeded: '机器人数量已达上限',
+      bot_robot_save_failed: '机器人保存失败',
+    }[error.message] || error.message);
+  } finally {
+    savingRobot.value = false;
+  }
+}
+
 function checkedAt(value) {
   if (!value) return '';
   return new Intl.DateTimeFormat('zh-CN', {
@@ -82,8 +117,49 @@ function checkedAt(value) {
       </button>
     </div>
 
+    <form class="card bot-registration" @submit.prevent="createRobot">
+      <div class="bot-registration-heading">
+        <span class="bot-chat-icon"><KeyRound :size="18" /></span>
+        <strong>新增机器人</strong>
+      </div>
+      <div class="bot-registration-grid">
+        <label class="admin-field">
+          <span class="admin-field-label">机器人 Token</span>
+          <input
+            v-model="newRobot.token"
+            type="password"
+            autocomplete="off"
+            placeholder="123:secret"
+            :disabled="savingRobot"
+          >
+        </label>
+        <label class="admin-field">
+          <span class="admin-field-label">显示名称</span>
+          <input
+            v-model="newRobot.name"
+            autocomplete="off"
+            placeholder="主机器人"
+            :disabled="savingRobot"
+          >
+        </label>
+        <label class="admin-field">
+          <span class="admin-field-label">机器人 ID</span>
+          <input
+            v-model="newRobot.id"
+            autocomplete="off"
+            placeholder="primary"
+            :disabled="savingRobot"
+          >
+        </label>
+        <button class="ok bot-registration-button" type="submit" :disabled="savingRobot">
+          <Plus :size="16" />
+          新增
+        </button>
+      </div>
+    </form>
+
     <div v-if="loading && !robots.length" class="empty">正在读取机器人状态…</div>
-    <div v-else-if="!configured" class="empty">机器人尚未配置</div>
+    <div v-else-if="!configured" class="empty">暂无机器人</div>
     <div v-else class="card bot-management">
       <section v-for="robot in robots" :key="robot.id" class="bot-robot-section">
         <header class="bot-robot-header">
