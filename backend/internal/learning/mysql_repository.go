@@ -384,7 +384,7 @@ func ReplaceWeekTasksWithIDsTx(
 
 func insertStudyTaskTx(ctx context.Context, tx *sql.Tx, groupID, weekID uint64, task TaskDraft, now time.Time) (uint64, error) {
 	res, err := tx.ExecContext(ctx, `INSERT INTO study_tasks (group_id,week_id,task_type,title,content,required,enabled,sort_order,created_at,updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?)`, groupID, weekID, task.TaskType, task.Title, task.Content, true, true, task.SortOrder, now, now)
+		VALUES (?,?,?,?,?,?,?,?,?,?)`, groupID, weekID, task.TaskType, task.Title, task.Content, !task.Optional, true, task.SortOrder, now, now)
 	if err != nil {
 		return 0, err
 	}

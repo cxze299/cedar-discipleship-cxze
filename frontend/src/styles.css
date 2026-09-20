@@ -1312,6 +1312,8 @@ input:focus, select:focus, textarea:focus {
 }
 
 .legend-daily_devotion i { background: #0a84ff; }
+.legend-daily_scripture i { background: #14b8a6; }
+.legend-weekly_checkin i { background: #64748b; }
 .legend-weekly_book i { background: #8b5cf6; }
 .legend-weekly_video i { background: #19bf7a; }
 .legend-weekly_verse i { background: #f59e0b; }
@@ -1380,6 +1382,14 @@ input:focus, select:focus, textarea:focus {
 
 .bar-segment.devotion {
   background: linear-gradient(180deg, #4ea7ff, #0a84ff);
+}
+
+.bar-segment.scripture {
+  background: linear-gradient(180deg, #5eead4, #14b8a6);
+}
+
+.bar-segment.weekly {
+  background: linear-gradient(180deg, #94a3b8, #64748b);
 }
 
 .bar-segment.book {
@@ -4682,6 +4692,14 @@ textarea::placeholder {
   background: #527c91;
 }
 
+.bar-segment.scripture {
+  background: #397f78;
+}
+
+.bar-segment.weekly {
+  background: #69737d;
+}
+
 .bar-segment.book {
   background: #756b8b;
 }
@@ -4696,6 +4714,14 @@ textarea::placeholder {
 
 .legend-daily_devotion i {
   background: #527c91;
+}
+
+.legend-daily_scripture i {
+  background: #397f78;
+}
+
+.legend-weekly_checkin i {
+  background: #69737d;
 }
 
 .legend-weekly_book i {

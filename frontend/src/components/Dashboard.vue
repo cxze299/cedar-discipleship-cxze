@@ -42,6 +42,8 @@ const {
 
 const legend = [
   { key: 'daily_devotion', label: '灵修' },
+  { key: 'daily_scripture', label: '读经' },
+  { key: 'weekly_checkin', label: '周任务' },
   { key: 'weekly_book', label: '书籍' },
   { key: 'weekly_video', label: '音视频' },
   { key: 'weekly_outline', label: '背大纲' },
@@ -195,6 +197,8 @@ async function exportRankingChart() {
   const items = rankedItems.value;
   const colors = {
     daily_devotion: '#0a84ff',
+    daily_scripture: '#14b8a6',
+    weekly_checkin: '#64748b',
     weekly_book: '#8b5cf6',
     weekly_video: '#19bf7a',
     weekly_outline: '#f59e0b',
@@ -491,6 +495,18 @@ async function exportRankingChart() {
                     class="bar-segment devotion"
                     :style="{ height: `${segmentPercent(member, 'daily_devotion')}%` }"
                     :title="`灵修 ${segmentCount(member, 'daily_devotion')} 次`"
+                  ></span>
+                  <span
+                    v-if="segmentCount(member, 'daily_scripture') && (!activeLegend || activeLegend.key === 'daily_scripture')"
+                    class="bar-segment scripture"
+                    :style="{ height: `${segmentPercent(member, 'daily_scripture')}%` }"
+                    :title="`读经 ${segmentCount(member, 'daily_scripture')} 次`"
+                  ></span>
+                  <span
+                    v-if="segmentCount(member, 'weekly_checkin') && (!activeLegend || activeLegend.key === 'weekly_checkin')"
+                    class="bar-segment weekly"
+                    :style="{ height: `${segmentPercent(member, 'weekly_checkin')}%` }"
+                    :title="`周任务 ${segmentCount(member, 'weekly_checkin')} 次`"
                   ></span>
                   <span
                     v-if="segmentCount(member, 'weekly_book') && (!activeLegend || activeLegend.key === 'weekly_book')"

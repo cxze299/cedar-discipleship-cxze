@@ -152,6 +152,8 @@ func (a *app) handleDashboardActiveRule(w http.ResponseWriter, r *http.Request) 
 
 var activeMemberTaskTypes = []string{
 	"daily_devotion",
+	"daily_scripture",
+	"weekly_checkin",
 	"weekly_book",
 	"weekly_video",
 	"weekly_outline",

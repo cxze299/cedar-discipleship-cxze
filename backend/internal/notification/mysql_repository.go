@@ -36,9 +36,9 @@ func (s *CheckinSource) Enabled(ctx context.Context, event Event) (bool, error) 
 			return false, nil
 		}
 		switch taskType {
-		case "daily_devotion":
+		case "daily_devotion", "daily_scripture":
 			topic = "daily"
-		case "weekly_book", "weekly_video":
+		case "weekly_checkin", "weekly_book", "weekly_video":
 			topic = "weekly"
 		}
 	} else {
@@ -95,9 +95,9 @@ func (s *CheckinSource) Snapshot(ctx context.Context, event Event) (Snapshot, er
 	today := checkedAt.In(s.location).Format("2006-01-02")
 	logicalDate := date.Format("2006-01-02")
 	start, end := today, today
-	daily := taskType == "daily_devotion"
+	daily := taskType == "daily_devotion" || taskType == "daily_scripture"
 	if !daily {
-		if taskType != "weekly_book" && taskType != "weekly_video" {
+		if taskType != "weekly_checkin" && taskType != "weekly_book" && taskType != "weekly_video" {
 			return Snapshot{}, nil
 		}
 		var currentWeekID int64
@@ -159,7 +159,7 @@ func (s *CheckinSource) periodSnapshot(ctx context.Context, event Event, start, 
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("parse notification period: %w", err)
 	}
-	where := "c.task_type='daily_devotion'"
+	where := "c.task_type IN ('daily_devotion','daily_scripture')"
 	period := "c.logical_date BETWEEN ? AND ?"
 	args := []any{event.GroupID, start, end}
 	cutoff := "c.id<=?"
@@ -169,7 +169,7 @@ func (s *CheckinSource) periodSnapshot(ctx context.Context, event Event, start, 
 		cutoffValue = event.OccurredAt.UTC().Format("2006-01-02 15:04:05.000")
 	}
 	if !daily {
-		where = "c.task_type IN ('weekly_book','weekly_video')"
+		where = "c.task_type IN ('weekly_checkin','weekly_book','weekly_video')"
 		// Videos retain completion when the same asset is assigned again this week.
 		period = `((c.logical_date BETWEEN ? AND ? AND c.week_id=?)
 			OR (c.task_type='weekly_video' AND EXISTS (

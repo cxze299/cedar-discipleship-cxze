@@ -53,13 +53,13 @@ func (a *app) handleCreateCheckin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "future_checkin_not_allowed")
 		return
 	}
-	if req.TaskType == "daily_devotion" {
+	if req.TaskType == "daily_devotion" || req.TaskType == "daily_scripture" {
 		settings, err := a.groupLearningConfig(r.Context(), groupID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "checkin_save_failed")
 			return
 		}
-		if !learningdomain.DailyTaskEnabled(settings) {
+		if !learningdomain.DailyTaskTypeEnabled(settings, req.TaskType) {
 			writeError(w, http.StatusBadRequest, "daily_task_disabled")
 			return
 		}
@@ -112,7 +112,7 @@ func (a *app) handleCreateCheckin(w http.ResponseWriter, r *http.Request) {
 
 func validCheckinTaskType(taskType string) bool {
 	switch taskType {
-	case "daily_devotion", "weekly_book", "weekly_video", "weekly_verse", "weekly_outline":
+	case "daily_devotion", "daily_scripture", "weekly_checkin", "weekly_book", "weekly_video", "weekly_verse", "weekly_outline":
 		return true
 	default:
 		return false

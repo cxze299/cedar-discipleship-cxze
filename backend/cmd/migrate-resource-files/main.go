@@ -48,6 +48,8 @@ var legacyResourceDirs = []struct {
 	{Name: "Book", Category: "book"},
 	{Name: "Passage", Category: "passage"},
 	{Name: "PPT", Category: "handout"},
+	{Name: "MP3", Category: "audio"},
+	{Name: "MP4", Category: "video"},
 	{Name: "Newtestament", Category: "video"},
 }
 
@@ -58,6 +60,7 @@ var legacyRootResourceFiles = []struct {
 	{Name: "newtestament.md", Category: "markdown"},
 	{Name: "weekly_task.md", Category: "markdown"},
 	{Name: "Kuangye.md", Category: "markdown"},
+	{Name: "Yonghuo.md", Category: "markdown"},
 }
 
 type options struct {
@@ -467,7 +470,7 @@ func sortLegacyResourceFiles(files []legacyResourceFile) {
 
 func isSupportedLegacyResourceFile(name string) bool {
 	switch strings.ToLower(filepath.Ext(name)) {
-	case ".pdf", ".md", ".markdown", ".mp4", ".m4v", ".mov", ".webm", ".png", ".jpg", ".jpeg", ".webp", ".ppt", ".pptx", ".doc", ".docx", ".xls", ".xlsx":
+	case ".pdf", ".md", ".markdown", ".mp3", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wav", ".weba", ".mp4", ".m4v", ".mov", ".webm", ".png", ".jpg", ".jpeg", ".webp", ".ppt", ".pptx", ".doc", ".docx", ".xls", ".xlsx":
 		return true
 	default:
 		return false
@@ -1889,6 +1892,7 @@ func taskHasAssetLinks(ctx context.Context, db *sql.DB, groupID, taskID uint64) 
 type historicalReadingMetadata struct {
 	BookName    string `json:"book_name"`
 	SourceTitle string `json:"source_title"`
+	ReadingPath string `json:"reading_path"`
 }
 
 type historicalReadingAsset struct {
@@ -1933,6 +1937,7 @@ func historicalReadingRefs(title, content string) []string {
 	if strings.HasPrefix(strings.TrimSpace(content), "{") && json.Unmarshal([]byte(content), &metadata) == nil {
 		add(metadata.SourceTitle)
 		add(metadata.BookName)
+		add(path.Base(strings.TrimSpace(metadata.ReadingPath)))
 	}
 	add(title)
 	return refs
@@ -2381,7 +2386,7 @@ func usageTypeForCategory(category string) string {
 		return "video"
 	case "outline":
 		return "outline"
-	case "mentor", "handout", "share":
+	case "audio", "mentor", "handout", "share":
 		return "share"
 	default:
 		return "reading"

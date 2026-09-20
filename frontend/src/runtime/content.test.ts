@@ -7,6 +7,7 @@ import {
   deepMerge,
   enabledFlag,
   extractNumberedContentSection,
+  extractWeeklyContentSection,
   extractPdfPageRange,
   markdownToSafeHTML,
   normalizeSearchText,
@@ -85,7 +86,56 @@ describe('content runtime helpers', () => {
       type: 'markdown',
       content: '罗马书 8:11 原文',
     });
-    expect(buildWeeklyVerseContentLink('罗马书 8:11-15', '  ')).toBeNull();
+    expect(buildWeeklyVerseContentLink('罗马书 8:11-15', '  ')).toMatchObject({
+      type: 'iframe',
+      url: 'https://www.wordproject.org/bibles/gb/45/8.htm#11',
+    });
+    expect(buildWeeklyVerseContentLink('林前 13：4-8', '')).toMatchObject({
+      url: 'https://www.wordproject.org/bibles/gb/46/13.htm#4',
+    });
+    expect(buildWeeklyVerseContentLink('未识别的经文', '')).toBeNull();
+    expect(buildWeeklyVerseContentLink('罗马书 99:1', '')).toBeNull();
+  });
+
+  it('preserves the aggregate week title even with reading links disabled', () => {
+    expect(weeklyTitleFromContent({
+      weekly_checkin: true,
+      title: '复习两个主题',
+      book_enabled: false,
+      verse_ref: '罗马书 8:1',
+    })).toBe('复习两个主题');
+  });
+
+  it('accepts titled dates and respects explicit selection modes', () => {
+    const text = '# 1\n无关数字篇章\n### 九月二十日 信心\n正文\n### 九月二十一日 次日\n后文';
+    expect(extractNumberedContentSection(text, 0, '九月二十日')).toEqual([
+      '### 九月二十日 信心', '正文',
+    ]);
+    expect(extractNumberedContentSection(text, 1, '九月二十日', 'date')).toEqual([
+      '### 九月二十日 信心', '正文',
+    ]);
+    expect(extractNumberedContentSection(text, 2, '九月二十日', 'numbered')).toEqual([]);
+    expect(extractNumberedContentSection('9月20日 标题\n正文\n九月二十一日\n后文', 0, '九月二十号')).toEqual([
+      '9月20日 标题', '正文',
+    ]);
+    expect(extractNumberedContentSection(
+      '九月廿九日\n前文。九月卅日「正文」\n十月一日\n后文',
+      0,
+      '九月三十日',
+    )).toEqual(['九月卅日', '「正文」']);
+    expect(extractNumberedContentSection('# 1\n正文', 1, '九月二十日', 'date')).toEqual([]);
+  });
+
+  it('matches legacy weekly themes including review titles and stops at the next chapter', () => {
+    const text = '# 卷首语\n## 二、 基督是神的仆人--马可福音\n马可正文\n### 提纲\n内容\n## 五、 基督在身体里--使徒行传\n使徒正文\n## 六、 基督在福音里--罗马书\n后文';
+    expect(extractWeeklyContentSection(text, '复习马可福音')).toEqual([
+      '## 二、 基督是神的仆人--马可福音', '马可正文', '### 提纲', '内容',
+    ]);
+    expect(extractWeeklyContentSection(text, '《基督在身体里》使徒行传')).toEqual([
+      '## 五、 基督在身体里--使徒行传', '使徒正文',
+    ]);
+    expect(extractWeeklyContentSection(text, '永活之泉')).toEqual([]);
+    expect(extractWeeklyContentSection(text, '')).toEqual([]);
   });
 
   it('extracts numbered devotion content from numeric or Chinese date headings', () => {

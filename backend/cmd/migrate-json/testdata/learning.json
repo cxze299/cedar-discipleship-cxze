@@ -1,0 +1,43 @@
+{
+  "zw1": {
+    "admin_ui": {"max_reading_slots":1},
+    "daily_reading": {
+      "base":{"date":"2026-05-11","book":"撒下","chapter":24},
+      "chapters_per_day":2,
+      "books":[["撒下",24],["王上",22],["王下",25],["代上",29],["代下",36],["拉",10],["尼",13],["斯",10],["伯",42],["诗",150],["箴",31],["传",12],["歌",8],["赛",66],["耶",52],["哀",5],["结",48],["但",12],["何",14],["珥",3],["摩",9],["俄",1],["拿",4],["弥",7],["鸿",3],["哈",3],["番",3],["该",2],["亚",14],["玛",4],["太",28],["可",16],["路",24],["约",21],["徒",28],["罗",16],["林前",16],["林后",13],["加",6],["弗",6],["腓",4],["西",4],["帖前",5],["帖后",3],["提前",6],["提后",4],["多",3],["门",1],["来",13],["雅",5],["彼前",5],["彼后",3],["约壹",5],["约贰",1],["约叁",1],["犹",1],["启",22]]
+    },
+    "task_sections":{
+      "daily":{"path":"/Yonghuo.md","devotion":{"enabled":true,"type":"markdown","path":"/Yonghuo.md","mode":"date"},"scripture":{"enabled":true,"type":"sequence","chapters_per_day":2}},
+      "weekly":{"reading_path":"./weekly_task.md","book_enabled":true,"video_enabled":true,"verse_enabled":true,"outline_enabled":false},
+      "buttons":{"book1":"周任务"}
+    },
+    "weekly_schedule":[{"start":"2026-05-11","end":"2026-05-17","title":"复习《正常基督徒的生活》1-4章","readings":[{"title":"第一章 基督的血","url":"https://pages.uoregon.edu/fyin/book/001.htm","type":"iframe"}],"video":"","videos":[],"verse":"希伯来书 1:9-10","reciteText":""}],
+    "class_rep_shares":[{"title":"生命之道音频","url":"/MP3/%5BL311%5D.mp3","type":"audio"}],
+    "weekly_reading_catalog":[{"title":"第一章 基督的血","url":"https://pages.uoregon.edu/fyin/book/001.htm","type":"iframe"}],
+    "mounted_files":{"audios":{"dir":"MP3","publicPath":"/MP3","extensions":[".mp3"]}}
+  },
+  "zwlingyi": {
+    "admin_ui":{"max_reading_slots":1},
+    "daily_reading":{
+      "base":{"date":"2026-05-11","book":"撒下","chapter":24},
+      "chapters_per_day":2,
+      "books":[["撒下",24],["王上",22],["王下",25],["代上",29],["代下",36],["拉",10],["尼",13],["斯",10],["伯",42],["诗",150],["箴",31],["传",12],["歌",8],["赛",66],["耶",52],["哀",5],["结",48],["但",12],["何",14],["珥",3],["摩",9],["俄",1],["拿",4],["弥",7],["鸿",3],["哈",3],["番",3],["该",2],["亚",14],["玛",4],["太",28],["可",16],["路",24],["约",21],["徒",28],["罗",16],["林前",16],["林后",13],["加",6],["弗",6],["腓",4],["西",4],["帖前",5],["帖后",3],["提前",6],["提后",4],["多",3],["门",1],["来",13],["雅",5],["彼前",5],["彼后",3],["约壹",5],["约贰",1],["约叁",1],["犹",1],["启",22]]
+    },
+    "task_sections":{
+      "daily":{"path":"/Yonghuo.md","devotion":{"enabled":true,"mode":"date","path":"/Yonghuo.md"},"scripture":{"enabled":true,"type":"sequence","chapters_per_day":2}},
+      "weekly":{"reading_path":"","book_enabled":false,"checkin_enabled":true,"video_enabled":false,"verse_enabled":true},
+      "buttons":{"book1":"周任务"}
+    },
+    "weekly_schedule":[{"start":"2026-08-17","end":"2026-08-23","title":["引言","罪"],"readings":[],"book_enabled":false,"video_enabled":false,"verse_enabled":true,"verse":"希伯来书 3:5-6"}]
+  },
+  "zwmouss": {
+    "admin_ui":{},
+    "task_sections":{"daily":{"label":"每日灵修","path":"./Yonghuo.md"},"weekly":{"label":"周课任务"}},
+    "weekly_schedule":[{"start":"2026-04-13","end":"2026-04-18","title":"永活之泉","verse":"约翰福音17:1-2","video":"","videos":[]}],
+    "class_rep_shares":[{"title":"导读","url":"/Mentor/%E5%AF%BC%E8%AF%BB.pdf"}]
+  },
+  "zk": {
+    "task_sections":{"daily":{"label":"每日灵修","path":"/Kuangye.md"},"weekly":{"reading_path":"/weekly_task.md"},"buttons":{"book1":"书1","book2":"书2"}},
+    "weekly_schedule":[{"start":"2026-04-06","end":"2026-04-12","title":"《基督是一切》马太福音：基督是我们的王","readings":[{"title":"《基督是一切》马太福音：基督是我们的王","url":"","type":"pdf"}],"video":"新约圣经-01-211209-圣经引言(上)","url":"http://nas.restinhim.online:5777/Newtestament/L1.mp4","videos":[{"title":"新约圣经-01-211209-圣经引言(上)","url":"http://nas.restinhim.online:5777/Newtestament/L1.mp4"}],"verse":"罗马书 7:1-5","reciteText":""}]
+  }
+}

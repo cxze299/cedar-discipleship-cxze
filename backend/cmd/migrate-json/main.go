@@ -52,14 +52,21 @@ type options struct {
 	failOnGeneratedUsernames bool
 	forceOverwrite           bool
 	preferSharedAssets       bool
+	dailyCheckinMode         string
+	weeklyCheckinMode        string
+	devotionMode             string
 }
 
 type oldConfig struct {
-	SiteInfo       siteInfo        `json:"site_info"`
-	Members        []string        `json:"members"`
-	WeeklySchedule []oldWeek       `json:"weekly_schedule"`
-	TaskSections   json.RawMessage `json:"task_sections"`
-	MountedFiles   json.RawMessage `json:"mounted_files"`
+	SiteInfo             siteInfo        `json:"site_info"`
+	Members              []string        `json:"members"`
+	WeeklySchedule       []oldWeek       `json:"weekly_schedule"`
+	TaskSections         json.RawMessage `json:"task_sections"`
+	MountedFiles         json.RawMessage `json:"mounted_files"`
+	DailyReading         json.RawMessage `json:"daily_reading"`
+	WeeklyReadingCatalog json.RawMessage `json:"weekly_reading_catalog"`
+	ClassRepShares       json.RawMessage `json:"class_rep_shares"`
+	AdminUI              json.RawMessage `json:"admin_ui"`
 }
 
 type siteInfo struct {
@@ -88,6 +95,8 @@ type oldWeek struct {
 	OutlineImage   string          `json:"outlineImage"`
 	Shares         []oldAssetRef   `json:"shares"`
 	SortOrder      int             `json:"sort_order"`
+	WeeklyCheckin  bool            `json:"-"`
+	ReadingPath    string          `json:"-"`
 }
 
 type oldAssetRef struct {
@@ -110,6 +119,8 @@ type oldRecord struct {
 	Note        string `json:"note"`
 	Kind        string `json:"kind"`
 	Part        string `json:"part"`
+	Scripture   string `json:"daily_scripture"`
+	Weekly      string `json:"weekly_checkin"`
 }
 
 type migrationReport struct {
@@ -175,11 +186,18 @@ type migrationState struct {
 }
 
 type plannedTask struct {
-	Type    string
-	Title   string
-	Content string
-	Enabled bool
-	Assets  []plannedAssetLink
+	Type     string
+	Title    string
+	Content  string
+	Enabled  bool
+	Optional bool
+	Assets   []plannedAssetLink
+}
+
+type recordTask struct {
+	ID    uint64
+	Type  string
+	Title string
 }
 
 type plannedAssetLink struct {
@@ -194,6 +212,7 @@ type migratedReadingMetadata struct {
 	PageEnd     int    `json:"page_end,omitempty"`
 	ReadingNote string `json:"reading_note,omitempty"`
 	SourceTitle string `json:"source_title"`
+	ReadingPath string `json:"reading_path,omitempty"`
 }
 
 type scriptureBook struct {
@@ -289,6 +308,9 @@ func main() {
 	flag.BoolVar(&opt.failOnGeneratedUsernames, "fail-on-generated-usernames", false, "fail members whose usernames must be auto-generated")
 	flag.BoolVar(&opt.forceOverwrite, "force-overwrite", false, "overwrite existing group settings and study weeks")
 	flag.BoolVar(&opt.preferSharedAssets, "prefer-shared-assets", false, "deprecated compatibility flag; local files are deduplicated by checksum during resource migration")
+	flag.StringVar(&opt.dailyCheckinMode, "daily-checkin-mode", "", "legacy daily completion mode: combined or separate")
+	flag.StringVar(&opt.weeklyCheckinMode, "weekly-checkin-mode", "", "legacy weekly completion mode: per_reading or aggregate")
+	flag.StringVar(&opt.devotionMode, "devotion-mode", "", "legacy devotion lookup mode: auto, numbered, or date")
 	flag.Parse()
 
 	if err := run(opt); err != nil {
@@ -309,6 +331,9 @@ func run(opt options) error {
 
 	cfg, err := loadConfig(opt.configPath, opt.skipConfig)
 	if err != nil {
+		return err
+	}
+	if err := normalizeLegacyConfig(&cfg, opt); err != nil {
 		return err
 	}
 	records, err := loadRecords(opt.recordsPath, opt.skipRecords)
@@ -454,16 +479,9 @@ func importConfig(ctx context.Context, tx *sql.Tx, cfg oldConfig, usernameMap ma
 	report.Group.Created = created
 	report.Group.Reused = !created
 
-	settingsJSON := map[string]json.RawMessage{}
-	if len(cfg.TaskSections) > 0 {
-		taskSections, err := normalizeTaskSections(cfg.TaskSections)
-		if err != nil {
-			return err
-		}
-		settingsJSON["task_sections"] = taskSections
-	}
-	if len(cfg.MountedFiles) > 0 {
-		settingsJSON["mounted_files"] = cfg.MountedFiles
+	settingsJSON, err := learningSettings(cfg)
+	if err != nil {
+		return err
 	}
 	settingsBytes, _ := json.Marshal(settingsJSON)
 	buttonLabels := extractButtonLabels(cfg.TaskSections)
@@ -623,8 +641,22 @@ func importRecords(ctx context.Context, tx *sql.Tx, records []oldRecord, opt opt
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
+		candidates, err := recordTasksForWeek(ctx, tx, state.groupID, weekID)
+		if err != nil {
+			return err
+		}
 		for _, row := range checkinRowsForRecord(rec) {
 			report.Checkins.RowsPlanned++
+			if isWeeklyRecordType(row.TaskType) {
+				resolved, err := resolveRecordTask(row, candidates)
+				if err != nil {
+					report.Checkins.Failed++
+					report.Failures = append(report.Failures, failure{Scope: "checkin", Key: recordKey(rec) + ":" + row.TaskType, Message: err.Error()})
+					continue
+				}
+				row.TaskID = resolved.TaskID
+				row.TaskType = resolved.TaskType
+			}
 			status, err := insertCheckin(ctx, tx, state.groupID, userID, weekID, rec, row, checkinTime, opt.allowDuplicateAsDeleted)
 			if err != nil {
 				report.Checkins.Failed++
@@ -648,23 +680,98 @@ type checkinRow struct {
 	TaskType string
 	Detail   string
 	Part     string
+	TaskID   uint64
+}
+
+func recordTasksForWeek(ctx context.Context, tx *sql.Tx, groupID, weekID uint64) ([]recordTask, error) {
+	if weekID == 0 {
+		return nil, nil
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT id,task_type,title FROM study_tasks
+		WHERE group_id=? AND week_id=? AND enabled=1
+		ORDER BY sort_order,id`, groupID, weekID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var tasks []recordTask
+	for rows.Next() {
+		var task recordTask
+		if err := rows.Scan(&task.ID, &task.Type, &task.Title); err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, task)
+	}
+	return tasks, rows.Err()
+}
+
+func resolveRecordTask(row checkinRow, candidates []recordTask) (checkinRow, error) {
+	if row.TaskType == "weekly_book" {
+		for _, candidate := range candidates {
+			if candidate.Type == "weekly_checkin" {
+				row.TaskType = candidate.Type
+				row.TaskID = candidate.ID
+				row.Part = ""
+				return row, nil
+			}
+		}
+	}
+	var matches []recordTask
+	title := strings.TrimSpace(firstNonEmpty(row.Part, row.Detail))
+	for _, candidate := range candidates {
+		if candidate.Type != row.TaskType {
+			continue
+		}
+		if row.TaskType != "weekly_book" || title == candidate.Title {
+			matches = append(matches, candidate)
+		}
+	}
+	if len(matches) != 1 {
+		return row, fmt.Errorf("task identity is ambiguous or missing: type=%s title=%q matches=%d", row.TaskType, title, len(matches))
+	}
+	row.TaskID = matches[0].ID
+	return row, nil
+}
+
+func isWeeklyRecordType(taskType string) bool {
+	return strings.HasPrefix(taskType, "weekly_")
+}
+
+func completedStatus(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "done", "completed", "已完成":
+		return true
+	default:
+		return false
+	}
 }
 
 func checkinRowsForRecord(rec oldRecord) []checkinRow {
 	var rows []checkinRow
+	seen := map[string]bool{}
 	add := func(taskType string) {
+		if seen[taskType] {
+			return
+		}
+		seen[taskType] = true
 		rows = append(rows, checkinRow{TaskType: taskType, Detail: firstNonEmpty(rec.Detail, taskType), Part: rec.Part})
 	}
-	if strings.EqualFold(rec.Daily, "done") {
+	if completedStatus(rec.Daily) {
 		add("daily_devotion")
 	}
-	if strings.EqualFold(rec.Book, "done") {
+	if completedStatus(rec.Scripture) {
+		add("daily_scripture")
+	}
+	if completedStatus(rec.Weekly) {
+		add("weekly_checkin")
+	}
+	if completedStatus(rec.Book) {
 		add("weekly_book")
 	}
-	if strings.EqualFold(rec.Video, "done") {
+	if completedStatus(rec.Video) {
 		add("weekly_video")
 	}
-	if strings.EqualFold(rec.Verse, "done") {
+	if completedStatus(rec.Verse) {
 		add("weekly_verse")
 	}
 	switch strings.TrimSpace(rec.Kind) {
@@ -798,7 +905,8 @@ func ensureTask(ctx context.Context, tx *sql.Tx, groupID, weekID uint64, task pl
 	var id uint64
 	err := tx.QueryRowContext(ctx, "SELECT id FROM study_tasks WHERE group_id=? AND week_id=? AND task_type=? AND title=? LIMIT 1", groupID, weekID, task.Type, task.Title).Scan(&id)
 	if err == nil {
-		_, err = tx.ExecContext(ctx, "UPDATE study_tasks SET content=?, enabled=?, updated_at=? WHERE id=?", nullString(task.Content), boolInt(task.Enabled), now, id)
+		_, err = tx.ExecContext(ctx, "UPDATE study_tasks SET content=?, required=?, enabled=?, updated_at=? WHERE id=?",
+			nullString(task.Content), boolInt(!task.Optional), boolInt(task.Enabled), now, id)
 		return id, false, err
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
@@ -806,8 +914,8 @@ func ensureTask(ctx context.Context, tx *sql.Tx, groupID, weekID uint64, task pl
 	}
 	res, err := tx.ExecContext(ctx, `INSERT INTO study_tasks
 		(group_id,week_id,task_type,title,content,required,enabled,sort_order,created_at,updated_at)
-		VALUES (?,?,?,?,?,1,?,?,?,?)`,
-		groupID, weekID, task.Type, task.Title, nullString(task.Content), boolInt(task.Enabled), 0, now, now)
+		VALUES (?,?,?,?,?,?,?,?,?,?)`,
+		groupID, weekID, task.Type, task.Title, nullString(task.Content), boolInt(!task.Optional), boolInt(task.Enabled), 0, now, now)
 	if err != nil {
 		return 0, false, err
 	}
@@ -1066,7 +1174,7 @@ func insertCheckin(ctx context.Context, tx *sql.Tx, groupID, userID, weekID uint
 	activeKey := uint64(0)
 	deletedAt := any(nil)
 	status := "inserted"
-	if exists, err := checkinExists(ctx, tx, groupID, userID, row.TaskType, rec.LogicalDate, row.Part); err != nil {
+	if exists, err := checkinExists(ctx, tx, groupID, userID, weekID, rec.LogicalDate, row); err != nil {
 		return "", err
 	} else if exists {
 		if !allowDuplicateAsDeleted {
@@ -1080,7 +1188,7 @@ func insertCheckin(ctx context.Context, tx *sql.Tx, groupID, userID, weekID uint
 	res, err := tx.ExecContext(ctx, `INSERT IGNORE INTO checkin_records
 		(group_id,user_id,task_id,week_id,logical_date,checkin_time,task_type,status,is_retro,detail,note,part,source,active_key,created_by,created_at,updated_at,deleted_at)
 		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		groupID, userID, nil, nullableID(weekID), rec.LogicalDate, checkinTime.UTC().Format("2006-01-02 15:04:05.000"),
+		groupID, userID, nullableID(row.TaskID), nullableID(weekID), rec.LogicalDate, checkinTime.UTC().Format("2006-01-02 15:04:05.000"),
 		row.TaskType, "done", boolInt(isRetro(rec.IsRetro)), truncate(row.Detail, 1024), nullString(rec.Note), truncate(row.Part, 64), sourceMigration,
 		activeKey, userID, nowSQL(), nowSQL(), deletedAt)
 	if err != nil {
@@ -1093,11 +1201,19 @@ func insertCheckin(ctx context.Context, tx *sql.Tx, groupID, userID, weekID uint
 	return status, nil
 }
 
-func checkinExists(ctx context.Context, tx *sql.Tx, groupID, userID uint64, taskType, logicalDate, part string) (bool, error) {
+func checkinExists(ctx context.Context, tx *sql.Tx, groupID, userID, weekID uint64, logicalDate string, row checkinRow) (bool, error) {
 	var count int
+	if isWeeklyRecordType(row.TaskType) && row.TaskID > 0 {
+		err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM checkin_records
+			WHERE group_id=? AND user_id=? AND task_id=? AND week_id=? AND task_type=?
+			  AND deleted_at IS NULL AND status='done'`,
+			groupID, userID, row.TaskID, weekID, row.TaskType).Scan(&count)
+		return count > 0, err
+	}
 	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM checkin_records
-		WHERE group_id=? AND user_id=? AND task_type=? AND logical_date=? AND part=? AND active_key=0`,
-		groupID, userID, taskType, logicalDate, truncate(part, 64)).Scan(&count)
+		WHERE group_id=? AND user_id=? AND task_type=? AND logical_date=? AND part=?
+		  AND deleted_at IS NULL AND status='done'`,
+		groupID, userID, row.TaskType, logicalDate, truncate(row.Part, 64)).Scan(&count)
 	return count > 0, err
 }
 
@@ -1105,38 +1221,65 @@ func tasksForWeek(week oldWeek) []plannedTask {
 	var tasks []plannedTask
 	tasks = append(tasks, readingTasksForWeek(week)...)
 
-	videoTitle := firstNonEmpty(week.Video, "周视频")
+	videoTitle := strings.TrimSpace(week.Video)
 	var videoAssets []plannedAssetLink
 	for _, ref := range week.Videos {
-		videoAssets = append(videoAssets, plannedAssetLink{Ref: ref, Category: "video", UsageType: "video"})
+		if strings.TrimSpace(ref.URL) != "" {
+			videoAssets = append(videoAssets, plannedAssetLink{Ref: ref, Category: "video", UsageType: "video"})
+		}
 	}
-	if week.URL != "" {
-		videoAssets = append(videoAssets, plannedAssetLink{Ref: oldAssetRef{Title: videoTitle, URL: week.URL}, Category: "video", UsageType: "video"})
+	if week.URL != "" && !assetRefExists(videoAssets, week.URL) {
+		videoAssets = append(videoAssets, plannedAssetLink{Ref: oldAssetRef{Title: firstNonEmpty(videoTitle, "周视频"), URL: week.URL}, Category: "video", UsageType: "video"})
 	}
-	tasks = append(tasks, plannedTask{Type: "weekly_video", Title: videoTitle, Enabled: defaultBool(week.VideoEnabled, true), Assets: videoAssets})
-	tasks = append(tasks, plannedTask{Type: "weekly_verse", Title: firstNonEmpty(week.Verse, "背经"), Content: week.ReciteText, Enabled: defaultBool(week.VerseEnabled, true)})
+	if videoTitle != "" || len(videoAssets) > 0 {
+		content := ""
+		for _, link := range videoAssets {
+			if isExternalContentURL(link.Ref.URL) {
+				content = strings.TrimSpace(link.Ref.URL)
+				break
+			}
+		}
+		tasks = append(tasks, plannedTask{Type: "weekly_video", Title: firstNonEmpty(videoTitle, "周视频"), Content: content, Enabled: defaultBool(week.VideoEnabled, true), Assets: videoAssets})
+	}
+	if strings.TrimSpace(week.Verse) != "" || strings.TrimSpace(week.ReciteText) != "" {
+		tasks = append(tasks, plannedTask{Type: "weekly_verse", Title: firstNonEmpty(week.Verse, "背经"), Content: week.ReciteText, Enabled: defaultBool(week.VerseEnabled, true)})
+	}
 	if week.OutlineImage != "" {
 		tasks = append(tasks, plannedTask{Type: "weekly_outline", Title: "提纲背诵", Enabled: defaultBool(week.OutlineEnabled, true), Assets: []plannedAssetLink{{Ref: oldAssetRef{Title: "提纲图片", URL: week.OutlineImage}, Category: "outline", UsageType: "outline"}}})
 	}
 	for _, ref := range week.Shares {
 		tasks = append(tasks, plannedTask{Type: "share", Title: firstNonEmpty(ref.Title, "课代表分享"), Enabled: true, Assets: []plannedAssetLink{{Ref: ref, Category: "share", UsageType: "share"}}})
 	}
+	if week.WeeklyCheckin {
+		tasks = append(tasks, plannedTask{
+			Type: "weekly_checkin", Title: firstNonEmpty(strings.Join(titleList(week.Title), "；"), "周任务"), Enabled: true,
+		})
+	}
 	return tasks
+}
+
+func assetRefExists(links []plannedAssetLink, value string) bool {
+	value = strings.TrimSpace(value)
+	for _, link := range links {
+		if strings.TrimSpace(link.Ref.URL) == value {
+			return true
+		}
+	}
+	return false
 }
 
 func readingTasksForWeek(week oldWeek) []plannedTask {
 	titles := titleList(week.Title)
 	enabled := defaultBool(week.BookEnabled, true)
+	if week.WeeklyCheckin && len(week.Readings) == 0 {
+		return nil
+	}
 	total := len(week.Readings)
 	if len(titles) > total {
 		total = len(titles)
 	}
 	if total == 0 {
-		return []plannedTask{{
-			Type:    "weekly_book",
-			Title:   "周读物",
-			Enabled: enabled,
-		}}
+		return nil
 	}
 
 	tasks := make([]plannedTask, 0, total)
@@ -1153,10 +1296,11 @@ func readingTasksForWeek(week oldWeek) []plannedTask {
 			"周读物",
 		)
 		task := plannedTask{
-			Type:    "weekly_book",
-			Title:   title,
-			Content: migratedReadingContent(title),
-			Enabled: enabled,
+			Type:     "weekly_book",
+			Title:    title,
+			Content:  migratedReadingContent(title, week.ReadingPath),
+			Enabled:  enabled,
+			Optional: week.WeeklyCheckin,
 		}
 		if isExternalContentURL(ref.URL) {
 			task.Content = strings.TrimSpace(ref.URL)
@@ -1173,8 +1317,11 @@ func readingTasksForWeek(week oldWeek) []plannedTask {
 	return tasks
 }
 
-func migratedReadingContent(title string) string {
+func migratedReadingContent(title string, readingPaths ...string) string {
 	metadata := parseReadingMetadata(title)
+	if len(readingPaths) > 0 {
+		metadata.ReadingPath = strings.TrimSpace(readingPaths[0])
+	}
 	data, err := json.Marshal(metadata)
 	if err != nil {
 		return ""
@@ -1348,11 +1495,9 @@ func normalizeTaskSections(raw json.RawMessage) (json.RawMessage, error) {
 		daily = map[string]any{}
 		sections["daily"] = daily
 	}
-	dailyPath := databaseAssetDownloadURL(daily["path"])
+	dailyPath := firstNonEmpty(databaseAssetDownloadURL(daily["path"]), stringValue(daily["path"]))
 	if dailyPath != "" {
 		daily["path"] = dailyPath
-	} else {
-		delete(daily, "path")
 	}
 
 	devotion := mapValue(daily, "devotion")
@@ -1360,14 +1505,12 @@ func normalizeTaskSections(raw json.RawMessage) (json.RawMessage, error) {
 		devotion = map[string]any{}
 		daily["devotion"] = devotion
 	}
-	devotionPath := databaseAssetDownloadURL(devotion["path"])
+	devotionPath := firstNonEmpty(databaseAssetDownloadURL(devotion["path"]), stringValue(devotion["path"]))
 	switch {
 	case devotionPath != "":
 		devotion["path"] = devotionPath
 	case dailyPath != "":
 		devotion["path"] = dailyPath
-	default:
-		delete(devotion, "path")
 	}
 	if _, ok := devotion["numbered_start_date"]; !ok {
 		if startDate := stringValue(devotion["start_date"]); startDate != "" {
@@ -1380,7 +1523,7 @@ func normalizeTaskSections(raw json.RawMessage) (json.RawMessage, error) {
 		}
 	}
 	if _, ok := devotion["mode"]; !ok {
-		devotion["mode"] = "numbered"
+		devotion["mode"] = "auto"
 	}
 	if _, ok := devotion["type"]; !ok {
 		devotion["type"] = "markdown"
@@ -1582,7 +1725,7 @@ func isRetro(v any) bool {
 		return x
 	case string:
 		x = strings.ToLower(strings.TrimSpace(x))
-		return x == "yes" || x == "true" || x == "1" || x == "retro"
+		return x == "yes" || x == "true" || x == "1" || x == "retro" || x == "是"
 	case float64:
 		return x != 0
 	default:

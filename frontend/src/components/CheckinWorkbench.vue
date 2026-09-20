@@ -30,6 +30,8 @@ const {
 
 const legend = [
   { key: 'daily_devotion', label: '灵修' },
+  { key: 'daily_scripture', label: '读经' },
+  { key: 'weekly_checkin', label: '周任务' },
   { key: 'weekly_book', label: '书籍' },
   { key: 'weekly_video', label: '音视频' },
   { key: 'weekly_outline', label: '背大纲' },
@@ -96,6 +98,8 @@ async function exportStatsChart() {
   const items = rankedStats.value;
   const colors = {
     daily_devotion: '#0a84ff',
+    daily_scripture: '#14b8a6',
+    weekly_checkin: '#64748b',
     weekly_book: '#8b5cf6',
     weekly_video: '#19bf7a',
     weekly_outline: '#f59e0b',
@@ -232,7 +236,7 @@ async function exportStatsChart() {
             <span class="task-title">{{ task.title }}</span>
           </button>
 
-          <div v-if="task.type === 'daily_devotion' && task.contentLinks?.length > 1" class="task-link-list">
+          <div v-if="task.contentLinks?.length > 1" class="task-link-list">
             <button
               v-for="link in task.contentLinks"
               :key="`${link.label}:${link.url}`"
@@ -298,6 +302,18 @@ async function exportStatsChart() {
                     class="bar-segment devotion"
                     :style="{ height: `${statPercent(member, 'daily_devotion')}%` }"
                     :title="`灵修 ${statCount(member, 'daily_devotion')} 次`"
+                  ></span>
+                  <span
+                    v-if="statCount(member, 'daily_scripture') && (!activeLegend || activeLegend.key === 'daily_scripture')"
+                    class="bar-segment scripture"
+                    :style="{ height: `${statPercent(member, 'daily_scripture')}%` }"
+                    :title="`读经 ${statCount(member, 'daily_scripture')} 次`"
+                  ></span>
+                  <span
+                    v-if="statCount(member, 'weekly_checkin') && (!activeLegend || activeLegend.key === 'weekly_checkin')"
+                    class="bar-segment weekly"
+                    :style="{ height: `${statPercent(member, 'weekly_checkin')}%` }"
+                    :title="`周任务 ${statCount(member, 'weekly_checkin')} 次`"
                   ></span>
                   <span
                     v-if="statCount(member, 'weekly_book') && (!activeLegend || activeLegend.key === 'weekly_book')"

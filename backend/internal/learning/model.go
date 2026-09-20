@@ -49,4 +49,5 @@ type TaskDraft struct {
 	SortOrder int
 	AssetID   uint64
 	UsageType string
+	Optional  bool
 }

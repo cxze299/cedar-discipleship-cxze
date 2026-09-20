@@ -41,7 +41,9 @@ func (s *Service) ListWeeks(ctx context.Context, groupID uint64) ([]WeekVO, erro
 			return nil, err
 		}
 		readings, videos, outline := SplitWeekTaskBindings(TaskMaps(tasks))
-		out = append(out, weekVO(week, readings, videos, outline))
+		vo := weekVO(week, readings, videos, outline)
+		vo.WeeklyCheckin = hasAggregateWeeklyTask(TaskMaps(tasks))
+		out = append(out, vo)
 	}
 	return out, nil
 }
@@ -61,6 +63,7 @@ func (s *Service) ListWeekInputs(ctx context.Context, groupID uint64) ([]WeekInp
 			VerseRef:       week.VerseRef,
 			ReciteText:     week.ReciteText,
 			BookEnabled:    week.BookEnabled,
+			WeeklyCheckin:  week.WeeklyCheckin,
 			VideoEnabled:   week.VideoEnabled,
 			VerseEnabled:   week.VerseEnabled,
 			OutlineEnabled: week.OutlineEnabled,
@@ -222,6 +225,11 @@ func (s *Service) SaveLearningConfig(ctx context.Context, groupID uint64, settin
 
 func BuildTaskDrafts(input WeekInput, existingVerseTitle string) []TaskDraft {
 	var tasks []TaskDraft
+	if input.WeeklyCheckin {
+		tasks = append(tasks, TaskDraft{
+			TaskType: "weekly_checkin", Title: firstNonEmpty(input.Title, "周任务"), SortOrder: 1,
+		})
+	}
 	if input.BookEnabled {
 		order := 1
 		for _, reading := range input.Readings {
@@ -235,6 +243,7 @@ func BuildTaskDrafts(input WeekInput, existingVerseTitle string) []TaskDraft {
 				SortOrder: order,
 				AssetID:   reading.AssetID,
 				UsageType: "reading",
+				Optional:  input.WeeklyCheckin,
 			})
 			order++
 		}
@@ -256,7 +265,8 @@ func BuildTaskDrafts(input WeekInput, existingVerseTitle string) []TaskDraft {
 			break
 		}
 	}
-	if verseTitle := WeeklyVerseTaskTitle(input, existingVerseTitle); verseTitle != "" {
+	if verseTitle := WeeklyVerseTaskTitle(input, existingVerseTitle); verseTitle != "" &&
+		firstNonEmpty(input.VerseRef, input.ReciteText, existingVerseTitle) != "" {
 		tasks = append(tasks, TaskDraft{
 			TaskType:  "weekly_verse",
 			Title:     verseTitle,
@@ -278,6 +288,9 @@ func BuildTaskDrafts(input WeekInput, existingVerseTitle string) []TaskDraft {
 }
 
 func WeekTitle(input WeekInput) string {
+	if input.WeeklyCheckin {
+		return firstNonEmpty(strings.TrimSpace(input.Title), "周任务")
+	}
 	parts := make([]string, 0, 3)
 	if input.BookEnabled {
 		for _, reading := range input.Readings {
@@ -366,28 +379,21 @@ func TaskMaps(tasks []Task) []map[string]any {
 
 func buildTodayTasks(date string, week map[string]any, rawTasks []map[string]any, settings map[string]any, records []TodayRecord) []TodayTaskVO {
 	weekID := mapUint64(week, "id")
-	var tasks []TodayTaskVO
-	if DailyTaskEnabled(settings) {
-		tasks = append(tasks, TodayTaskVO{
-			ID:       "daily_devotion",
-			Type:     "daily_devotion",
-			Kind:     "devotion",
-			Title:    nestedString(settings, []string{"task_sections", "daily", "label"}, "每日灵修"),
-			Summary:  "今天的灵修与读经",
-			Detail:   nestedString(settings, []string{"task_sections", "daily", "label"}, "每日灵修"),
-			Required: true,
-			Status:   "pending",
-		})
-	}
+	tasks := dailyTasks(settings)
+	aggregate := hasAggregateWeeklyTask(rawTasks)
 
 	if week != nil {
 		for _, raw := range rawTasks {
+			if !mapBool(raw, "enabled", true) {
+				continue
+			}
 			taskType := asString(raw["task_type"])
 			switch taskType {
 			case "weekly_book":
-				if !mapBool(week, "book_enabled", true) {
+				if aggregate || !mapBool(week, "book_enabled", true) {
 					continue
 				}
+			case "weekly_checkin":
 			case "weekly_video":
 				if !mapBool(week, "video_enabled", true) {
 					continue
@@ -458,6 +464,10 @@ func todayTaskKind(taskType string) string {
 	switch taskType {
 	case "daily_devotion":
 		return "devotion"
+	case "daily_scripture":
+		return "scripture"
+	case "weekly_checkin":
+		return "weekly"
 	case "weekly_book":
 		return "book"
 	case "weekly_video":
@@ -473,6 +483,8 @@ func todayTaskKind(taskType string) string {
 
 func todayTaskSummary(taskType string) string {
 	switch taskType {
+	case "weekly_checkin":
+		return "本周任务"
 	case "weekly_book":
 		return "本周阅读"
 	case "weekly_video":
@@ -488,6 +500,8 @@ func todayTaskSummary(taskType string) string {
 
 func todayTaskFallbackTitle(taskType string) string {
 	switch taskType {
+	case "weekly_checkin":
+		return "周任务"
 	case "weekly_book":
 		return "周读物"
 	case "weekly_video":
@@ -559,7 +573,7 @@ func matchingTodayRecord(task TodayTaskVO, records []TodayRecord, date string) *
 			}
 			continue
 		}
-		if task.Type == "weekly_verse" || task.Type == "weekly_outline" {
+		if task.Type == "weekly_verse" || task.Type == "weekly_outline" || task.Type == "weekly_checkin" {
 			if task.TaskID > 0 && record.TaskID != nil && *record.TaskID == task.TaskID {
 				return record
 			}
@@ -728,6 +742,7 @@ func firstTaskAsset(raw any) map[string]any {
 
 func InferTaskBindingType(taskType, urlValue, fileName string) string {
 	value := strings.ToLower(firstNonEmpty(fileName, urlValue))
+	value = strings.SplitN(strings.SplitN(value, "?", 2)[0], "#", 2)[0]
 	if isAudioBinding(value) {
 		return "audio"
 	}
@@ -738,6 +753,8 @@ func InferTaskBindingType(taskType, urlValue, fileName string) string {
 		return "image"
 	}
 	switch {
+	case strings.HasSuffix(value, ".html"), strings.HasSuffix(value, ".htm"):
+		return "iframe"
 	case strings.HasSuffix(value, ".md"):
 		return "markdown"
 	case strings.HasSuffix(value, ".mp4"), strings.HasSuffix(value, ".webm"), strings.HasSuffix(value, ".mov"), strings.HasSuffix(value, ".m4v"):

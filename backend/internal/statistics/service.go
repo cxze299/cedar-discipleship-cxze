@@ -60,10 +60,12 @@ func (s *Service) MonthlyRanking(ctx context.Context, groupID uint64, month, fro
 			DisplayName: member.DisplayName,
 			MemberName:  member.MemberName,
 			Counts: map[string]int{
-				"daily_devotion": 0,
-				"weekly_book":    0,
-				"weekly_video":   0,
-				"weekly_outline": 0,
+				"daily_devotion":  0,
+				"daily_scripture": 0,
+				"weekly_checkin":  0,
+				"weekly_book":     0,
+				"weekly_video":    0,
+				"weekly_outline":  0,
 			},
 		}
 	}
