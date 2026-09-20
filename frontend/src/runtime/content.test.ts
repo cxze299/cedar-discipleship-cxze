@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   applyPdfPageRangeToTitle,
   buildReaderPageURL,
+  buildWeeklyVerseContentLink,
   classifyAttachment,
   deepMerge,
   enabledFlag,
@@ -74,6 +75,16 @@ describe('content runtime helpers', () => {
       title: '手动标题',
       readings: [{ title: '读物一' }],
     })).toBe('读物一');
+  });
+
+  it('builds an inline content link for weekly verse text', () => {
+    expect(buildWeeklyVerseContentLink('罗马书 8:11-15', '罗马书 8:11 原文')).toEqual({
+      label: '查看原文',
+      title: '罗马书 8:11-15',
+      type: 'markdown',
+      content: '罗马书 8:11 原文',
+    });
+    expect(buildWeeklyVerseContentLink('罗马书 8:11-15', '  ')).toBeNull();
   });
 
   it('renders markdown while escaping raw HTML and unsafe links', () => {

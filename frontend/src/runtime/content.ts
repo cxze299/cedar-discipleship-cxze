@@ -118,6 +118,17 @@ export function weeklyTitleFromContent(input: {
   return parts.join('；');
 }
 
+export function buildWeeklyVerseContentLink(verseRef: unknown, reciteText: unknown) {
+  const content = String(reciteText || '').trim();
+  if (!content) return null;
+  return {
+    label: '查看原文',
+    title: String(verseRef || '').trim() || '本周背经',
+    type: 'markdown' as const,
+    content,
+  };
+}
+
 export function normalizeSearchText(value: unknown): string {
   return String(value || '')
     .replace(/[《》【】（）()：:·,\-—–_]/g, ' ')

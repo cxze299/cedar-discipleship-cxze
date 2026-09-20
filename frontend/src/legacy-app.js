@@ -17,10 +17,12 @@ import {
 import {
   applyPdfPageRangeToTitle,
   buildReaderPageURL,
+  buildWeeklyVerseContentLink,
   deepMerge,
   enabledFlag,
   extractPdfPageRange,
   isPlainObject,
+  markdownToSafeHTML,
   normalizePageField,
   normalizeSearchText,
   parsePdfPageRangeParts,
@@ -770,7 +772,7 @@ export async function openTaskContent(task, link = null) {
     ...baseTarget,
     hideExternalLink: ['weekly_book', 'weekly_video'].includes(task.type),
   } : null;
-  if (!target?.url) {
+  if (!target?.url && !target?.content) {
     toast('暂无内容链接');
     return;
   }
@@ -1025,11 +1027,29 @@ export function closeViewer() {
 }
 
 export async function openContentTarget(target) {
+  const title = target.title || target.label || '阅读内容';
+  const inlineContent = String(target.content || '').trim();
+  if (inlineContent) {
+    closeViewer();
+    state.viewer = {
+      type: 'markdown',
+      title,
+      html: markdownToSafeHTML(inlineContent),
+      sourceURL: '',
+      downloadURL: '',
+      downloadSource: 'learning',
+      originalName: '',
+      externalURL: '',
+      relatedSections: target.relatedSections || [],
+    };
+    syncViewerStore();
+    render();
+    return;
+  }
   const sourceURL = resolveContentSourceURL(target);
   const sourceAPIPath = sameOriginAPIPath(sourceURL, window.location.origin);
   const downloadURL = target.downloadURL || target.url;
   const type = String(target.type || inferResourceType(target.url)).toLowerCase();
-  const title = target.title || target.label || '阅读内容';
   const originalName = target.original_name || target.filename || '';
   const downloadSource = target.downloadSource || 'learning';
   const pageRange = target.pageRange || extractPdfPageRange(title);
@@ -1312,17 +1332,19 @@ function currentTaskOptions() {
     });
   }
   if (enabledFlag(week.verse_enabled) && verseTask?.id) {
+    const verseTitle = week.verse_ref || verseTask.title || '本周背经';
+    const verseLink = buildWeeklyVerseContentLink(verseTitle, verseTask.content || week.recite_text);
     tasks.push({
       type: 'weekly_verse',
       taskID: Number(verseTask?.id || 0),
       weekID: Number(week.id || 0),
-      title: week.verse_ref || verseTask?.title || '本周背经',
+      title: verseTitle,
       icon: '背经',
       part: '',
-      detail: week.verse_ref || verseTask?.title || '本周背经',
+      detail: verseTitle,
       summary: '背经与默想',
       contentURL: '',
-      contentLinks: [],
+      contentLinks: verseLink ? [verseLink] : [],
     });
   }
   if (enabledFlag(week.outline_enabled) && outlineTask?.id) {
