@@ -771,8 +771,12 @@ async function refreshHomeStats() {
 
 export async function openTaskContent(task, link = null) {
   const baseTarget = link || (task.contentLinks || [])[0] || (task.contentURL ? { url: task.contentURL, title: task.title } : null);
+  const pageRange = baseTarget?.pageRange
+    || extractPdfPageRange(task.title || task.detail || task.part || '')
+    || extractPdfPageRange(baseTarget?.title || baseTarget?.label || '');
   const target = baseTarget ? {
     ...baseTarget,
+    pageRange,
     hideExternalLink: ['weekly_book', 'weekly_video'].includes(task.type),
   } : null;
   if (!target?.url && !target?.content) {
@@ -994,11 +998,11 @@ function buildViewerURL(url, type, pageRange = '', sourceURL = '') {
 function resolveContentSourceURL(target) {
   const originalURL = String(target.url || '').trim();
   const originalAPIPath = sameOriginAPIPath(originalURL, window.location.origin);
-  const type = String(target.type || inferResourceType(target.url)).toLowerCase();
   const sourceForMatch = originalAPIPath || originalURL;
   const pageRange = target.pageRange || extractPdfPageRange(target.title || target.label || '');
-  if (type !== 'pdf' || !pageRange) return target.url;
   const assetMatch = String(sourceForMatch).match(/^\/api\/assets\/(\d+)\/download$/);
+  const type = String(target.type || (pageRange && assetMatch ? 'pdf' : inferResourceType(target.url))).toLowerCase();
+  if (type !== 'pdf' || !pageRange) return target.url;
   if (assetMatch) {
     return `/api/assets/${assetMatch[1]}/range?pages=${encodeURIComponent(pageRange)}`;
   }
