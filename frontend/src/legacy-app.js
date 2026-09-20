@@ -20,6 +20,7 @@ import {
   buildWeeklyVerseContentLink,
   deepMerge,
   enabledFlag,
+  extractNumberedContentSection,
   extractPdfPageRange,
   isPlainObject,
   markdownToSafeHTML,
@@ -973,27 +974,6 @@ function markdownToHTML(content) {
   return html;
 }
 
-function extractNumberedMarkdownSection(text, number) {
-  const lines = String(text || '').replace(/\r/g, '').split('\n');
-  const startRegex = new RegExp(`^#{1,6}\\s*${Number(number)}\\s*$`);
-  const stopRegex = /^#{1,6}\s*\d+\s*$/;
-  let capturing = false;
-  const content = [];
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-    if (!capturing) {
-      if (startRegex.test(line)) {
-        capturing = true;
-        content.push(rawLine);
-      }
-      continue;
-    }
-    if (stopRegex.test(line) && !startRegex.test(line)) break;
-    content.push(rawLine);
-  }
-  return content;
-}
-
 function isTrimmedPDFSource(url) {
   const apiPath = sameOriginAPIPath(url, window.location.origin);
   return /^\/api\/assets\/\d+\/range\b/.test(apiPath || String(url || ''));
@@ -1099,7 +1079,9 @@ export async function openContentTarget(target) {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     if (type === 'markdown') {
       const text = await res.text();
-      const lines = target.section ? extractNumberedMarkdownSection(text, target.section) : text.split('\n');
+      const lines = target.section
+        ? extractNumberedContentSection(text, target.section, target.sectionTitle || target.title)
+        : text.split('\n');
       state.viewer = {
         type: 'markdown',
         title,
@@ -1141,7 +1123,9 @@ export async function openContentTarget(target) {
     const res = await fetch(target.url, { cache: 'no-store' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const text = await res.text();
-    const lines = target.section ? extractNumberedMarkdownSection(text, target.section) : text.split('\n');
+    const lines = target.section
+      ? extractNumberedContentSection(text, target.section, target.sectionTitle || target.title)
+      : text.split('\n');
     state.viewer = {
       type: 'markdown',
       title,
@@ -1633,6 +1617,7 @@ function getDailyDevotionPlan(date = state.selectedDate) {
     url: cfg.path || daily.path || '',
     type: cfg.type || 'markdown',
     section,
+    sectionTitle: title,
   };
 }
 

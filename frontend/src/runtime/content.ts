@@ -129,6 +129,56 @@ export function buildWeeklyVerseContentLink(verseRef: unknown, reciteText: unkno
   };
 }
 
+export function extractNumberedContentSection(text: unknown, number: unknown, heading: unknown = ''): string[] {
+  const lines = String(text || '').replace(/\r/g, '').split('\n');
+  const sectionNumber = Number(number);
+  if (Number.isFinite(sectionNumber) && sectionNumber > 0) {
+    const startPattern = new RegExp(`^#{1,6}\\s*${sectionNumber}\\s*$`);
+    const stopPattern = /^#{1,6}\s*\d+\s*$/;
+    const numbered = extractSection(lines, (line) => startPattern.test(line), (line) => stopPattern.test(line));
+    if (numbered.length) return numbered;
+  }
+
+  const targetHeading = normalizeSectionHeading(heading);
+  if (!targetHeading) return [];
+  const dateHeadingPattern = /^[一二三四五六七八九十]+月[一二三四五六七八九十]+日$/;
+  return extractSection(
+    lines,
+    (line) => normalizeSectionHeading(line) === targetHeading,
+    (line) => dateHeadingPattern.test(normalizeSectionHeading(line)),
+  );
+}
+
+function extractSection(
+  lines: string[],
+  startsSection: (line: string) => boolean,
+  startsNextSection: (line: string) => boolean,
+): string[] {
+  let capturing = false;
+  const content: string[] = [];
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!capturing) {
+      if (startsSection(line)) {
+        capturing = true;
+        content.push(rawLine);
+      }
+      continue;
+    }
+    if (startsNextSection(line) && !startsSection(line)) break;
+    content.push(rawLine);
+  }
+  return content;
+}
+
+function normalizeSectionHeading(value: unknown): string {
+  return String(value || '')
+    .trim()
+    .replace(/^\uFEFF/, '')
+    .replace(/^#{1,6}\s*/, '')
+    .replace(/号$/, '日');
+}
+
 export function normalizeSearchText(value: unknown): string {
   return String(value || '')
     .replace(/[《》【】（）()：:·,\-—–_]/g, ' ')

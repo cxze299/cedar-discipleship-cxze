@@ -6,6 +6,7 @@ import {
   classifyAttachment,
   deepMerge,
   enabledFlag,
+  extractNumberedContentSection,
   extractPdfPageRange,
   markdownToSafeHTML,
   normalizeSearchText,
@@ -85,6 +86,19 @@ describe('content runtime helpers', () => {
       content: '罗马书 8:11 原文',
     });
     expect(buildWeeklyVerseContentLink('罗马书 8:11-15', '  ')).toBeNull();
+  });
+
+  it('extracts numbered devotion content from numeric or Chinese date headings', () => {
+    expect(extractNumberedContentSection(
+      '# 186\n前一篇\n# 187\n目标正文\n# 188\n后一篇',
+      187,
+      '七月六号',
+    )).toEqual(['# 187', '目标正文']);
+    expect(extractNumberedContentSection(
+      '卷首语\n\n七月五日\n前一篇\n\n七月六日\n目标正文\n第二段\n\n七月七日\n后一篇',
+      187,
+      '七月六号',
+    )).toEqual(['七月六日', '目标正文', '第二段', '']);
   });
 
   it('renders markdown while escaping raw HTML and unsafe links', () => {
