@@ -60,6 +60,16 @@ For multi-step tasks, state a brief plan:
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
+## 5. Required Compatibility Skill
+
+For any change to existing code paths, routing, defaults, shared helpers, data contracts, migrations, frontend content/resource resolution, completion semantics, or cross-group compatibility, read and follow:
+
+```text
+.agents/skills/preserve-existing-behavior/SKILL.md
+```
+
+This skill is mandatory unless the task is provably isolated from existing behavior. Existing behavior is the default contract; change it only when the user explicitly requests that behavior change.
+
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
