@@ -1849,12 +1849,12 @@ function monthlyRankingItems() {
 }
 
 function normalizeActiveMemberRule(rule) {
-  const validTypes = ['daily_devotion', 'daily_scripture', 'weekly_checkin', 'weekly_book', 'weekly_video', 'weekly_outline'];
-  const requested = new Set(Array.isArray(rule?.task_types) ? rule.task_types : ['weekly_outline']);
+  const validTypes = ['daily_devotion', 'daily_scripture', 'weekly_book', 'weekly_video'];
+  const requested = new Set(Array.isArray(rule?.task_types) ? rule.task_types : validTypes);
   const taskTypes = validTypes.filter((taskType) => requested.has(taskType));
   return {
     mode: rule?.mode === 'all' ? 'all' : 'any',
-    task_types: taskTypes.length ? taskTypes : ['weekly_outline'],
+    task_types: taskTypes.length ? taskTypes : validTypes,
   };
 }
 

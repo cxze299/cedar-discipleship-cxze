@@ -48,6 +48,7 @@ const legend = [
   { key: 'weekly_video', label: '音视频' },
   { key: 'weekly_outline', label: '背大纲' },
 ];
+const activeRuleOptions = legend.filter((item) => !['weekly_checkin', 'weekly_outline'].includes(item.key));
 
 const statsView = ref('chart');
 const activeStatKey = ref('all');
@@ -424,7 +425,7 @@ async function exportRankingChart() {
             <div v-if="canManageActiveRule" class="active-rule-editor">
               <div class="active-rule-task-buttons">
                 <button
-                  v-for="item in legend"
+                  v-for="item in activeRuleOptions"
                   :key="item.key"
                   type="button"
                   :class="{ active: activeMemberRule.task_types.includes(item.key) }"

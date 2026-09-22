@@ -662,12 +662,27 @@ func TestNormalizeActiveMemberRule(t *testing.T) {
 			wantTypes: []string{"weekly_book"},
 		},
 		{
+			name:      "retired weekly task types are ignored",
+			input:     statisticsdomain.ActiveMemberRuleVO{Mode: "any", TaskTypes: []string{"weekly_book", "weekly_outline", "weekly_checkin"}},
+			wantValid: true,
+			wantMode:  "any",
+			wantTypes: []string{"weekly_book"},
+		},
+		{
 			name:  "empty selection rejected",
 			input: statisticsdomain.ActiveMemberRuleVO{Mode: "any"},
 		},
 		{
 			name:  "unknown task rejected",
 			input: statisticsdomain.ActiveMemberRuleVO{Mode: "any", TaskTypes: []string{"weekly_verse"}},
+		},
+		{
+			name:  "weekly checkin rejected",
+			input: statisticsdomain.ActiveMemberRuleVO{Mode: "any", TaskTypes: []string{"weekly_checkin"}},
+		},
+		{
+			name:  "weekly outline rejected",
+			input: statisticsdomain.ActiveMemberRuleVO{Mode: "any", TaskTypes: []string{"weekly_outline"}},
 		},
 		{
 			name:  "unknown mode rejected",
