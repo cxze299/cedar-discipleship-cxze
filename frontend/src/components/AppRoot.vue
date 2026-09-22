@@ -109,7 +109,6 @@ const resourceTypeFilter = ref('');
 const resourceDateFilter = ref('');
 const resourceStatusFilter = ref('all');
 const notificationSaving = ref(false);
-const memberGroupSwitching = ref(false);
 
 const activeGroup = computed(() => groups.value.find((item) => Number(item.id) === Number(currentGroupID.value)));
 const canManageRoles = computed(() => Boolean(user.value?.is_super_admin || user.value?.roles?.some((role) => ['group_admin', 'group_leader'].includes(role))));
@@ -210,23 +209,6 @@ function navLabel(item) {
 
 function selectAdmin(section) {
   setAdminSection(section);
-}
-
-async function selectMemberGroup(event) {
-  const groupID = Number(event.target.value || 0);
-  if (!groupID || groupID === Number(currentGroupID.value)) return;
-  memberGroupSwitching.value = true;
-  try {
-    await switchGroup(groupID);
-    memberName.value = '';
-    memberUsername.value = '';
-    memberConflict.value = null;
-    groupPassword.value = '';
-  } catch (error) {
-    showToast(error.message);
-  } finally {
-    memberGroupSwitching.value = false;
-  }
 }
 
 function resourceSectionKey(section) {
@@ -879,19 +861,8 @@ async function selectCalendarDate(day) {
             <div v-if="adminLoading && !['members', 'ministry', 'bot'].includes(adminSection)" class="empty">正在加载管理配置…</div>
 
             <section v-else-if="adminSection === 'members'">
-              <div class="section-title"><h2>成员与权限管理</h2></div>
-              <div class="card admin-member-scope">
-                <label class="admin-field">
-                  <span>管理小组</span>
-                  <select
-                    :value="currentGroupID || ''"
-                    :disabled="memberGroupSwitching"
-                    @change="selectMemberGroup"
-                  >
-                    <option value="" disabled>请选择小组</option>
-                    <option v-for="group in groups" :key="group.id" :value="group.id">{{ group.name }}</option>
-                  </select>
-                </label>
+              <div class="section-title">
+                <h2>成员与权限管理</h2>
                 <span v-if="activeGroup" class="muted">{{ members.length }} 位成员</span>
               </div>
               <div v-if="user?.is_super_admin" class="card">
@@ -901,8 +872,7 @@ async function selectCalendarDate(day) {
                   <button type="button" @click="createGroup">创建小组</button>
                 </div>
               </div>
-              <div v-if="memberGroupSwitching" class="empty">正在切换小组…</div>
-              <div v-else-if="!currentGroupID" class="empty">请选择需要管理的小组。</div>
+              <div v-if="!currentGroupID" class="empty">请选择需要管理的小组。</div>
               <div v-else class="grid">
                 <div class="grid cols-2">
                   <div v-if="user?.is_super_admin" class="card">
