@@ -881,6 +881,10 @@ input:focus, select:focus, textarea:focus {
   gap: 13px;
   padding-top: 2px;
 }
+.daily-plan-add-button {
+  justify-self: start;
+  min-height: 44px;
+}
 .daily-plan-list {
   display: grid;
   gap: 0;

@@ -61,7 +61,7 @@ import {
   resolveEffectiveSchedule,
   scriptureChaptersForDate,
 } from './runtime/dailySchedule';
-import { saveWeekWithConfirmation } from './runtime/weekProtection';
+import { nextReadingStartPage, saveWeekWithConfirmation } from './runtime/weekProtection';
 
 export { enabledFlag, extractPdfPageRange };
 
@@ -1788,15 +1788,20 @@ function getDailyDevotionPlan(date = state.selectedDate) {
   if (dailyDevotionPlanMode(devotion) === 'custom') {
     if (!customPlan) return null;
     const title = customPlan.title || toChineseMonthDay(date);
-    const path = customPlan.path || '';
+    const path = customPlan.path || devotion.custom_path || devotion.path || daily.path || '';
     const type = path
-      ? inferDailyDevotionContentType(customPlan, configuredAssetForURL(path))
+      ? inferDailyDevotionContentType({ ...customPlan, path }, configuredAssetForURL(path))
       : customPlan.type;
     return {
       label: title,
       title,
       url: path,
       type,
+      ...(type === 'markdown' && customPlan.section ? {
+        section: customPlan.section,
+        sectionTitle: title,
+        selectionMode: 'numbered',
+      } : {}),
       ...(type === 'pdf' ? { pageRange: resolvePdfPageRange(customPlan) } : {}),
     };
   }
@@ -2080,10 +2085,9 @@ function nextWeekReadings(previousWeek) {
   if (!readings.length) return [emptyWeekBinding('readings')];
   return readings.map((item) => {
     const normalized = normalizeReadingDraftItem(item);
-    const previousEnd = Number(normalized.page_end || 0);
     return {
       ...normalized,
-      page_start: previousEnd > 0 ? String(previousEnd + 1) : '',
+      page_start: nextReadingStartPage(normalized.page_end),
       page_end: '',
     };
   });

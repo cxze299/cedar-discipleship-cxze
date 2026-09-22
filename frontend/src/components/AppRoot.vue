@@ -1,7 +1,17 @@
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
-import { ChevronDown, ChevronRight, Download, LogOut, Pencil, Trash2, UserPlus, X } from '@lucide/vue';
+import {
+  ChevronDown,
+  ChevronRight,
+  Download,
+  LogOut,
+  Pencil,
+  Plus,
+  Trash2,
+  UserPlus,
+  X,
+} from '@lucide/vue';
 import { useAppStateStore } from '../stores/appState';
 import { useDownloadManagerStore } from '../stores/downloadManager';
 import { inferDailyDevotionContentType } from '../runtime/content';
@@ -9,10 +19,16 @@ import {
   dailyDevotionPlanForDate,
   dailyDevotionPlanMode,
   dailyDevotionPlans,
+  nextDailyDevotionPlan,
   removeDailyDevotionPlan,
   upsertDailyDevotionPlan,
 } from '../runtime/dailySchedule';
-import { todayString } from '../runtime/date';
+import {
+  formatLocalDate,
+  parseLocalDate,
+  toChineseMonthDay,
+  todayString,
+} from '../runtime/date';
 import { downloadErrorMessage } from '../runtime/downloads';
 import { filterSharedResources } from '../runtime/resourceGovernance';
 import {
@@ -128,19 +144,22 @@ const devotion = computed(() => daily.value.devotion || {});
 const scripture = computed(() => daily.value.scripture || {});
 const devotionPlanMode = computed(() => dailyDevotionPlanMode(devotion.value));
 const configuredDailyPlans = computed(() => dailyDevotionPlans(devotion.value));
-const selectedDailyPlan = computed(() => (
-  dailyDevotionPlanForDate(
+const selectedDailyPlan = computed(() => {
+  const existing = dailyDevotionPlanForDate(
     { ...devotion.value, plan_mode: 'custom' },
     dailyPlanDate.value,
-  ) || {
+  );
+  return {
+    ...existing,
     date: dailyPlanDate.value,
-    title: '',
-    path: '',
-    type: '',
-    page_start: '',
-    page_end: '',
-  }
-));
+    title: existing?.title || toChineseMonthDay(dailyPlanDate.value),
+    path: existing?.path || '',
+    type: existing?.type || '',
+    section: existing?.section || '',
+    page_start: existing?.page_start || '',
+    page_end: existing?.page_end || '',
+  };
+});
 const selectedDailyPlanExists = computed(() => configuredDailyPlans.value.some(
   (plan) => plan.date === dailyPlanDate.value,
 ));
@@ -177,10 +196,21 @@ const devotionContentType = computed(() => inferDailyDevotionContentType(
   { ...devotion.value, path: devotionPath.value },
   devotionAsset.value,
 ));
-const selectedDailyPlanAsset = computed(() => resourceForURL(selectedDailyPlan.value.path));
+const customDevotionPath = computed(() => (
+  [...configuredDailyPlans.value].reverse().find((plan) => plan.path)?.path
+  || devotion.value.custom_path
+  || devotionPath.value
+  || ''
+));
+const selectedDailyPlanAsset = computed(() => resourceForURL(
+  selectedDailyPlan.value.path || customDevotionPath.value,
+));
 const selectedDailyPlanContentType = computed(() => (
-  selectedDailyPlan.value.path
-    ? inferDailyDevotionContentType(selectedDailyPlan.value, selectedDailyPlanAsset.value)
+  selectedDailyPlan.value.path || customDevotionPath.value
+    ? inferDailyDevotionContentType({
+      ...selectedDailyPlan.value,
+      path: selectedDailyPlan.value.path || customDevotionPath.value,
+    }, selectedDailyPlanAsset.value)
     : selectedDailyPlan.value.type
 ));
 const conflictAlreadyInGroup = computed(() => members.value.some(
@@ -416,28 +446,63 @@ function selectDailyPlanDate(value) {
   if (/^\d{4}-\d{2}-\d{2}$/.test(date)) dailyPlanDate.value = date;
 }
 
+function shiftDailyPlanDate(value, days) {
+  const date = parseLocalDate(value);
+  date.setDate(date.getDate() + days);
+  return formatLocalDate(date);
+}
+
 function updateDailyPlan(patch) {
   if (!dailyPlanDate.value) return;
   const next = upsertDailyDevotionPlan(devotion.value, {
     ...selectedDailyPlan.value,
     ...patch,
     date: dailyPlanDate.value,
+    title: String(patch.title ?? selectedDailyPlan.value.title ?? '').trim()
+      || toChineseMonthDay(dailyPlanDate.value),
   });
   updateLearning(['task_sections', 'daily', 'devotion'], {
     ...next,
     plan_mode: 'custom',
+    custom_path: customDevotionPath.value,
   });
 }
 
-function updateDailyPlanFile(value) {
+function updateCustomDevotionFile(value) {
   const path = String(value || '').trim();
   const selected = resourceForURL(path);
-  updateDailyPlan({
-    path,
-    type: path ? inferDailyDevotionContentType({ ...selectedDailyPlan.value, path }, selected) : '',
-    page_start: '',
-    page_end: '',
+  const type = path ? inferDailyDevotionContentType({ ...devotion.value, path }, selected) : '';
+  updateLearning(['task_sections', 'daily', 'devotion'], {
+    ...devotion.value,
+    custom_path: path,
+    custom_type: type,
+    plan_mode: 'custom',
+    plans: configuredDailyPlans.value.map((plan) => ({
+      ...plan,
+      path: '',
+      type,
+      section: type === 'markdown' ? plan.section : '',
+      page_start: type === 'pdf' ? plan.page_start : '',
+      page_end: type === 'pdf' ? plan.page_end : '',
+    })),
   });
+}
+
+function addDailyPlan() {
+  const lastPlan = configuredDailyPlans.value.at(-1) || null;
+  const baseDate = lastPlan?.date || shiftDailyPlanDate(dailyPlanDate.value, -1);
+  const plan = nextDailyDevotionPlan(
+    devotion.value,
+    selectedDailyPlanContentType.value || devotionContentType.value || 'markdown',
+    baseDate,
+  );
+  const next = upsertDailyDevotionPlan(devotion.value, plan);
+  updateLearning(['task_sections', 'daily', 'devotion'], {
+    ...next,
+    plan_mode: 'custom',
+    custom_path: customDevotionPath.value,
+  });
+  dailyPlanDate.value = plan.date;
 }
 
 async function saveDailyPlan() {
@@ -1111,19 +1176,27 @@ async function selectCalendarDate(day) {
                       </template>
                       <div v-else class="daily-plan-editor">
                         <label class="admin-field">
+                          <span class="admin-field-label">固定灵修文件</span>
+                          <select :value="customDevotionPath" @change="updateCustomDevotionFile($event.target.value)">
+                            <option value="">未绑定资源</option>
+                            <option v-for="option in devotionOptionsWithCurrent(customDevotionPath)" :key="option.url" :value="option.url">{{ devotionFileOptionText(option) }}</option>
+                          </select>
+                        </label>
+                        <button class="icon-text-button daily-plan-add-button" :disabled="!canEditLearning" type="button" @click="addDailyPlan">
+                          <Plus :size="17" />
+                          新增一天
+                        </button>
+                        <label class="admin-field">
                           <span class="admin-field-label">计划日期</span>
                           <input type="date" :value="dailyPlanDate" @change="selectDailyPlanDate($event.target.value)" />
                         </label>
                         <label class="admin-field">
                           <span class="admin-field-label">当天标题</span>
-                          <input :value="selectedDailyPlan.title" placeholder="每日灵修" @change="updateDailyPlan({ title: $event.target.value })" />
+                          <input :value="selectedDailyPlan.title" @change="updateDailyPlan({ title: $event.target.value })" />
                         </label>
-                        <label class="admin-field">
-                          <span class="admin-field-label">灵修文件</span>
-                          <select :value="selectedDailyPlan.path" @change="updateDailyPlanFile($event.target.value)">
-                            <option value="">未绑定资源</option>
-                            <option v-for="option in devotionOptionsWithCurrent(selectedDailyPlan.path, selectedDailyPlan)" :key="option.url" :value="option.url">{{ devotionFileOptionText(option) }}</option>
-                          </select>
+                        <label v-if="selectedDailyPlanContentType === 'markdown'" class="admin-field">
+                          <span class="admin-field-label">当天篇号</span>
+                          <input type="number" min="1" inputmode="numeric" :value="selectedDailyPlan.section" @change="updateDailyPlan({ section: $event.target.value })" />
                         </label>
                         <div v-if="selectedDailyPlanContentType === 'pdf'" class="admin-page-range">
                           <label class="admin-compact-field">
@@ -1150,7 +1223,7 @@ async function selectCalendarDate(day) {
                           >
                             <span>
                               <b>{{ plan.date }}</b>
-                              <small>{{ plan.title || '每日灵修' }}</small>
+                              <small>{{ plan.title || toChineseMonthDay(plan.date) }}</small>
                             </span>
                             <ChevronRight :size="16" />
                           </button>
