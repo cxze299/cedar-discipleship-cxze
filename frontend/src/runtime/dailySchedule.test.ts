@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { numberedSectionForDate, resolveEffectiveSchedule, scriptureChaptersForDate } from './dailySchedule';
+import { numberedSectionForDate, pdfPageForDate, resolveEffectiveSchedule, scriptureChaptersForDate } from './dailySchedule';
 
 describe('resolveEffectiveSchedule', () => {
   const devotion = {
@@ -35,6 +35,14 @@ describe('resolveEffectiveSchedule', () => {
   it('keeps the old sequence through the day before the new version', () => {
     expect(numberedSectionForDate(devotion, '2026-09-06')).toBe(145);
     expect(numberedSectionForDate(devotion, '2026-09-07')).toBe(148);
+  });
+
+  it('advances PDF devotion one page per day from its configured start page', () => {
+    const pdf = { numbered_start_date: '2026-09-07', start_page: 12 };
+    expect(pdfPageForDate(pdf, '2026-09-07')).toBe(12);
+    expect(pdfPageForDate(pdf, '2026-09-09')).toBe(14);
+    expect(pdfPageForDate(pdf, '2026-09-06')).toBeNull();
+    expect(pdfPageForDate({}, '2026-09-07')).toBeNull();
   });
 
   it('supports scripture schedule history', () => {

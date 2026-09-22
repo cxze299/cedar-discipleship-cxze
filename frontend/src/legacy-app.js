@@ -24,6 +24,7 @@ import {
   extractWeeklyContentSection,
   extractPdfPageRange,
   inferAssetContentType,
+  inferDailyDevotionContentType,
   isPlainObject,
   markdownToSafeHTML,
   normalizeContentViewerType,
@@ -53,6 +54,7 @@ import {
 } from './runtime/checkins';
 import {
   numberedSectionForDate,
+  pdfPageForDate,
   resolveEffectiveSchedule,
   scriptureChaptersForDate,
 } from './runtime/dailySchedule';
@@ -122,7 +124,10 @@ function canAdminAccess() {
 }
 
 function visibleNavItems() {
-  return navItems.filter(([id]) => id !== 'admin' || canAdminAccess());
+  return navItems.filter(([id]) => (
+    (id !== 'admin' || canAdminAccess()) &&
+    (id !== 'groups' || currentLearningSettings().ministry?.show_entry === true)
+  ));
 }
 
 function appSnapshot() {
@@ -315,6 +320,7 @@ export async function api(path, options = {}) {
     const error = new Error(data.error || `HTTP ${res.status}`);
     error.code = data.error || '';
     error.status = res.status;
+    error.payload = data;
     throw error;
   }
   return data;
@@ -589,6 +595,11 @@ export async function login(username, password) {
 
 export function setTab(tab) {
   if (tab === 'admin' && !canAdminAccess()) {
+    state.tab = 'home';
+    render();
+    return;
+  }
+  if (tab === 'groups' && currentLearningSettings().ministry?.show_entry !== true) {
     state.tab = 'home';
     render();
     return;
@@ -1155,6 +1166,9 @@ export async function openContentTarget(target) {
         revokeURL: objectURL,
         externalURL: target.hideExternalLink ? '' : objectURL,
         pageRange,
+        dailyPage: target.taskType === 'daily_devotion' && blobType === 'pdf'
+          ? (isTrimmedPDFSource(sourceAPIPath) ? 1 : Number(pageRange.split('-')[0]))
+          : 0,
         relatedSections: target.relatedSections || (isMediaResourceType(blobType) ? buildMediaViewerSections({ ...target, sourceURL, url: viewerURL, type: blobType, title }) : []),
       };
       syncViewerStore();
@@ -1198,6 +1212,9 @@ export async function openContentTarget(target) {
     originalName,
     externalURL: target.hideExternalLink ? '' : sourceURL,
     pageRange,
+    dailyPage: target.taskType === 'daily_devotion' && type === 'pdf'
+      ? Number(pageRange.split('-')[0])
+      : 0,
     relatedSections: target.relatedSections || (isMediaResourceType(type) ? buildMediaViewerSections({ ...target, sourceURL, url: viewerURL, type, title }) : []),
   };
   syncViewerStore();
@@ -1746,20 +1763,37 @@ function getDailyDevotionSectionNumber(date = state.selectedDate) {
   return numberedSectionForDate(taskSectionsConfig().daily?.devotion || {}, date);
 }
 
+function configuredAssetForURL(value) {
+  const source = sameOriginAPIPath(value, window.location.origin) || String(value || '').trim();
+  const assetMatch = source.match(/^\/api\/assets\/(\d+)\/download$/);
+  if (assetMatch) {
+    return state.assets.find((item) => Number(item?.id) === Number(assetMatch[1])) || null;
+  }
+  return state.assets.find((item) => {
+    const itemURL = sameOriginAPIPath(item?.url, window.location.origin) || String(item?.url || '').trim();
+    return itemURL && itemURL === source;
+  }) || null;
+}
+
 function getDailyDevotionPlan(date = state.selectedDate) {
   const daily = taskSectionsConfig().daily || {};
   const cfg = dailyDevotionConfig(date);
   if (cfg.enabled === false) return null;
   const title = toChineseMonthDay(date);
-  const section = getDailyDevotionSectionNumber(date);
+  const path = cfg.path || daily.path || '';
+  const type = inferDailyDevotionContentType({ ...cfg, path }, configuredAssetForURL(path));
+  const page = type === 'pdf' ? pdfPageForDate(taskSectionsConfig().daily?.devotion || {}, date) : null;
+  if (type === 'pdf' && page === null) return null;
+  const section = type === 'markdown' ? getDailyDevotionSectionNumber(date) : undefined;
   return {
     label: title,
     title,
-    url: cfg.path || daily.path || '',
-    type: cfg.type || 'markdown',
+    url: path,
+    type,
     section,
     sectionTitle: title,
     selectionMode: cfg.mode || '',
+    ...(page ? { pageRange: `${page}-${page}` } : {}),
   };
 }
 
@@ -2377,6 +2411,9 @@ export async function logout(options = {}) {
 }
 
 function render() {
+  if (state.tab === 'groups' && currentLearningSettings().ministry?.show_entry !== true) {
+    state.tab = 'home';
+  }
   syncAppStore();
   syncCheckinStore();
   syncDashboardStore();

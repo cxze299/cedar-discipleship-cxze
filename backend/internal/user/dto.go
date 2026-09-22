@@ -47,3 +47,10 @@ type CreateMemberInput struct {
 	Username    string
 	NamePinyin  string
 }
+
+type ExistingUserVO struct {
+	ID          uint64 `json:"id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
+	Status      int    `json:"status"`
+}

@@ -19,6 +19,10 @@ const props = defineProps({
     type: String,
     default: 'PDF 资料',
   },
+  singlePage: {
+    type: Number,
+    default: 0,
+  },
 });
 
 const shell = ref(null);
@@ -84,10 +88,11 @@ async function renderDocument() {
   const sequence = ++renderSequence;
   renderTask?.cancel();
   await nextTick();
-  for (let index = 0; index < pageCount.value; index += 1) {
+  const pagesToRender = props.singlePage > 0 ? 1 : pageCount.value;
+  for (let index = 0; index < pagesToRender; index += 1) {
     const target = pageCanvases.value[index];
     if (!target || sequence !== renderSequence) return;
-    await renderCanvas(index + 1, target, sequence);
+    await renderCanvas(props.singlePage || index + 1, target, sequence);
   }
 }
 
@@ -104,6 +109,10 @@ async function loadPDF() {
     loadingTask = getDocument(documentSource());
     pdfDocument = await loadingTask.promise;
     pageCount.value = pdfDocument.numPages;
+    if (props.singlePage > pageCount.value) {
+      error.value = '当前日期对应页码超出 PDF 总页数。';
+      return;
+    }
     await nextTick();
     await renderDocument();
   } catch {
@@ -145,7 +154,7 @@ onBeforeUnmount(async () => {
   <div ref="shell" class="pdf-viewer">
     <div class="pdf-viewer-toolbar">
       <div class="pdf-viewer-page-count">
-        共 {{ pageCount || '-' }} 页
+        {{ singlePage ? `第 ${singlePage} 页 / 共 ${pageCount || '-'} 页` : `共 ${pageCount || '-'} 页` }}
       </div>
       <div class="pdf-viewer-zoom">
         <button
@@ -182,10 +191,10 @@ onBeforeUnmount(async () => {
       </div>
       <div v-if="pageCount && !error" class="pdf-viewer-pages">
         <canvas
-          v-for="page in pageCount"
+          v-for="page in (singlePage ? 1 : pageCount)"
           :key="page"
           ref="pageCanvases"
-          :aria-label="`${title}第 ${page} 页`"
+          :aria-label="`${title}第 ${singlePage || page} 页`"
         ></canvas>
       </div>
     </div>

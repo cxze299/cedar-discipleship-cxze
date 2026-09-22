@@ -8235,6 +8235,46 @@ button.ministry-join-button {
   font-weight: 700;
 }
 
+.member-conflict-dialog {
+  width: min(480px, calc(100vw - 32px));
+}
+
+.member-conflict-dialog header > div {
+  min-width: 0;
+}
+
+.member-conflict-dialog .icon-button {
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  padding: 0;
+}
+
+.member-conflict-details {
+  padding-block: 8px;
+  border-block: 1px solid var(--line);
+}
+
+.member-conflict-details dt,
+.member-conflict-details dd {
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+}
+
+.resource-dialog-body .member-conflict-warning {
+  color: var(--red);
+  font-weight: 700;
+}
+
+.member-conflict-dialog footer button {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+
 .resource-confirm-list {
   max-height: 300px;
   overflow: auto;
@@ -8366,6 +8406,25 @@ button.ministry-join-button {
 
   .resource-dialog {
     padding: 16px;
+  }
+
+  .member-conflict-dialog footer {
+    align-items: stretch;
+    flex-direction: column-reverse;
+  }
+
+  .member-conflict-dialog {
+    width: calc(100% - 32px);
+    max-height: calc(100dvh - 32px);
+    place-self: center;
+  }
+
+  .member-conflict-dialog footer > span {
+    display: none;
+  }
+
+  .member-conflict-dialog footer button {
+    width: 100%;
   }
 }
 

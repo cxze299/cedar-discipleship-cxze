@@ -1,9 +1,10 @@
 <script setup>
-import { computed, ref, watch } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
-import { ChevronDown, ChevronRight, Download, LogOut, Trash2 } from '@lucide/vue';
+import { ChevronDown, ChevronRight, Download, LogOut, Pencil, Trash2, UserPlus, X } from '@lucide/vue';
 import { useAppStateStore } from '../stores/appState';
 import { useDownloadManagerStore } from '../stores/downloadManager';
+import { inferDailyDevotionContentType } from '../runtime/content';
 import { downloadErrorMessage } from '../runtime/downloads';
 import { filterSharedResources } from '../runtime/resourceGovernance';
 import {
@@ -90,6 +91,10 @@ const loginUsername = ref('');
 const loginPassword = ref('');
 const groupPassword = ref('');
 const memberName = ref('');
+const memberUsername = ref('');
+const memberUsernameInput = ref(null);
+const memberConflict = ref(null);
+const memberSaving = ref(false);
 const groupName = ref('');
 const groupEditName = ref('');
 const uploadCategory = ref('markdown');
@@ -131,14 +136,29 @@ const bibleBooks = [
 ].map(([book, chapters], index) => ({ book, book_id: String(index + 1), chapters }));
 const scriptureBookOptions = computed(() => bibleBooks);
 const libraryItems = computed(() => resourceLibrary.value.flatMap((section) => section.items || []));
-const markdownFileOptions = computed(() => {
+const devotionFileOptions = computed(() => {
   const seen = new Set();
   return libraryItems.value.filter((item) => {
-    if (item.type !== 'markdown' || !item.url || seen.has(item.url)) return false;
+    const type = inferDailyDevotionContentType({}, item);
+    if (!['markdown', 'pdf'].includes(type) || !item.url || seen.has(item.url)) return false;
     seen.add(item.url);
     return true;
   });
 });
+const devotionPath = computed(() => devotion.value.path || daily.value.path || '');
+const devotionAsset = computed(() => resourceForURL(devotionPath.value));
+const devotionContentType = computed(() => inferDailyDevotionContentType(
+  { ...devotion.value, path: devotionPath.value },
+  devotionAsset.value,
+));
+const conflictAlreadyInGroup = computed(() => members.value.some(
+  (member) => Number(member.user_id) === Number(memberConflict.value?.id),
+));
+const conflictCanBeAdded = computed(() => Boolean(
+  memberConflict.value &&
+  !conflictAlreadyInGroup.value &&
+  (memberConflict.value.status === undefined || Number(memberConflict.value.status) === 1),
+));
 const readingOptions = computed(() => libraryItems.value.filter((item) => (
   ['book', 'passage', 'markdown'].includes(normalizeResourceCategory(item.category))
 )));
@@ -199,6 +219,8 @@ async function selectMemberGroup(event) {
   try {
     await switchGroup(groupID);
     memberName.value = '';
+    memberUsername.value = '';
+    memberConflict.value = null;
     groupPassword.value = '';
   } catch (error) {
     showToast(error.message);
@@ -288,17 +310,73 @@ function groupSaveErrorMessage(message) {
 }
 
 async function createMember() {
+  const displayName = memberName.value.trim();
+  const username = memberUsername.value.trim();
+  if (!displayName || !username) {
+    showToast('请输入成员姓名和账号');
+    return;
+  }
+  memberSaving.value = true;
+  memberConflict.value = null;
   try {
     await api('/admin/members', {
       method: 'POST',
-      body: JSON.stringify({ create_user: true, display_name: memberName.value }),
+      body: JSON.stringify({ create_user: true, display_name: displayName, username }),
     });
     memberName.value = '';
+    memberUsername.value = '';
     showToast('成员已创建，初始密码为本组当前默认密码');
     await reloadApp();
   } catch (error) {
-    showToast(error.message);
+    if (error.code === 'username_exists' && error.payload?.existing_user) {
+      memberConflict.value = error.payload.existing_user;
+      return;
+    }
+    showToast(memberSaveErrorMessage(error.message));
+  } finally {
+    memberSaving.value = false;
   }
+}
+
+async function confirmExistingMember() {
+  const existing = memberConflict.value;
+  if (!existing?.id || !conflictCanBeAdded.value) return;
+  memberSaving.value = true;
+  try {
+    await api('/admin/members', {
+      method: 'POST',
+      body: JSON.stringify({
+        create_user: false,
+        user_id: existing.id,
+        display_name: existing.display_name,
+      }),
+    });
+    memberName.value = '';
+    memberUsername.value = '';
+    memberConflict.value = null;
+    showToast('已有账号已加入本组');
+    await reloadApp();
+  } catch (error) {
+    showToast(memberSaveErrorMessage(error.message));
+  } finally {
+    memberSaving.value = false;
+  }
+}
+
+function editMemberUsername() {
+  memberConflict.value = null;
+  nextTick(() => memberUsernameInput.value?.focus());
+}
+
+function memberSaveErrorMessage(message) {
+  return {
+    username_display_name_required: '请输入成员姓名和账号',
+    username_exists: '该账号已存在',
+    user_id_required: '未找到需要添加的账号',
+    group_default_password_missing: '请先设置本组默认密码',
+    user_create_failed: '成员账号创建失败',
+    member_add_failed: '成员加入小组失败',
+  }[message] || message;
 }
 
 function updateLearning(path, value) {
@@ -347,12 +425,39 @@ function fileOptionText(item) {
   return item.title || item.original_name || item.url || '未命名文件';
 }
 
-function markdownOptionsWithCurrent(currentValue) {
+function resourceForURL(value) {
+  const source = String(value || '').trim();
+  const assetID = Number(source.match(/^\/api\/assets\/(\d+)\/download$/)?.[1] || 0);
+  return libraryItems.value.find((item) => (
+    (assetID > 0 && Number(item.id) === assetID) || String(item.url || '').trim() === source
+  )) || null;
+}
+
+function devotionOptionsWithCurrent(currentValue) {
   const current = String(currentValue || '').trim();
-  if (!current || markdownFileOptions.value.some((item) => item.url === current)) {
-    return markdownFileOptions.value;
+  if (!current || devotionFileOptions.value.some((item) => item.url === current)) {
+    return devotionFileOptions.value;
   }
-  return [{ title: `${current}（当前配置）`, url: current, type: 'markdown' }, ...markdownFileOptions.value];
+  return [{
+    title: `${current}（当前配置）`,
+    url: current,
+    type: inferDailyDevotionContentType({ ...devotion.value, path: current }),
+  }, ...devotionFileOptions.value];
+}
+
+function devotionFileOptionText(item) {
+  const type = inferDailyDevotionContentType({}, item);
+  return `${fileOptionText(item)} · ${type === 'pdf' ? 'PDF' : 'Markdown'}`;
+}
+
+function updateDevotionFile(value) {
+  const path = String(value || '').trim();
+  const selected = resourceForURL(path);
+  updateLearning(['task_sections', 'daily', 'devotion'], {
+    ...devotion.value,
+    path,
+    type: inferDailyDevotionContentType({ ...devotion.value, path }, selected),
+  });
 }
 
 async function uploadSelectedFile() {
@@ -821,8 +926,26 @@ async function selectCalendarDate(day) {
                   <div v-if="canManageRoles" class="card">
                     <h2>添加成员</h2>
                     <div class="form-stack">
-                      <input v-model="memberName" placeholder="成员姓名" />
-                      <button type="button" @click="createMember">创建本组成员</button>
+                      <label class="admin-field">
+                        <span class="admin-field-label">成员姓名</span>
+                        <input v-model="memberName" autocomplete="off" placeholder="请输入姓名" @keydown.enter="createMember" />
+                      </label>
+                      <label class="admin-field">
+                        <span class="admin-field-label">账号</span>
+                        <input
+                          ref="memberUsernameInput"
+                          v-model="memberUsername"
+                          autocapitalize="none"
+                          autocomplete="off"
+                          placeholder="请输入唯一账号"
+                          spellcheck="false"
+                          @keydown.enter="createMember"
+                        />
+                      </label>
+                      <button class="icon-text-button" :disabled="memberSaving" type="button" @click="createMember">
+                        <UserPlus :size="17" />
+                        {{ memberSaving ? '正在添加' : '添加成员' }}
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -902,14 +1025,20 @@ async function selectCalendarDate(day) {
                       <label class="admin-toggle"><input type="checkbox" :checked="devotion.enabled !== false" @change="updateLearning(['task_sections','daily','devotion','enabled'], $event.target.checked)" /><span>显示灵修入口</span></label>
                       <label class="admin-field">
                         <span class="admin-field-label">灵修文件</span>
-                        <select :value="devotion.path || ''" @change="updateLearning(['task_sections','daily','devotion','path'], $event.target.value)">
+                        <select :value="devotionPath" @change="updateDevotionFile($event.target.value)">
                           <option value="">未绑定资源</option>
-                          <option v-for="option in markdownOptionsWithCurrent(devotion.path || daily.path)" :key="option.url" :value="option.url">{{ fileOptionText(option) }}</option>
+                          <option v-for="option in devotionOptionsWithCurrent(devotionPath)" :key="option.url" :value="option.url">{{ devotionFileOptionText(option) }}</option>
                         </select>
                       </label>
-                      <label class="admin-field"><span class="admin-field-label">文章定位</span><select :value="devotion.mode || 'auto'" @change="updateLearning(['task_sections','daily','devotion','mode'], $event.target.value)"><option value="auto">自动识别</option><option value="numbered">按篇号</option><option value="date">按日期标题</option></select></label>
-                      <label class="admin-field"><span class="admin-field-label">第 1 篇对应日期</span><input type="date" :value="devotion.numbered_start_date || ''" @change="updateLearning(['task_sections','daily','devotion','numbered_start_date'], $event.target.value)" /></label>
-                      <label class="admin-field"><span class="admin-field-label">起始篇号</span><input type="number" min="1" :value="devotion.numbered_start || 1" @change="updateLearning(['task_sections','daily','devotion','numbered_start'], Number($event.target.value || 1))" /></label>
+                      <template v-if="devotionContentType === 'markdown'">
+                        <label class="admin-field"><span class="admin-field-label">文章定位</span><select :value="devotion.mode || 'auto'" @change="updateLearning(['task_sections','daily','devotion','mode'], $event.target.value)"><option value="auto">自动识别</option><option value="numbered">按篇号</option><option value="date">按日期标题</option></select></label>
+                        <label class="admin-field"><span class="admin-field-label">第 1 篇对应日期</span><input type="date" :value="devotion.numbered_start_date || ''" @change="updateLearning(['task_sections','daily','devotion','numbered_start_date'], $event.target.value)" /></label>
+                        <label class="admin-field"><span class="admin-field-label">起始篇号</span><input type="number" min="1" :value="devotion.numbered_start || 1" @change="updateLearning(['task_sections','daily','devotion','numbered_start'], Number($event.target.value || 1))" /></label>
+                      </template>
+                      <template v-else-if="devotionContentType === 'pdf'">
+                        <label class="admin-field"><span class="admin-field-label">PDF 起始日期</span><input type="date" :value="devotion.numbered_start_date || ''" @change="updateLearning(['task_sections','daily','devotion','numbered_start_date'], $event.target.value)" /></label>
+                        <label class="admin-field"><span class="admin-field-label">PDF 起始页码</span><input type="number" min="1" :value="devotion.start_page || 1" @change="updateLearning(['task_sections','daily','devotion','start_page'], Math.max(1, Number($event.target.value || 1)))" /></label>
+                      </template>
                       <div class="form-actions"><button :class="canEditLearning ? '' : 'secondary'" :disabled="!canEditLearning" type="button" @click="saveLearningConfig">保存学习配置</button></div>
                     </div>
                   </div>
@@ -1092,6 +1221,49 @@ async function selectCalendarDate(day) {
         </button>
       </div>
     </main>
+  </div>
+
+  <div v-if="memberConflict" class="modal-backdrop" @click.self="editMemberUsername">
+    <section
+      class="resource-dialog member-conflict-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="member-conflict-title"
+    >
+      <header>
+        <div>
+          <div class="eyebrow">账号已存在</div>
+          <h3 id="member-conflict-title">确认成员身份</h3>
+        </div>
+        <button class="ghost icon-button" type="button" title="关闭" aria-label="关闭" @click="editMemberUsername">
+          <X :size="18" aria-hidden="true" />
+        </button>
+      </header>
+      <div class="resource-dialog-body">
+        <p>该账号已经属于以下人员。确认后将使用已有账号加入当前小组，不会创建重复账号。</p>
+        <dl class="member-conflict-details">
+          <dt>姓名</dt>
+          <dd>{{ memberConflict.display_name }}</dd>
+          <dt>账号</dt>
+          <dd>{{ memberConflict.username }}</dd>
+          <dt>状态</dt>
+          <dd>{{ Number(memberConflict.status) === 1 ? '正常' : '已停用' }}</dd>
+        </dl>
+        <p v-if="conflictAlreadyInGroup" class="member-conflict-warning">该成员已经在当前小组中。</p>
+        <p v-else-if="Number(memberConflict.status) !== 1" class="member-conflict-warning">该账号已停用，不能加入小组。</p>
+      </div>
+      <footer>
+        <span></span>
+        <button class="secondary" type="button" @click="editMemberUsername">
+          <Pencil :size="16" />
+          修改账号
+        </button>
+        <button :disabled="!conflictCanBeAdded || memberSaving" type="button" @click="confirmExistingMember">
+          <UserPlus :size="16" />
+          {{ memberSaving ? '正在添加' : conflictAlreadyInGroup ? '已在本组' : '确认添加' }}
+        </button>
+      </footer>
+    </section>
   </div>
 
   <div v-if="calendar" class="modal-backdrop" @click="$event.target.className === 'modal-backdrop' && closeCalendar()">

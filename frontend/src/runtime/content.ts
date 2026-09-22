@@ -146,6 +146,34 @@ export function inferAssetContentType(input: {
   }
 }
 
+export function inferDailyDevotionContentType(
+  config: { type?: unknown; path?: unknown } = {},
+  asset?: {
+    id?: unknown;
+    type?: unknown;
+    original_name?: unknown;
+    title?: unknown;
+    mime_type?: unknown;
+    category?: unknown;
+  },
+): '' | 'markdown' | 'pdf' {
+  if (asset) {
+    const explicitType = String(asset.type || '').trim().toLowerCase();
+    const assetType = inferAssetContentType({
+      ...asset,
+      type: explicitType === 'pdf' || explicitType === 'markdown' ? explicitType : '',
+    }, '');
+    if (assetType === 'pdf' || assetType === 'markdown') return assetType;
+    if (!config.path && !config.type) return '';
+  }
+
+  const pathType = classifyAttachment({ filename: config.path });
+  if (pathType.action === 'preview' && (pathType.type === 'pdf' || pathType.type === 'markdown')) {
+    return pathType.type;
+  }
+  return String(config.type || '').trim().toLowerCase() === 'pdf' ? 'pdf' : 'markdown';
+}
+
 export function weeklyTitleFromContent(input: {
   title?: unknown;
   weekly_checkin?: unknown;

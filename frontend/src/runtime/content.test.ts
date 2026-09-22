@@ -12,6 +12,7 @@ import {
   extractPdfPageRange,
   extractPdfPageRangeFromMetadata,
   inferAssetContentType,
+  inferDailyDevotionContentType,
   markdownToSafeHTML,
   normalizeContentViewerType,
   normalizeSearchText,
@@ -76,6 +77,35 @@ describe('content runtime helpers', () => {
     expect(classifyAttachment({ filename: '服事安排.pptx' })).toEqual({ action: 'download', type: 'download' });
     expect(classifyAttachment({ filename: '成员清单.xlsx' })).toEqual({ action: 'download', type: 'download' });
     expect(classifyAttachment({ filename: '资料.unknown' })).toEqual({ action: 'download', type: 'download' });
+  });
+
+  it('keeps Markdown devotion behavior and recognizes PDF devotion assets', () => {
+    expect(inferDailyDevotionContentType({
+      type: 'markdown',
+      path: '/api/assets/11/download',
+    }, {
+      id: 11,
+      original_name: '每日灵修.md',
+      type: 'markdown',
+    })).toBe('markdown');
+
+    expect(inferDailyDevotionContentType({
+      type: 'markdown',
+      path: '/api/assets/12/download',
+    }, {
+      id: 12,
+      original_name: '每日灵修.pdf',
+      type: 'reading',
+    })).toBe('pdf');
+
+    expect(inferDailyDevotionContentType({
+      path: '/legacy/devotion.pdf',
+    })).toBe('pdf');
+
+    expect(inferDailyDevotionContentType({}, {
+      original_name: '每日分享.mp4',
+      type: 'video',
+    })).toBe('');
   });
 
   it('describes media failures by browser error code', () => {

@@ -47,6 +47,16 @@ export function numberedSectionForDate(config: DailyScheduleConfig, date: string
   return startSection + Math.max(0, dayOffsetFrom(startDate, date));
 }
 
+export function pdfPageForDate(config: DailyScheduleConfig, date: string): number | null {
+  const effective = resolveEffectiveSchedule(config, date, ['numbered_start_date', 'start_date']);
+  const startDate = String(effective.numbered_start_date || effective.start_date || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate)) return null;
+  const offset = dayOffsetFrom(startDate, date);
+  if (offset < 0) return null;
+  const startPage = Number(effective.start_page || 1);
+  return (Number.isInteger(startPage) && startPage > 0 ? startPage : 1) + offset;
+}
+
 export type ScriptureChapter = {
   bookName: string;
   bookId: string;
