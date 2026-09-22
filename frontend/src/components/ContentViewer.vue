@@ -467,6 +467,7 @@ function openAdjacentItem(item) {
             :src="viewer.url"
             :data="viewer.pdfData"
             :title="viewer.title"
+            :single-page="viewer.dailyPage || 0"
           />
           <iframe
             v-else

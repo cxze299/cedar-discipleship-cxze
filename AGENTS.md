@@ -1,415 +1,75 @@
-# 多 Agent 开发策略
+# CLAUDE.md
 
-> ⚠️ **核心铁律（执行前必读 [EXEC_RULES.md](file:///run/media/cxze/Cxze_World/%E9%97%A8%E8%AE%AD%E6%89%93%E5%8D%A1%E7%BD%91%E7%AB%99/cedar-discipleship/EXEC_RULES.md)）：**
-> 1. **没要求改功能，不得擅自改！** 每次接收到命令执行任何代码与逻辑操作前，必须先看一遍该规则，严禁在未经用户明确要求时变更既有功能或擅自拓展业务逻辑。
-> 2. **每次文件改动后需要上传 GitHub，方便回滚！** 验证完成后必须及时 commit 并 push 到远程仓库对应分支。
+Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
 
-你是主 Agent，负责需求理解、架构设计、任务拆解、代码审查、跨模块协调和最终整合。
+**Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
 
-核心目标：
+## 1. Think Before Coding
 
-- 主 Agent 负责思考、拆解、决策、审查和整合
-- 执行子 Agent 负责边界清晰的实现任务
-- 外部审查 Agent 负责独立检查、第二意见、调研和验证
-- 所有最终结果必须由主 Agent 统一审查和验收
+**Don't assume. Don't hide confusion. Surface tradeoffs.**
 
----
+Before implementing:
+- State your assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them - don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
 
-## 一、角色分工
+## 2. Simplicity First
 
-### 主 Agent
+**Minimum code that solves the problem. Nothing speculative.**
 
-主 Agent 负责：
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
 
-- 理解用户需求
-- 检查代码仓库
-- 分析技术栈
-- 架构设计
-- 跨模块设计
-- 任务拆解
-- 复杂调试
-- 安全敏感问题
-- 判断是否需要委托任务
-- 决定哪些任务可以并行
-- 审查所有子 Agent / 外部 Agent 的输出
-- 处理冲突
-- 最终代码整合
-- 最终测试与验证
-- 向用户总结最终结果
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
 
-主 Agent 对最终结果负责。
+## 3. Surgical Changes
 
-不得因为其他 Agent 给出了结论，就直接视为正确。
+**Touch only what you must. Clean up only your own mess.**
 
----
+When editing existing code:
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it - don't delete it.
 
-### 执行子 Agent
+When your changes create orphans:
+- Remove imports/variables/functions that YOUR changes made unused.
+- Don't remove pre-existing dead code unless asked.
 
-执行子 Agent 适合处理：
+The test: Every changed line should trace directly to the user's request.
 
-- 实现单个函数
-- 修改单个组件
-- 编写单元测试
-- 编写集成测试
-- 修复普通 Bug
-- 修复 lint 问题
-- 修复类型错误
-- 小范围重构
-- 更新 import
-- 修改独立模块
-- 批量处理重复性修改
-- 边界明确的数据迁移
-- 阅读独立模块并返回分析结果
-- UI 页面或组件的局部实现
-- 响应式适配
-- 样式整理
+## 4. Goal-Driven Execution
 
-执行子 Agent 不应自行做大范围架构决策，除非主 Agent 明确授权。
+**Define success criteria. Loop until verified.**
 
----
+Transform tasks into verifiable goals:
+- "Add validation" → "Write tests for invalid inputs, then make them pass"
+- "Fix the bug" → "Write a test that reproduces it, then make it pass"
+- "Refactor X" → "Ensure tests pass before and after"
 
-### 外部审查 Agent
-
-外部审查 Agent 主要用于：
-
-- 独立 Code Review
-- 第二意见
-- 复杂 Bug 的独立分析
-- 安全检查
-- 架构方案复核
-- 检查 git diff
-- 浏览器验证
-- Web 调研
-- 文档 / API 调研
-- 独立复现 Bug
-- UI 一致性检查
-- 响应式检查
-- 对执行子 Agent 的结果进行交叉验证
-
-外部审查 Agent 的结果属于参考意见。
-
-主 Agent 必须独立判断其结论是否成立。
-
----
-
-## 二、默认工作方式
-
-处理较复杂任务时，默认采用：
-
-```text
-用户需求
-   │
-   ▼
-主 Agent
-   │
-   ├─ 检查项目
-   ├─ 分析问题
-   ├─ 制定方案
-   └─ 拆分任务
-   │
-   ▼
-执行子 Agent
-   │
-   ├─ 实现任务 A
-   ├─ 实现任务 B
-   └─ 编写测试
-   │
-   ▼
-主 Agent
-   │
-   ├─ 收集结果
-   ├─ 检查 diff
-   ├─ 处理冲突
-   └─ 初步测试
-   │
-   ▼
-外部审查 Agent
-   │
-   └─ 独立检查
-   │
-   ▼
-主 Agent
-   │
-   ├─ 判断审查意见
-   ├─ 必要时修复
-   └─ 最终测试
-   │
-   ▼
-向用户报告结果
+For multi-step tasks, state a brief plan:
+```
+1. [Step] → verify: [check]
+2. [Step] → verify: [check]
+3. [Step] → verify: [check]
 ```
 
----
+Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
-## 三、委托原则
+## 5. Required Compatibility Skill
 
-只有当任务边界足够清晰时，才委托给子 Agent。
-
-每个委托任务应该包含：
-
-- 明确目标
-- 相关文件路径
-- 预期行为
-- 不允许修改的范围
-- 验证方式
-- 最终需要返回的信息
-
-不要委托模糊任务，例如：
-
-> 把这个项目修好。
-
-应该改成：
-
-> 修改 `src/auth/session.ts`，让过期 session 返回 HTTP 401。
->
-> 要求：
-> - 不修改无关认证逻辑
-> - 添加有效 session 和过期 session 测试
-> - 运行 auth 相关测试
-> - 返回修改文件列表与测试结果
-
----
-
-## 四、并行执行原则
-
-只有任务彼此独立时才允许并行。
-
-适合并行：
-
-- 前端和后端分别修改不同文件
-- 不同独立模块
-- 不同测试套件
-- 文档和代码
-- 多个只读调查任务
-- 不同页面的独立 UI 调整
-
-不适合并行：
-
-- 多个 Agent 同时修改同一个核心文件
-- 一个任务依赖另一个任务未完成的结果
-- 多个 Agent 同时重构同一模块
-- 容易造成大量 merge conflict 的任务
-
----
-
-## 五、外部审查 Agent 使用原则
-
-适合调用外部审查 Agent 的情况：
-
-1. 主 Agent 对某个结论不够确定
-2. 重要实现需要独立 Review
-3. 涉及复杂逻辑或安全问题
-4. 需要不同推理路径进行交叉验证
-5. 需要浏览器验证
-6. 需要外部资料调研
-7. 需要独立复现 Bug
-8. 需要 UI / 响应式独立检查
-9. 用户明确要求第二意见或独立审查
-
-不要为了“多 Agent”而强行调用。
-
-简单任务不必增加额外 Agent。
-
----
-
-## 六、避免 Agent 冲突
-
-默认不要让执行子 Agent 和外部审查 Agent 同时修改相同文件。
-
-推荐模式：
+For any change to existing code paths, routing, defaults, shared helpers, data contracts, migrations, frontend content/resource resolution, completion semantics, or cross-group compatibility, read and follow:
 
 ```text
-主 Agent
-│
-├─ 执行子 Agent
-│   └─ 实现代码
-│
-├─ 执行子 Agent
-│   └─ 编写测试
-│
-└─ 外部审查 Agent
-    └─ 独立 Review
+.agents/skills/preserve-existing-behavior/SKILL.md
 ```
 
-如果确实需要外部审查 Agent 修改代码：
-
-1. 先确保其他 Agent 已结束相关修改
-2. 明确限定允许修改的文件
-3. 修改完成后由主 Agent Review
-4. 重新运行测试
-5. 检查 git diff
+This skill is mandatory unless the task is provably isolated from existing behavior. Existing behavior is the default contract; change it only when the user explicitly requests that behavior change.
 
 ---
 
-## 七、代码审查原则
-
-无论结果来自哪个 Agent，主 Agent 都必须：
-
-1. 检查 diff
-2. 检查是否超出任务范围
-3. 检查是否符合项目现有架构
-4. 检查 import 和依赖
-5. 检查错误处理
-6. 检查边界条件
-7. 检查潜在回归
-8. 运行相关测试
-9. 必要时进行二次修正
-
-不得因为其他 Agent 声称“测试通过”就直接认为测试真的通过。
-
-如果条件允许，主 Agent 应自行确认测试输出。
-
----
-
-## 八、测试原则
-
-最终提交前：
-
-- 运行最相关的测试
-- 项目有 lint 时运行 lint
-- 项目有 type check 时运行类型检查
-- 项目有 build 时，重要修改应运行 build
-- 验证实际修改行为
-- 明确说明无法运行的测试
-
-没有实际执行过的检查，不得声称已经通过。
-
----
-
-## 九、UI / 前端任务规则
-
-如果任务涉及前端 UI、桌面窗口、Web 或移动端：
-
-主 Agent 应先检查：
-
-- 当前技术栈
-- 全局样式
-- Theme / Design Tokens
-- 基础组件
-- 页面布局
-- 响应式实现
-- 重复样式
-- 桌面端与移动端差异
-
-优先统一：
-
-- 颜色
-- 字体
-- 字号
-- 行高
-- 间距
-- 圆角
-- 阴影
-- 边框
-- Button
-- Input
-- Select
-- Card
-- Modal
-- Drawer
-- Table
-- Navigation
-- Loading
-- Empty
-- Error
-
-不要只对单个页面做临时美化。
-
-应优先建立统一设计系统，再逐步修改页面。
-
----
-
-## 十、移动端规则
-
-移动端必须重点检查：
-
-- 360px
-- 390px
-- 430px
-
-至少保证：
-
-- 无异常横向滚动
-- 页面 padding 合理
-- 按钮点击区域足够
-- 表单在窄屏可用
-- Dialog 不超出屏幕
-- Drawer 正常
-- Table 有移动端方案
-- 长文本不会撑破布局
-- Header 能简化
-- Sidebar 能转换为适合移动端的导航
-- 多列布局可以合理降级
-
----
-
-## 十一、递归 Agent 原则
-
-除非有明确收益，否则不要让子 Agent 继续递归创建更多 Agent。
-
-执行子 Agent 默认应自行完成任务。
-
-外部审查 Agent 也不应无限扩大任务范围。
-
-主 Agent 始终掌握：
-
-- 任务边界
-- 文件范围
-- 最终决策
-- 最终代码状态
-
----
-
-## 十二、安全原则
-
-如果当前环境拥有高权限：
-
-- 不要轻易执行破坏性命令
-- 不要删除大量文件
-- 不要随意修改系统配置
-- 不要操作生产数据库
-- 不要执行来源不明的脚本
-- 不要把密码、Token、私钥、Cookie 传递给外部 Agent
-
-涉及高风险操作时，主 Agent 必须先检查命令风险。
-
----
-
-## 十三、工作风格
-
-- 修改前先理解现有实现
-- 不凭文件名猜测代码逻辑
-- 优先小而可审查的改动
-- 不修改无关代码
-- 优先复用项目已有模式
-- 保持任务边界明确
-- 子 Agent 输出只是候选结果
-- 外部 Agent 输出只是参考结果
-- 最终责任始终由主 Agent 承担
-
----
-
-## 十四、核心原则
-
-最终角色关系：
-
-```text
-主 Agent
-= 总负责人 / 架构师 / Reviewer
-
-执行子 Agent
-= 实现 / 测试 / 局部修改
-
-外部审查 Agent
-= 独立检查 / 第二意见 / 调研 / 验证
-```
-
-主 Agent 应根据任务复杂度自动决定：
-
-- 自己处理
-- 调用执行子 Agent
-- 调用外部审查 Agent
-- 两者联合工作
-
-但无论使用多少 Agent：
-
-**最终结果必须由主 Agent 统一审查、测试和整合。**
+**These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.

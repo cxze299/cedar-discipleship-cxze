@@ -31,10 +31,14 @@ import (
 const (
 	shareScopeAllGroups          = "all_groups"
 	assetKindOwned               = "owned"
+	assetKindImported            = "imported"
+	sharePermissionImport        = "import"
+	shareStatusActive            = "active"
 	newResourceStorageSQLPattern = "team-%-resources/objects/%"
 )
 
 var taskScopedTitleRegexp = regexp.MustCompile(`[0-9]{1,4}[[:space:]]*(?:[-~—–至到][[:space:]]*[0-9]{1,4})?[[:space:]]*页`)
+var errCrossGroupFileNotImportable = errors.New("cross_group_file_not_importable")
 
 var legacyResourceDirs = []struct {
 	Name     string
@@ -44,6 +48,8 @@ var legacyResourceDirs = []struct {
 	{Name: "Book", Category: "book"},
 	{Name: "Passage", Category: "passage"},
 	{Name: "PPT", Category: "handout"},
+	{Name: "MP3", Category: "audio"},
+	{Name: "MP4", Category: "video"},
 	{Name: "Newtestament", Category: "video"},
 }
 
@@ -54,6 +60,7 @@ var legacyRootResourceFiles = []struct {
 	{Name: "newtestament.md", Category: "markdown"},
 	{Name: "weekly_task.md", Category: "markdown"},
 	{Name: "Kuangye.md", Category: "markdown"},
+	{Name: "Yonghuo.md", Category: "markdown"},
 }
 
 type options struct {
@@ -90,6 +97,24 @@ type storedObject struct {
 	FileSize       uint64
 	ChecksumSHA256 string
 	MimeType       string
+}
+
+type fileFingerprint struct {
+	FileSize       uint64
+	ChecksumSHA256 string
+}
+
+type reusableAsset struct {
+	ID             uint64
+	GroupID        uint64
+	Category       string
+	Title          string
+	OriginalName   string
+	StoragePath    string
+	MimeType       string
+	FileSize       uint64
+	ChecksumSHA256 string
+	Importable     bool
 }
 
 type legacyResourceFile struct {
@@ -147,7 +172,7 @@ func run(opt options) error {
 		return err
 	}
 
-	var migrated, missing, skipped int
+	var migrated, imported, existingAssets, missing, skipped int
 	for _, asset := range assets {
 		result, err := migrateAsset(ctx, db, opt, group, asset)
 		if err != nil {
@@ -156,6 +181,10 @@ func run(opt options) error {
 		switch result {
 		case "migrated":
 			migrated++
+		case "imported":
+			imported++
+		case "existing":
+			existingAssets++
 		case "missing":
 			missing++
 		default:
@@ -166,10 +195,11 @@ func run(opt options) error {
 	if err != nil {
 		return err
 	}
-	registeredFiles, existingFiles, discoveredMissing, discoveredSkipped, err := registerDiscoveredLegacyFiles(ctx, db, opt, group, discoveredFiles)
+	registeredFiles, importedFiles, existingFiles, discoveredMissing, discoveredSkipped, err := registerDiscoveredLegacyFiles(ctx, db, opt, group, discoveredFiles)
 	if err != nil {
 		return err
 	}
+	imported += importedFiles
 	missing += discoveredMissing
 	skipped += discoveredSkipped
 	remappedTaskLinks, err := remapSourceTaskAssetLinks(ctx, db, group.ID, opt.dryRun)
@@ -197,8 +227,8 @@ func run(opt options) error {
 	if opt.dryRun {
 		mode = "dry-run"
 	}
-	fmt.Printf("resource_file_migration mode=%s group_id=%d group_code=%s group_name=%q total=%d legacy_assets=%d discovered_files=%d migrated=%d registered_files=%d existing_files=%d missing=%d skipped=%d remapped_task_links=%d repaired_task_links=%d repaired_asset_titles=%d repaired_config_paths=%d deduped_resources=%d\n",
-		mode, group.ID, group.Code, group.Name, len(assets)+len(discoveredFiles), len(assets), len(discoveredFiles), migrated, registeredFiles, existingFiles, missing, skipped, remappedTaskLinks, repairedLinks, repairedAssetTitles, repairedConfigPaths, dedupedResources)
+	fmt.Printf("resource_file_migration mode=%s group_id=%d group_code=%s group_name=%q total=%d legacy_assets=%d discovered_files=%d migrated=%d imported_files=%d registered_files=%d existing_files=%d missing=%d skipped=%d remapped_task_links=%d repaired_task_links=%d repaired_asset_titles=%d repaired_config_paths=%d deduped_resources=%d\n",
+		mode, group.ID, group.Code, group.Name, len(assets)+len(discoveredFiles), len(assets), len(discoveredFiles), migrated, imported, registeredFiles, existingAssets+existingFiles, missing, skipped, remappedTaskLinks, repairedLinks, repairedAssetTitles, repairedConfigPaths, dedupedResources)
 	return nil
 }
 
@@ -292,15 +322,56 @@ func migrateAsset(ctx context.Context, db *sql.DB, opt options, group studyGroup
 		return "missing", nil
 	}
 
+	fingerprint, err := fingerprintFile(sourcePath)
+	if err != nil {
+		return "", err
+	}
+	existingAssetID, err := findCurrentGroupAsset(ctx, db, group.ID, fingerprint)
+	if err != nil {
+		return "", err
+	}
 	fileName := safeFileName(firstNonEmpty(asset.OriginalName, filepath.Base(relativeSource), fmt.Sprintf("asset-%d", asset.ID)))
+	category := migratedCategory(asset)
+	if existingAssetID > 0 {
+		if opt.dryRun {
+			fmt.Printf("would reuse asset_id=%d group=%q source=%s existing_asset_id=%d fingerprint=%s:%d\n",
+				asset.ID, group.Name, relativeSource, existingAssetID, fingerprint.ChecksumSHA256, fingerprint.FileSize)
+			return "existing", nil
+		}
+		if err := reuseCurrentGroupAsset(ctx, db, group.ID, asset, existingAssetID, relativeSource, category); err != nil {
+			return "", err
+		}
+		fmt.Printf("reused asset_id=%d group=%q source=%s existing_asset_id=%d\n",
+			asset.ID, group.Name, relativeSource, existingAssetID)
+		return "existing", nil
+	}
+	source, reusable, err := findReusableAsset(ctx, db, group.ID, fingerprint)
+	if err != nil {
+		return "", err
+	}
+	if reusable {
+		if opt.dryRun {
+			fmt.Printf("would import asset_id=%d group=%q source=%s provider_group_id=%d provider_asset_id=%d fingerprint=%s:%d\n",
+				asset.ID, group.Name, relativeSource, source.GroupID, source.ID, fingerprint.ChecksumSHA256, fingerprint.FileSize)
+			return "imported", nil
+		}
+		importedAssetID, err := importCrossGroupFile(ctx, db, group, &asset, source, relativeSource, category)
+		if err != nil {
+			return "", err
+		}
+		fmt.Printf("imported asset_id=%d group=%q source=%s provider_group_id=%d provider_asset_id=%d\n",
+			importedAssetID, group.Name, relativeSource, source.GroupID, source.ID)
+		return "imported", nil
+	}
+
 	resourceKey := asset.ResourceKey
 	if !isHexResourceKey(resourceKey) {
 		resourceKey = fmt.Sprintf("%032x", asset.ID)
 	}
 	storagePath := path.Join("team-"+group.Code+"-resources", "objects", resourceKey, fileName)
-	category := migratedCategory(asset)
 	if opt.dryRun {
-		fmt.Printf("would migrate asset_id=%d group=%q source=%s target=%s category=%s\n", asset.ID, group.Name, relativeSource, storagePath, category)
+		fmt.Printf("would migrate unique asset_id=%d group=%q source=%s target=%s category=%s fingerprint=%s:%d\n",
+			asset.ID, group.Name, relativeSource, storagePath, category, fingerprint.ChecksumSHA256, fingerprint.FileSize)
 		return "migrated", nil
 	}
 
@@ -399,23 +470,25 @@ func sortLegacyResourceFiles(files []legacyResourceFile) {
 
 func isSupportedLegacyResourceFile(name string) bool {
 	switch strings.ToLower(filepath.Ext(name)) {
-	case ".pdf", ".md", ".markdown", ".mp4", ".m4v", ".mov", ".webm", ".png", ".jpg", ".jpeg", ".webp", ".ppt", ".pptx", ".doc", ".docx", ".xls", ".xlsx":
+	case ".pdf", ".md", ".markdown", ".mp3", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wav", ".weba", ".mp4", ".m4v", ".mov", ".webm", ".png", ".jpg", ".jpeg", ".webp", ".ppt", ".pptx", ".doc", ".docx", ".xls", ".xlsx":
 		return true
 	default:
 		return false
 	}
 }
 
-func registerDiscoveredLegacyFiles(ctx context.Context, db *sql.DB, opt options, group studyGroup, files []legacyResourceFile) (int, int, int, int, error) {
-	var registered, existing, missing, skipped int
+func registerDiscoveredLegacyFiles(ctx context.Context, db *sql.DB, opt options, group studyGroup, files []legacyResourceFile) (int, int, int, int, int, error) {
+	var registered, imported, existing, missing, skipped int
 	for _, file := range files {
 		result, err := registerDiscoveredLegacyFile(ctx, db, opt, group, file)
 		if err != nil {
-			return 0, 0, 0, 0, fmt.Errorf("legacy file %q: %w", file.RelativePath, err)
+			return 0, 0, 0, 0, 0, fmt.Errorf("legacy file %q: %w", file.RelativePath, err)
 		}
 		switch result {
 		case "registered":
 			registered++
+		case "imported":
+			imported++
 		case "existing":
 			existing++
 		case "missing":
@@ -424,7 +497,7 @@ func registerDiscoveredLegacyFiles(ctx context.Context, db *sql.DB, opt options,
 			skipped++
 		}
 	}
-	return registered, existing, missing, skipped, nil
+	return registered, imported, existing, missing, skipped, nil
 }
 
 func registerDiscoveredLegacyFile(ctx context.Context, db *sql.DB, opt options, group studyGroup, file legacyResourceFile) (string, error) {
@@ -436,25 +509,41 @@ func registerDiscoveredLegacyFile(ctx context.Context, db *sql.DB, opt options, 
 		fmt.Printf("missing legacy_file source=%s\n", filepath.ToSlash(file.RelativePath))
 		return "missing", nil
 	}
-	info, err := os.Stat(sourcePath)
-	if err != nil {
-		return "", err
-	}
-	if info.IsDir() {
-		return "skipped", nil
-	}
 	fileName := safeFileName(filepath.Base(file.RelativePath))
-	checksum, err := fileChecksum(sourcePath)
+	fingerprint, err := fingerprintFile(sourcePath)
 	if err != nil {
 		return "", err
 	}
 	category := firstNonEmpty(file.Category, legacyCategoryFromPath(file.RelativePath), "share")
-	exists, err := discoveredAssetExists(ctx, db, group.ID, category, fileName, uint64(info.Size()), checksum)
+	existingAssetID, err := findCurrentGroupAsset(ctx, db, group.ID, fingerprint)
 	if err != nil {
 		return "", err
 	}
-	if exists {
+	if existingAssetID > 0 {
+		if !opt.dryRun {
+			if err := linkExistingFile(ctx, db, group.ID, existingAssetID, file.RelativePath, category); err != nil {
+				return "", err
+			}
+		}
 		return "existing", nil
+	}
+	source, reusable, err := findReusableAsset(ctx, db, group.ID, fingerprint)
+	if err != nil {
+		return "", err
+	}
+	if reusable {
+		if opt.dryRun {
+			fmt.Printf("would import legacy_file group=%q source=%s provider_group_id=%d provider_asset_id=%d fingerprint=%s:%d\n",
+				group.Name, filepath.ToSlash(file.RelativePath), source.GroupID, source.ID, fingerprint.ChecksumSHA256, fingerprint.FileSize)
+			return "imported", nil
+		}
+		assetID, err := importCrossGroupFile(ctx, db, group, nil, source, file.RelativePath, category)
+		if err != nil {
+			return "", err
+		}
+		fmt.Printf("imported legacy_file asset_id=%d group=%q source=%s provider_group_id=%d provider_asset_id=%d\n",
+			assetID, group.Name, filepath.ToSlash(file.RelativePath), source.GroupID, source.ID)
+		return "imported", nil
 	}
 
 	resourceKey, err := randomHexKey()
@@ -463,8 +552,8 @@ func registerDiscoveredLegacyFile(ctx context.Context, db *sql.DB, opt options, 
 	}
 	storagePath := path.Join("team-"+group.Code+"-resources", "objects", resourceKey, fileName)
 	if opt.dryRun {
-		fmt.Printf("would register legacy_file group=%q source=%s target=%s category=%s\n",
-			group.Name, filepath.ToSlash(file.RelativePath), storagePath, category)
+		fmt.Printf("would register unique legacy_file group=%q source=%s target=%s category=%s fingerprint=%s:%d\n",
+			group.Name, filepath.ToSlash(file.RelativePath), storagePath, category, fingerprint.ChecksumSHA256, fingerprint.FileSize)
 		return "registered", nil
 	}
 
@@ -517,21 +606,6 @@ func resolveLegacySourcePath(legacyRoot, legacyAssetsRoot, relativePath string) 
 		}
 	}
 	return "", false, nil
-}
-
-func discoveredAssetExists(ctx context.Context, db *sql.DB, groupID uint64, category, originalName string, fileSize uint64, checksum string) (bool, error) {
-	var id uint64
-	err := db.QueryRowContext(ctx, `SELECT id FROM assets
-		WHERE group_id=? AND category=? AND original_name=? AND file_size=? AND checksum_sha256=?
-		  AND storage_path LIKE 'team-%-resources/objects/%'
-		ORDER BY id LIMIT 1`, groupID, category, originalName, fileSize, checksum).Scan(&id)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return id > 0, nil
 }
 
 func createDiscoveredAsset(ctx context.Context, db *sql.DB, group studyGroup, resourceKey, category, title, fileName string, stored storedObject, relativeSource string) (uint64, error) {
@@ -706,6 +780,611 @@ func fileChecksum(path string) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(hasher.Sum(nil)), nil
+}
+
+func fingerprintFile(filePath string) (fileFingerprint, error) {
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return fileFingerprint{}, err
+	}
+	if info.IsDir() {
+		return fileFingerprint{}, errors.New("source path is a directory")
+	}
+	checksum, err := fileChecksum(filePath)
+	if err != nil {
+		return fileFingerprint{}, err
+	}
+	return fileFingerprint{
+		FileSize:       uint64(info.Size()),
+		ChecksumSHA256: strings.ToLower(checksum),
+	}, nil
+}
+
+func findCurrentGroupAsset(
+	ctx context.Context,
+	db *sql.DB,
+	groupID uint64,
+	fingerprint fileFingerprint,
+) (uint64, error) {
+	var assetID uint64
+	err := db.QueryRowContext(ctx, `SELECT a.id
+		FROM assets a
+		JOIN asset_bindings b ON b.asset_id=a.id AND b.group_id=a.group_id AND b.deleted_at IS NULL
+		WHERE a.group_id=? AND a.file_size=? AND LOWER(a.checksum_sha256)=?
+		  AND a.storage_path LIKE 'team-%-resources/objects/%'
+		ORDER BY CASE WHEN b.asset_kind=? THEN 0 ELSE 1 END,a.id
+		LIMIT 1`,
+		groupID, fingerprint.FileSize, fingerprint.ChecksumSHA256, assetKindOwned,
+	).Scan(&assetID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	return assetID, err
+}
+
+func reuseCurrentGroupAsset(
+	ctx context.Context,
+	db *sql.DB,
+	groupID uint64,
+	legacy legacyAsset,
+	existingAssetID uint64,
+	relativeSource, category string,
+) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	now := time.Now().UTC()
+	if err := ensureAssetHasNoDependents(ctx, tx, legacy.ID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT IGNORE INTO task_assets
+		(group_id,task_id,asset_id,usage_type,sort_order,created_at)
+		SELECT group_id,task_id,?,usage_type,sort_order,created_at
+		FROM task_assets WHERE group_id=? AND asset_id=?`,
+		existingAssetID, groupID, legacy.ID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM task_assets WHERE group_id=? AND asset_id=?`, groupID, legacy.ID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE asset_bindings
+		SET deleted_at=COALESCE(deleted_at,?),updated_at=?
+		WHERE asset_id=? AND group_id=?`, now, now, legacy.ID, groupID); err != nil {
+		return err
+	}
+	if err := retireReplacedAsset(ctx, tx, groupID, legacy.ID, now); err != nil {
+		return err
+	}
+	if err := linkTasksForAsset(
+		ctx, tx, groupID, existingAssetID, legacy.StoragePath, relativeSource, category, now,
+	); err != nil {
+		return err
+	}
+	if err := remapGroupSettingsAssetID(ctx, tx, groupID, legacy.ID, existingAssetID, now); err != nil {
+		return err
+	}
+	if err := remapGroupSettingsLegacyPath(ctx, tx, groupID, relativeSource, existingAssetID, now); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func linkExistingFile(
+	ctx context.Context,
+	db *sql.DB,
+	groupID, assetID uint64,
+	relativeSource, category string,
+) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	now := time.Now().UTC()
+	if err := linkTasksForAsset(
+		ctx, tx, groupID, assetID, relativeSource, relativeSource, category, now,
+	); err != nil {
+		return err
+	}
+	if err := remapGroupSettingsLegacyPath(ctx, tx, groupID, relativeSource, assetID, now); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func findReusableAsset(
+	ctx context.Context,
+	db *sql.DB,
+	targetGroupID uint64,
+	fingerprint fileFingerprint,
+) (reusableAsset, bool, error) {
+	var crossGroupMatch int
+	if err := db.QueryRowContext(ctx, `SELECT EXISTS(
+			SELECT 1
+			FROM assets a
+			JOIN asset_bindings b
+			  ON b.asset_id=a.id AND b.group_id=a.group_id AND b.deleted_at IS NULL
+			WHERE a.group_id<>? AND a.file_size=? AND LOWER(a.checksum_sha256)=?
+			  AND a.storage_path LIKE 'team-%-resources/objects/%'
+		)`, targetGroupID, fingerprint.FileSize, fingerprint.ChecksumSHA256).Scan(&crossGroupMatch); err != nil {
+		return reusableAsset{}, false, err
+	}
+	rows, err := db.QueryContext(ctx, `SELECT
+			a.id,a.group_id,a.category,a.title,a.original_name,a.storage_path,
+			a.mime_type,a.file_size,a.checksum_sha256,
+			CASE WHEN sg.status=1 AND EXISTS(
+				SELECT 1 FROM asset_share_grants g
+				WHERE g.asset_id=a.id AND g.owner_group_id=a.group_id
+				  AND g.permission=? AND g.status=?
+				  AND (g.consumer_group_id IS NULL OR g.consumer_group_id=?)
+			) THEN 1 ELSE 0 END
+		FROM assets a
+		JOIN asset_bindings b
+		  ON b.asset_id=a.id AND b.group_id=a.group_id
+		 AND b.asset_kind=? AND b.deleted_at IS NULL
+		JOIN study_groups sg ON sg.id=a.group_id
+		WHERE a.group_id<>? AND a.file_size=? AND LOWER(a.checksum_sha256)=?
+		  AND a.storage_path LIKE 'team-%-resources/objects/%'
+		ORDER BY a.group_id,a.id`,
+		sharePermissionImport,
+		shareStatusActive,
+		targetGroupID,
+		assetKindOwned,
+		targetGroupID,
+		fingerprint.FileSize,
+		fingerprint.ChecksumSHA256,
+	)
+	if err != nil {
+		return reusableAsset{}, false, err
+	}
+	defer rows.Close()
+
+	var candidates []reusableAsset
+	for rows.Next() {
+		var item reusableAsset
+		var importable int
+		if err := rows.Scan(
+			&item.ID,
+			&item.GroupID,
+			&item.Category,
+			&item.Title,
+			&item.OriginalName,
+			&item.StoragePath,
+			&item.MimeType,
+			&item.FileSize,
+			&item.ChecksumSHA256,
+			&importable,
+		); err != nil {
+			return reusableAsset{}, false, err
+		}
+		item.Importable = importable > 0
+		candidates = append(candidates, item)
+	}
+	if err := rows.Err(); err != nil {
+		return reusableAsset{}, false, err
+	}
+	return selectReusableAsset(candidates, crossGroupMatch > 0)
+}
+
+func selectReusableAsset(candidates []reusableAsset, hasCrossGroupMatch bool) (reusableAsset, bool, error) {
+	var selected reusableAsset
+	for _, candidate := range candidates {
+		if !candidate.Importable {
+			continue
+		}
+		if selected.ID == 0 ||
+			candidate.GroupID < selected.GroupID ||
+			(candidate.GroupID == selected.GroupID && candidate.ID < selected.ID) {
+			selected = candidate
+		}
+	}
+	if selected.ID > 0 {
+		return selected, true, nil
+	}
+	if hasCrossGroupMatch {
+		return reusableAsset{}, false, errCrossGroupFileNotImportable
+	}
+	return reusableAsset{}, false, nil
+}
+
+func importCrossGroupFile(
+	ctx context.Context,
+	db *sql.DB,
+	group studyGroup,
+	legacy *legacyAsset,
+	source reusableAsset,
+	relativeSource string,
+	localCategory string,
+) (uint64, error) {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	now := time.Now().UTC()
+	if err := validateReusableAsset(ctx, tx, group.ID, source); err != nil {
+		return 0, err
+	}
+	if legacy != nil {
+		if err := ensureAssetHasNoDependents(ctx, tx, legacy.ID); err != nil {
+			return 0, err
+		}
+	}
+	var importedAssetID uint64
+	err = tx.QueryRowContext(ctx, `SELECT asset_id FROM asset_bindings
+		WHERE group_id=? AND source_asset_id=? FOR UPDATE`, group.ID, source.ID).Scan(&importedAssetID)
+	switch {
+	case err == nil:
+		if err := restoreImportedAsset(ctx, tx, group.ID, importedAssetID, source, now); err != nil {
+			return 0, err
+		}
+	case !errors.Is(err, sql.ErrNoRows):
+		return 0, err
+	case legacy != nil:
+		importedAssetID = legacy.ID
+		resourceKey := legacy.ResourceKey
+		if !isHexResourceKey(resourceKey) {
+			resourceKey, err = randomHexKey()
+			if err != nil {
+				return 0, err
+			}
+		}
+		if err := convertAssetToImport(ctx, tx, group.ID, importedAssetID, resourceKey, source, now); err != nil {
+			return 0, err
+		}
+	default:
+		importedAssetID, err = createImportedAsset(ctx, tx, group.ID, source, now)
+		if err != nil {
+			return 0, err
+		}
+	}
+
+	if legacy != nil && legacy.ID != importedAssetID {
+		if err := remapImportedAssetReferences(ctx, tx, group.ID, legacy.ID, importedAssetID, source, now); err != nil {
+			return 0, err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO asset_dependencies
+		(consumer_group_id,consumer_asset_id,provider_group_id,provider_asset_id,dependency_type,status,created_at,updated_at)
+		VALUES (?,?,?,?,?,?,?,?)
+		ON DUPLICATE KEY UPDATE status=VALUES(status),updated_at=VALUES(updated_at)`,
+		group.ID, importedAssetID, source.GroupID, source.ID, sharePermissionImport, shareStatusActive, now, now); err != nil {
+		return 0, err
+	}
+	detail := `{"migration":true,"source":"resource_file_migration"}`
+	if _, err := tx.ExecContext(ctx, `INSERT INTO asset_import_events
+		(target_group_id,imported_asset_id,source_asset_id,event_type,actor_user_id,detail,created_at)
+		VALUES (?,?,?,?,?,?,?)`,
+		group.ID, importedAssetID, source.ID, "imported", 1, detail, now); err != nil {
+		return 0, err
+	}
+	oldStoragePath := relativeSource
+	if legacy != nil {
+		oldStoragePath = legacy.StoragePath
+	}
+	if err := linkTasksForAsset(ctx, tx, group.ID, importedAssetID, oldStoragePath, relativeSource, localCategory, now); err != nil {
+		return 0, err
+	}
+	if err := remapGroupSettingsLegacyPath(ctx, tx, group.ID, relativeSource, importedAssetID, now); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return importedAssetID, nil
+}
+
+func validateReusableAsset(
+	ctx context.Context,
+	tx *sql.Tx,
+	targetGroupID uint64,
+	source reusableAsset,
+) error {
+	var exists int
+	err := tx.QueryRowContext(ctx, `SELECT 1
+		FROM assets a
+		JOIN asset_bindings b
+		  ON b.asset_id=a.id AND b.group_id=a.group_id
+		 AND b.asset_kind=? AND b.deleted_at IS NULL
+		JOIN study_groups sg ON sg.id=a.group_id AND sg.status=1
+		JOIN asset_share_grants g
+		  ON g.asset_id=a.id AND g.owner_group_id=a.group_id
+		 AND g.permission=? AND g.status=?
+		 AND (g.consumer_group_id IS NULL OR g.consumer_group_id=?)
+		WHERE a.id=? AND a.group_id=? AND a.file_size=? AND LOWER(a.checksum_sha256)=?
+		  AND a.storage_path LIKE 'team-%-resources/objects/%'
+		LIMIT 1 FOR UPDATE`,
+		assetKindOwned,
+		sharePermissionImport,
+		shareStatusActive,
+		targetGroupID,
+		source.ID,
+		source.GroupID,
+		source.FileSize,
+		strings.ToLower(source.ChecksumSHA256),
+	).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return errCrossGroupFileNotImportable
+	}
+	return err
+}
+
+func restoreImportedAsset(
+	ctx context.Context,
+	tx *sql.Tx,
+	groupID, assetID uint64,
+	source reusableAsset,
+	now time.Time,
+) error {
+	if _, err := tx.ExecContext(ctx, `UPDATE asset_bindings
+		SET asset_kind=?,source_asset_id=?,imported_at=COALESCE(imported_at,?),
+			deleted_at=NULL,updated_at=?
+		WHERE asset_id=? AND group_id=?`,
+		assetKindImported, source.ID, now, now, assetID, groupID); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `UPDATE assets
+		SET category=?,title=?,original_name=?,storage_path=?,mime_type=?,
+			file_size=?,checksum_sha256=?,visibility=?,updated_at=?
+		WHERE id=? AND group_id=?`,
+		source.Category, source.Title, source.OriginalName, source.StoragePath, source.MimeType,
+		source.FileSize, source.ChecksumSHA256, assetKindImported, now, assetID, groupID)
+	return err
+}
+
+func convertAssetToImport(
+	ctx context.Context,
+	tx *sql.Tx,
+	groupID, assetID uint64,
+	resourceKey string,
+	source reusableAsset,
+	now time.Time,
+) error {
+	if err := restoreImportedAsset(ctx, tx, groupID, assetID, source, now); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE asset_bindings
+		SET resource_key=?,asset_kind=?,source_asset_id=?,imported_at=?,
+			deleted_at=NULL,updated_at=?
+		WHERE asset_id=? AND group_id=?`,
+		resourceKey, assetKindImported, source.ID, now, now, assetID, groupID)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO asset_bindings
+			(asset_id,group_id,resource_key,asset_kind,source_asset_id,imported_at,deleted_at,created_at,updated_at)
+			VALUES (?,?,?,?,?,?,NULL,?,?)`,
+			assetID, groupID, resourceKey, assetKindImported, source.ID, now, now, now); err != nil {
+			return err
+		}
+	}
+	return retireReplacedAsset(ctx, tx, groupID, assetID, now)
+}
+
+func createImportedAsset(
+	ctx context.Context,
+	tx *sql.Tx,
+	groupID uint64,
+	source reusableAsset,
+	now time.Time,
+) (uint64, error) {
+	result, err := tx.ExecContext(ctx, `INSERT INTO assets
+		(group_id,category,title,original_name,storage_path,mime_type,file_size,checksum_sha256,visibility,created_by,created_at,updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+		groupID, source.Category, source.Title, source.OriginalName, source.StoragePath, source.MimeType,
+		source.FileSize, source.ChecksumSHA256, assetKindImported, 1, now, now)
+	if err != nil {
+		return 0, err
+	}
+	id, err := result.LastInsertId()
+	if err != nil || id <= 0 {
+		return 0, errors.New("invalid_import_insert_id")
+	}
+	resourceKey, err := randomHexKey()
+	if err != nil {
+		return 0, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO asset_bindings
+		(asset_id,group_id,resource_key,asset_kind,source_asset_id,imported_at,deleted_at,created_at,updated_at)
+		VALUES (?,?,?,?,?,?,NULL,?,?)`,
+		uint64(id), groupID, resourceKey, assetKindImported, source.ID, now, now, now); err != nil {
+		return 0, err
+	}
+	return uint64(id), nil
+}
+
+func remapImportedAssetReferences(
+	ctx context.Context,
+	tx *sql.Tx,
+	groupID, oldAssetID, importedAssetID uint64,
+	source reusableAsset,
+	now time.Time,
+) error {
+	if _, err := tx.ExecContext(ctx, `INSERT IGNORE INTO task_assets
+		(group_id,task_id,asset_id,usage_type,sort_order,created_at)
+		SELECT group_id,task_id,?,usage_type,sort_order,created_at
+		FROM task_assets WHERE group_id=? AND asset_id=?`,
+		importedAssetID, groupID, oldAssetID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM task_assets WHERE group_id=? AND asset_id=?`, groupID, oldAssetID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE asset_bindings
+		SET deleted_at=COALESCE(deleted_at,?),updated_at=?
+		WHERE asset_id=? AND group_id=?`, now, now, oldAssetID, groupID); err != nil {
+		return err
+	}
+	if err := retireReplacedAsset(ctx, tx, groupID, oldAssetID, now); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE assets
+		SET category=?,title=?,original_name=?,storage_path=?,mime_type=?,
+			file_size=?,checksum_sha256=?,visibility=?,updated_at=?
+		WHERE id=? AND group_id=?`,
+		source.Category, source.Title, source.OriginalName, source.StoragePath, source.MimeType,
+		source.FileSize, source.ChecksumSHA256, assetKindImported, now, oldAssetID, groupID); err != nil {
+		return err
+	}
+	return remapGroupSettingsAssetID(ctx, tx, groupID, oldAssetID, importedAssetID, now)
+}
+
+func ensureAssetHasNoDependents(ctx context.Context, tx *sql.Tx, assetID uint64) error {
+	var dependent int
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(
+		SELECT 1 FROM asset_dependencies
+		WHERE provider_asset_id=? AND status=?
+	)`, assetID, shareStatusActive).Scan(&dependent); err != nil {
+		return err
+	}
+	if dependent > 0 {
+		return errors.New("legacy_asset_has_active_dependents")
+	}
+	return nil
+}
+
+func retireReplacedAsset(
+	ctx context.Context,
+	tx *sql.Tx,
+	groupID, assetID uint64,
+	now time.Time,
+) error {
+	if _, err := tx.ExecContext(ctx, `UPDATE asset_share_grants
+		SET status='revoked',revoked_by=1,revoked_at=COALESCE(revoked_at,?)
+		WHERE asset_id=? AND status=?`, now, assetID, shareStatusActive); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `UPDATE asset_dependencies
+		SET status='removed',updated_at=?
+		WHERE consumer_group_id=? AND consumer_asset_id=? AND status=?`,
+		now, groupID, assetID, shareStatusActive)
+	return err
+}
+
+func remapGroupSettingsAssetID(
+	ctx context.Context,
+	tx *sql.Tx,
+	groupID, oldAssetID, importedAssetID uint64,
+	now time.Time,
+) error {
+	return rewriteGroupSettings(ctx, tx, groupID, now, func(settings *any) bool {
+		return replaceAssetID(settings, oldAssetID, importedAssetID)
+	})
+}
+
+func remapGroupSettingsLegacyPath(
+	ctx context.Context,
+	tx *sql.Tx,
+	groupID uint64,
+	legacyPath string,
+	assetID uint64,
+	now time.Time,
+) error {
+	legacyKey := normalizedLegacyKey(legacyPath)
+	if legacyKey == "" {
+		return nil
+	}
+	return rewriteGroupSettings(ctx, tx, groupID, now, func(settings *any) bool {
+		return replaceLegacyPath(settings, legacyKey, assetID)
+	})
+}
+
+func rewriteGroupSettings(
+	ctx context.Context,
+	tx *sql.Tx,
+	groupID uint64,
+	now time.Time,
+	rewrite func(*any) bool,
+) error {
+	var raw sql.NullString
+	err := tx.QueryRowContext(ctx, `SELECT settings FROM group_settings WHERE group_id=? FOR UPDATE`, groupID).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) || !raw.Valid || strings.TrimSpace(raw.String) == "" {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var settings any
+	if err := json.Unmarshal([]byte(raw.String), &settings); err != nil {
+		return fmt.Errorf("parse group settings: %w", err)
+	}
+	if !rewrite(&settings) {
+		return nil
+	}
+	payload, err := json.Marshal(settings)
+	if err != nil {
+		return fmt.Errorf("marshal group settings: %w", err)
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE group_settings SET settings=?,updated_at=? WHERE group_id=?`, string(payload), now, groupID)
+	return err
+}
+
+func replaceLegacyPath(value *any, legacyKey string, assetID uint64) bool {
+	switch item := (*value).(type) {
+	case string:
+		if normalizedLegacyKey(item) != legacyKey {
+			return false
+		}
+		*value = assetDownloadURL(assetID)
+		return true
+	case []any:
+		changed := false
+		for index := range item {
+			if replaceLegacyPath(&item[index], legacyKey, assetID) {
+				changed = true
+			}
+		}
+		return changed
+	case map[string]any:
+		changed := false
+		for key, child := range item {
+			if replaceLegacyPath(&child, legacyKey, assetID) {
+				item[key] = child
+				changed = true
+			}
+		}
+		return changed
+	default:
+		return false
+	}
+}
+
+func replaceAssetID(value *any, oldAssetID, importedAssetID uint64) bool {
+	switch item := (*value).(type) {
+	case string:
+		if assetIDFromDownloadURL(item) != oldAssetID {
+			return false
+		}
+		*value = assetDownloadURL(importedAssetID)
+		return true
+	case []any:
+		changed := false
+		for index := range item {
+			if replaceAssetID(&item[index], oldAssetID, importedAssetID) {
+				changed = true
+			}
+		}
+		return changed
+	case map[string]any:
+		changed := false
+		for key, child := range item {
+			if replaceAssetID(&child, oldAssetID, importedAssetID) {
+				item[key] = child
+				changed = true
+			}
+		}
+		return changed
+	default:
+		return false
+	}
 }
 
 func updateAsset(ctx context.Context, db *sql.DB, group studyGroup, asset legacyAsset, resourceKey, category, fileName string, stored storedObject, relativeSource string) error {
@@ -1213,6 +1892,7 @@ func taskHasAssetLinks(ctx context.Context, db *sql.DB, groupID, taskID uint64) 
 type historicalReadingMetadata struct {
 	BookName    string `json:"book_name"`
 	SourceTitle string `json:"source_title"`
+	ReadingPath string `json:"reading_path"`
 }
 
 type historicalReadingAsset struct {
@@ -1257,6 +1937,7 @@ func historicalReadingRefs(title, content string) []string {
 	if strings.HasPrefix(strings.TrimSpace(content), "{") && json.Unmarshal([]byte(content), &metadata) == nil {
 		add(metadata.SourceTitle)
 		add(metadata.BookName)
+		add(path.Base(strings.TrimSpace(metadata.ReadingPath)))
 	}
 	add(title)
 	return refs
@@ -1705,7 +2386,7 @@ func usageTypeForCategory(category string) string {
 		return "video"
 	case "outline":
 		return "outline"
-	case "mentor", "handout", "share":
+	case "audio", "mentor", "handout", "share":
 		return "share"
 	default:
 		return "reading"

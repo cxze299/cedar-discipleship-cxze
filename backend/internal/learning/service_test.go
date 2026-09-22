@@ -5,6 +5,88 @@ import (
 	"testing"
 )
 
+func TestTaskAssetMapsIncludesMIMEType(t *testing.T) {
+	t.Parallel()
+
+	got := taskAssetMaps([]TaskAsset{{
+		ID:           7,
+		Category:     "book",
+		Title:        "圣经救赎史剧综览-2",
+		OriginalName: "圣经救赎史剧综览-2",
+		MimeType:     "application/pdf",
+		UsageType:    "reading",
+	}})
+	if len(got) != 1 || got[0]["mime_type"] != "application/pdf" {
+		t.Fatalf("taskAssetMaps() = %#v, want MIME type", got)
+	}
+}
+
+func TestTaskMapsIncludesReadingPageMetadata(t *testing.T) {
+	t.Parallel()
+
+	got := TaskMaps([]Task{{
+		ID:       12,
+		TaskType: "weekly_book",
+		Title:    "基督是一切-江守道",
+		Content:  `{"book_name":"基督是一切","page_start":36,"page_end":40,"source_title":"《基督是一切》36-40页"}`,
+		Enabled:  true,
+		Assets: []TaskAsset{{
+			ID:           7,
+			Category:     "book",
+			Title:        "基督是一切-江守道",
+			OriginalName: "基督是一切-江守道.pdf",
+			MimeType:     "application/pdf",
+			UsageType:    "reading",
+		}},
+	}})
+	if len(got) != 1 {
+		t.Fatalf("TaskMaps() returned %d tasks, want 1", len(got))
+	}
+	if got[0]["page_start"] != "36" || got[0]["page_end"] != "40" || got[0]["source_title"] != "《基督是一切》36-40页" {
+		t.Fatalf("TaskMaps() page metadata = %#v", got[0])
+	}
+
+	readings, _, _ := SplitWeekTaskBindings(got)
+	if len(readings) != 1 {
+		t.Fatalf("SplitWeekTaskBindings() returned %d readings, want 1", len(readings))
+	}
+	if readings[0].Title != "《基督是一切》36-40页" || readings[0].PageStart != "36" || readings[0].PageEnd != "40" {
+		t.Fatalf("reading binding = %+v, want source title and page fields", readings[0])
+	}
+}
+
+func TestBuildTaskDraftsAppliesReadingPageFields(t *testing.T) {
+	t.Parallel()
+
+	drafts := BuildTaskDrafts(WeekInput{
+		BookEnabled: true,
+		Readings: []TaskBinding{{
+			Title:     "圣经救赎史剧综览-2",
+			AssetID:   9,
+			PageStart: "175",
+			PageEnd:   "179",
+		}},
+	}, "")
+	if len(drafts) != 1 {
+		t.Fatalf("BuildTaskDrafts() returned %d tasks, want 1", len(drafts))
+	}
+	if drafts[0].Title != "圣经救赎史剧综览-2 175-179页" {
+		t.Fatalf("draft title = %q, want page range preserved", drafts[0].Title)
+	}
+	title := WeekTitle(WeekInput{
+		BookEnabled: true,
+		Readings: []TaskBinding{{
+			Title:     "圣经救赎史剧综览-2",
+			AssetID:   9,
+			PageStart: "175",
+			PageEnd:   "179",
+		}},
+	})
+	if title != "圣经救赎史剧综览-2 175-179页" {
+		t.Fatalf("week title = %q, want page range preserved", title)
+	}
+}
+
 func TestInferTaskBindingTypeKeepsWeeklyAudio(t *testing.T) {
 	t.Parallel()
 

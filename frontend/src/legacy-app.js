@@ -578,7 +578,9 @@ export async function login(username, password) {
   state.user = data.user;
   setAccessToken(state.token);
   render();
-  await loadAll({ useExistingUser: true });
+  // Refresh the authoritative profile after sign-in so roles granted by the
+  // selected group are available before the learning workspace is rendered.
+  await loadAll();
   render();
 }
 

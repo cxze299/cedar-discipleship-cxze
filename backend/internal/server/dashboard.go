@@ -152,15 +152,15 @@ func (a *app) handleDashboardActiveRule(w http.ResponseWriter, r *http.Request) 
 
 var activeMemberTaskTypes = []string{
 	"daily_devotion",
+	"daily_scripture",
 	"weekly_book",
 	"weekly_video",
-	"weekly_outline",
 }
 
 func defaultActiveMemberRule() statisticsdomain.ActiveMemberRuleVO {
 	return statisticsdomain.ActiveMemberRuleVO{
 		Mode:      "any",
-		TaskTypes: []string{"weekly_outline"},
+		TaskTypes: append([]string(nil), activeMemberTaskTypes...),
 	}
 }
 
@@ -197,6 +197,9 @@ func normalizeActiveMemberRule(input statisticsdomain.ActiveMemberRuleVO) (stati
 	for _, taskType := range input.TaskTypes {
 		taskType = strings.TrimSpace(taskType)
 		if !validActiveMemberTaskType(taskType) {
+			if retiredActiveMemberTaskType(taskType) {
+				continue
+			}
 			return statisticsdomain.ActiveMemberRuleVO{}, false
 		}
 		requested[taskType] = true
@@ -220,6 +223,10 @@ func validActiveMemberTaskType(value string) bool {
 		}
 	}
 	return false
+}
+
+func retiredActiveMemberTaskType(value string) bool {
+	return value == "weekly_checkin" || value == "weekly_outline"
 }
 
 func canManageActiveMemberRule(user currentUser) bool {
