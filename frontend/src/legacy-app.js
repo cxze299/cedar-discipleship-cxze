@@ -907,41 +907,24 @@ function assetDownloadURL(asset) {
   return asset?.url || '';
 }
 
-function buildMountedSeriesLinks(title) {
+function buildMountedSeriesLinks(title, assets = state.assets) {
   const baseTitle = String(title || '').trim().replace(/^\[B311\]/i, '');
   if (!baseTitle) return [];
-  return state.assets
-    .filter((item) => ['mentor', 'book', 'passage', 'handout'].includes(classifyViewerResource(item)))
+  return assets
+    .filter((item) => ['passage', 'handout'].includes(classifyViewerResource(item)))
     .filter((item) => matchViewerResourceToTitle(item, baseTitle))
     .map((item) => viewerResourceLink(item, baseTitle))
     .filter((item) => item.url);
 }
 
-function currentWeeklyBookContentLinks() {
-  const week = state.bootstrap?.current_week || {};
-  const bookTasks = (state.bootstrap?.current_tasks || [])
-    .filter((task) => task.task_type === 'weekly_book');
-  return buildWeeklyBookEntries(bookTasks, week.title, currentWeekConfigPlan())
-    .flatMap((book) => book.contentLinks || [])
-    .filter((item) => item?.url)
-    .map((item) => ({
-      ...item,
-      category: 'book',
-      id: item.id || `weekly-book-${normalizeSearchText(item.url)}-${normalizeSearchText(item.title || item.label)}`,
-      title: item.title || item.label || '本周书籍',
-    }));
-}
-
-function buildMediaViewerSections(target) {
+export function buildMediaViewerSections(target, assets = state.assets) {
   const currentMedia = viewerResourceLink({
     title: target.title || '本周音视频',
     url: target.sourceURL || target.url,
     type: target.type || 'video',
   }, target.title || '本周音视频');
-  const includeWeeklyBooks = String(target.taskType || '').startsWith('weekly_') || Number(target.weekID || 0) > 0;
-  const weeklyBookLinks = includeWeeklyBooks ? currentWeeklyBookContentLinks() : [];
-  const mountedCompanions = buildMountedSeriesLinks(target.title);
-  const related = state.assets
+  const mountedCompanions = buildMountedSeriesLinks(target.title, assets);
+  const related = assets
     .filter((asset, index, arr) => asset?.id && arr.findIndex((other) => other?.id === asset.id) === index)
     .filter((asset) => matchViewerResourceToTitle(asset, target.title))
     .map((asset) => viewerResourceLink(asset, target.title))
@@ -954,13 +937,11 @@ function buildMediaViewerSections(target) {
     if (titleKey) return `${item?.category || 'unknown'}:${titleKey}`;
     return `${item?.category || 'unknown'}:${normalizeSearchText(item?.url || '')}`;
   };
-  const unique = [currentMedia, ...weeklyBookLinks, ...mountedCompanions, ...related].filter((item, index, arr) => {
+  const unique = [currentMedia, ...mountedCompanions, ...related].filter((item, index, arr) => {
     if (!item?.url) return false;
     return arr.findIndex((other) => dedupeKey(other) === dedupeKey(item)) === index;
   });
   const sections = [
-    { key: 'mentor', label: 'Mentor 导读', actionLabel: '查看' },
-    { key: 'book', label: resourceCategoryLabel('book'), actionLabel: '查看' },
     { key: 'passage', label: resourceCategoryLabel('passage'), actionLabel: '查看' },
     { key: 'handout', label: resourceCategoryLabel('handout'), actionLabel: '查看' },
     { key: 'video', label: resourceCategoryLabel('video'), actionLabel: '观看' },
