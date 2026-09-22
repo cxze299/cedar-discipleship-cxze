@@ -176,10 +176,12 @@ func (a *app) handleBotEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := a.db.QueryContext(r.Context(), `
 		SELECT c.id, COALESCE(NULLIF(m.member_name,''),u.display_name), c.logical_date,
-		       c.checkin_time, c.task_type, c.is_retro, c.updated_at, c.deleted_at
+		       c.checkin_time, c.task_type, COALESCE(c.detail,''), COALESCE(c.part,''),
+		       COALESCE(st.title,''), c.is_retro, c.updated_at, c.deleted_at
 		FROM checkin_records c
 		JOIN users u ON u.id=c.user_id
 		LEFT JOIN group_members m ON m.group_id=c.group_id AND m.user_id=c.user_id
+		LEFT JOIN study_tasks st ON st.id=c.task_id AND st.group_id=c.group_id
 		WHERE c.group_id=? AND (c.updated_at>? OR (c.updated_at=? AND c.id>?))
 		ORDER BY c.updated_at,c.id LIMIT 500`, group.ID, updatedAt, updatedAt, afterID)
 	if err != nil {
@@ -191,25 +193,21 @@ func (a *app) handleBotEvents(w http.ResponseWriter, r *http.Request) {
 	lastTime, lastID := updatedAt, afterID
 	for rows.Next() {
 		var id uint64
-		var name, taskType string
+		var name, taskType, detail, part, taskTitle string
 		var logicalDate, checkinTime, changedAt time.Time
 		var isRetro bool
 		var deletedAt sql.NullTime
-		if err := rows.Scan(&id, &name, &logicalDate, &checkinTime, &taskType, &isRetro, &changedAt, &deletedAt); err != nil {
+		if err := rows.Scan(&id, &name, &logicalDate, &checkinTime, &taskType, &detail, &part, &taskTitle, &isRetro, &changedAt, &deletedAt); err != nil {
 			writeError(w, http.StatusInternalServerError, "bot_events_failed")
 			return
 		}
-		label := botTaskLabel(taskType)
-		if label == "" {
-			lastTime, lastID = changedAt, id
-			continue
-		}
+		label := botTaskLabel(taskType, taskTitle, detail, part)
 		action := "checkin"
 		if deletedAt.Valid {
 			action = "cancel"
 		}
 		events = append(events, map[string]any{
-			"id": id, "action": action, "name": strings.TrimSpace(name), "type": label,
+			"id": id, "action": action, "name": strings.TrimSpace(name), "type": label, "task_type": taskType,
 			"logical_date": logicalDate.Format("2006-01-02"), "checkin_time": checkinTime.Format(time.RFC3339),
 			"changed_at": changedAt.UTC().Format(time.RFC3339Nano), "is_retro": isRetro,
 		})
@@ -239,19 +237,27 @@ func parseBotEventCursor(value string) (time.Time, uint64, error) {
 	return at.UTC(), id, err
 }
 
-func botTaskLabel(taskType string) string {
+func botTaskLabel(taskType string, values ...string) string {
 	switch taskType {
 	case "daily_devotion":
 		return "每日灵修"
+	case "daily_scripture":
+		return "每日读经"
 	case "weekly_book":
 		return "周读物"
 	case "weekly_video":
 		return "周视频"
 	case "weekly_verse":
 		return "周背经"
-	default:
-		return ""
+	case "weekly_outline":
+		return "提纲背诵"
 	}
+	for _, value := range values {
+		if label := strings.TrimSpace(value); label != "" {
+			return label
+		}
+	}
+	return taskType
 }
 
 func botTaskType(value string) string {
