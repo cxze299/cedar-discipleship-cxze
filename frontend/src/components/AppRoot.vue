@@ -9,6 +9,7 @@ import {
   Lock,
   LogOut,
   Play,
+  RefreshCw,
   Search,
   Settings,
   User,
@@ -127,6 +128,7 @@ const calendarMaxDate = (() => {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 })();
 const notificationSaving = ref(false);
+const resourceRefreshing = ref(false);
 
 const activeGroup = computed(() => groups.value.find((item) => Number(item.id) === Number(currentGroupID.value)));
 const canManageRoles = computed(() => Boolean(user.value?.is_super_admin || user.value?.roles?.some((role) => ['group_admin', 'group_leader'].includes(role))));
@@ -516,6 +518,19 @@ async function selectCalendarDate(date) {
   closeCalendar();
   await setSelectedDate(date);
 }
+
+async function refreshResources() {
+  if (resourceRefreshing.value) return;
+  resourceRefreshing.value = true;
+  try {
+    await reloadApp();
+    showToast('资源已刷新');
+  } catch (error) {
+    showToast(error?.message || '资源刷新失败');
+  } finally {
+    resourceRefreshing.value = false;
+  }
+}
 </script>
 
 <template>
@@ -658,11 +673,17 @@ async function selectCalendarDate(date) {
               <h1>小组资料库</h1>
               <p class="muted">共 {{ filteredResources.length }} 项资料，选择一份开始学习</p>
             </div>
-            <div v-if="selectedResourceKeys.size" class="inline app-resource-selection">
-              <span class="pill">已选 {{ selectedResourceKeys.size }} 项</span>
-              <button class="primary" type="button" @click="downloadSelectedResources">
-                批量下载
+            <div class="inline app-resource-page-actions">
+              <button class="quiet icon-text-button" type="button" :disabled="resourceRefreshing" @click="refreshResources">
+                <RefreshCw :size="17" :class="{ spin: resourceRefreshing }" />
+                {{ resourceRefreshing ? '刷新中' : '刷新资源' }}
               </button>
+              <div v-if="selectedResourceKeys.size" class="inline app-resource-selection">
+                <span class="pill">已选 {{ selectedResourceKeys.size }} 项</span>
+                <button class="primary" type="button" @click="downloadSelectedResources">
+                  批量下载
+                </button>
+              </div>
             </div>
           </div>
 

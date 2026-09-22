@@ -342,6 +342,16 @@ async function runLocalBackupImport() {
                       <div class="admin-field"><span class="admin-field-label">开始时间</span><DateField :model-value="weekDraft.start || ''" label="周任务开始日期" :max="weekDraft.end || ''" @update:model-value="updateWeekDraftField('start', $event)" /></div>
                       <div class="admin-field"><span class="admin-field-label">结束时间</span><DateField :model-value="weekDraft.end || ''" label="周任务结束日期" :min="weekDraft.start || ''" @update:model-value="updateWeekDraftField('end', $event)" /></div>
                     </div>
+                    <label class="admin-field">
+                      <span class="admin-field-label">自定义标题</span>
+                      <input
+                        :value="weekDraft.title || ''"
+                        maxlength="120"
+                        placeholder="留空时根据已选任务内容自动生成"
+                        @change="updateWeekDraftField('title', $event.target.value.trim())"
+                      />
+                      <small class="muted">该标题会显示在任务列表与周任务选择器中。</small>
+                    </label>
                     <div class="admin-checkbox-row">
                       <label class="admin-toggle"><input type="checkbox" :checked="enabledFlag(weekDraft.book_enabled)" @change="updateWeekDraftField('book_enabled', $event.target.checked)" /><span>书籍</span></label>
                       <label class="admin-toggle"><input type="checkbox" :checked="enabledFlag(weekDraft.video_enabled)" @change="updateWeekDraftField('video_enabled', $event.target.checked)" /><span>音视频</span></label>

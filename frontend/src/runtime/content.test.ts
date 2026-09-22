@@ -73,7 +73,7 @@ describe('content runtime helpers', () => {
     expect(weeklyTitleFromContent({
       title: '手动标题',
       readings: [{ title: '读物一' }],
-    })).toBe('读物一');
+    })).toBe('手动标题');
   });
 
   it('renders markdown while escaping raw HTML and unsafe links', () => {

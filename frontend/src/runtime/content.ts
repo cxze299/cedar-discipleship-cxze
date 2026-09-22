@@ -98,6 +98,9 @@ export function weeklyTitleFromContent(input: {
   videos?: Array<{ title?: unknown }>;
   verse_ref?: unknown;
 }): string {
+  const customTitle = String(input.title || '').trim();
+  if (customTitle) return customTitle;
+
   const parts: string[] = [];
   if (enabledFlag(input.book_enabled)) {
     for (const reading of input.readings || []) {

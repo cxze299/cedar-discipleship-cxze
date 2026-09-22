@@ -156,6 +156,12 @@
   gap: 8px;
 }
 
+.app-resource-page-actions {
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
 .app-resource-toolbar {
   flex-wrap: wrap;
   margin-bottom: 24px;
