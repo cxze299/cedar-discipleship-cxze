@@ -20,6 +20,7 @@ import {
   buildReaderPageURL,
   deepMerge,
   enabledFlag,
+  extractMarkdownSectionForDate,
   extractNumberedMarkdownSection,
   extractPdfPageRange,
   isPlainObject,
@@ -1060,7 +1061,9 @@ export async function openContentTarget(target) {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     if (type === 'markdown') {
       const text = await res.text();
-      const lines = target.section ? extractNumberedMarkdownSection(text, target.section) : text.split('\n');
+      const lines = target.date
+        ? extractMarkdownSectionForDate(text, target.date, target.section)
+        : (target.section ? extractNumberedMarkdownSection(text, target.section) : text.split('\n'));
       state.viewer = {
         type: 'markdown',
         title,
@@ -1102,7 +1105,9 @@ export async function openContentTarget(target) {
     const res = await fetch(target.url, { cache: 'no-store' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const text = await res.text();
-    const lines = target.section ? extractNumberedMarkdownSection(text, target.section) : text.split('\n');
+    const lines = target.date
+      ? extractMarkdownSectionForDate(text, target.date, target.section)
+      : (target.section ? extractNumberedMarkdownSection(text, target.section) : text.split('\n'));
     state.viewer = {
       type: 'markdown',
       title,
@@ -1594,6 +1599,7 @@ function getDailyDevotionPlan(date = state.selectedDate) {
   return {
     label: title,
     title,
+    date,
     url: path,
     type,
     section,

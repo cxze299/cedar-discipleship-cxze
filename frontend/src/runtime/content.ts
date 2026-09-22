@@ -127,6 +127,45 @@ export function extractNumberedMarkdownSection(value: unknown, number: unknown):
   return hasNumberedHeadings ? [] : lines;
 }
 
+type MarkdownDateHeading = { year?: number; month: number; day: number };
+
+function markdownDateHeading(line: string): MarkdownDateHeading | null {
+  const heading = line.trim().match(/^#{1,6}\s+(.+)$/)?.[1] || '';
+  if (!heading) return null;
+  const iso = heading.match(/(?:^|[^\d])(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})(?!\d)/);
+  if (iso) return { year: Number(iso[1]), month: Number(iso[2]), day: Number(iso[3]) };
+  const chinese = heading.match(/(?:^|[^\d])(\d{1,2})\s*月\s*(\d{1,2})\s*(?:日|号)(?!\d)/);
+  if (chinese) return { month: Number(chinese[1]), day: Number(chinese[2]) };
+  const slash = heading.match(/(?:^|[^\d])(\d{1,2})\s*\/\s*(\d{1,2})(?!\d)/);
+  if (slash) return { month: Number(slash[1]), day: Number(slash[2]) };
+  return null;
+}
+
+function sameMarkdownDate(left: MarkdownDateHeading, right: MarkdownDateHeading): boolean {
+  return left.month === right.month && left.day === right.day
+    && (left.year === undefined || right.year === undefined || left.year === right.year);
+}
+
+/** Match a date heading first, then fall back to the configured numbered section. */
+export function extractMarkdownSectionForDate(value: unknown, date: unknown, number: unknown): string[] {
+  const lines = String(value || '').replace(/\r/g, '').split('\n');
+  const targetMatch = String(date || '').match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (!targetMatch) return extractNumberedMarkdownSection(lines.join('\n'), number);
+  const target: MarkdownDateHeading = {
+    year: Number(targetMatch[1]),
+    month: Number(targetMatch[2]),
+    day: Number(targetMatch[3]),
+  };
+  const dateHeadingIndexes = lines
+    .map((line, index) => ({ index, date: markdownDateHeading(line) }))
+    .filter((item): item is { index: number; date: MarkdownDateHeading } => item.date !== null);
+  const matchIndex = dateHeadingIndexes.findIndex((item) => sameMarkdownDate(item.date, target));
+  if (matchIndex < 0) return extractNumberedMarkdownSection(lines.join('\n'), number);
+  const start = dateHeadingIndexes[matchIndex].index;
+  const end = dateHeadingIndexes[matchIndex + 1]?.index ?? lines.length;
+  return lines.slice(start, end);
+}
+
 export function weeklyTitleFromContent(input: {
   title?: unknown;
   book_enabled?: unknown;

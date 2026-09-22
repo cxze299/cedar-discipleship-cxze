@@ -5,6 +5,7 @@ import {
   classifyAttachment,
   deepMerge,
   enabledFlag,
+  extractMarkdownSectionForDate,
   extractNumberedMarkdownSection,
   extractPdfPageRange,
   markdownToSafeHTML,
@@ -96,6 +97,14 @@ describe('content runtime helpers', () => {
     expect(extractNumberedMarkdownSection('# 总标题\n没有分篇的内容', 8))
       .toEqual(['# 总标题', '没有分篇的内容']);
     expect(extractNumberedMarkdownSection('## 1\n内容一', 2)).toEqual([]);
+  });
+
+  it('matches date headings before using numbered devotion sections', () => {
+    const markdown = '# 9月21日\n昨天\n# 2026-09-22\n今天\n# 9月23号\n明天';
+    expect(extractMarkdownSectionForDate(markdown, '2026-09-22', 1))
+      .toEqual(['# 2026-09-22', '今天']);
+    expect(extractMarkdownSectionForDate(markdown, '2026-09-23', 1))
+      .toEqual(['# 9月23号', '明天']);
   });
 
   it('recognizes same-origin protected API URLs', () => {
