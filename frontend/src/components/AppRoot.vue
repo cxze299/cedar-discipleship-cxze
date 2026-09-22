@@ -5,6 +5,14 @@ import { ChevronDown, ChevronRight, Download, LogOut, Pencil, Trash2, UserPlus, 
 import { useAppStateStore } from '../stores/appState';
 import { useDownloadManagerStore } from '../stores/downloadManager';
 import { inferDailyDevotionContentType } from '../runtime/content';
+import {
+  dailyDevotionPlanForDate,
+  dailyDevotionPlanMode,
+  dailyDevotionPlans,
+  removeDailyDevotionPlan,
+  upsertDailyDevotionPlan,
+} from '../runtime/dailySchedule';
+import { todayString } from '../runtime/date';
 import { downloadErrorMessage } from '../runtime/downloads';
 import { filterSharedResources } from '../runtime/resourceGovernance';
 import {
@@ -109,6 +117,7 @@ const resourceTypeFilter = ref('');
 const resourceDateFilter = ref('');
 const resourceStatusFilter = ref('all');
 const notificationSaving = ref(false);
+const dailyPlanDate = ref(todayString());
 
 const activeGroup = computed(() => groups.value.find((item) => Number(item.id) === Number(currentGroupID.value)));
 const canManageRoles = computed(() => Boolean(user.value?.is_super_admin || user.value?.roles?.some((role) => ['group_admin', 'group_leader'].includes(role))));
@@ -117,6 +126,24 @@ const settings = computed(() => learningConfig.value || {});
 const daily = computed(() => settings.value.task_sections?.daily || {});
 const devotion = computed(() => daily.value.devotion || {});
 const scripture = computed(() => daily.value.scripture || {});
+const devotionPlanMode = computed(() => dailyDevotionPlanMode(devotion.value));
+const configuredDailyPlans = computed(() => dailyDevotionPlans(devotion.value));
+const selectedDailyPlan = computed(() => (
+  dailyDevotionPlanForDate(
+    { ...devotion.value, plan_mode: 'custom' },
+    dailyPlanDate.value,
+  ) || {
+    date: dailyPlanDate.value,
+    title: '',
+    path: '',
+    type: '',
+    page_start: '',
+    page_end: '',
+  }
+));
+const selectedDailyPlanExists = computed(() => configuredDailyPlans.value.some(
+  (plan) => plan.date === dailyPlanDate.value,
+));
 const checkinNotifications = computed(() => settings.value.checkin_notifications || {});
 const bibleBooks = [
   ['创世记', 50], ['出埃及记', 40], ['利未记', 27], ['民数记', 36], ['申命记', 34],
@@ -149,6 +176,12 @@ const devotionAsset = computed(() => resourceForURL(devotionPath.value));
 const devotionContentType = computed(() => inferDailyDevotionContentType(
   { ...devotion.value, path: devotionPath.value },
   devotionAsset.value,
+));
+const selectedDailyPlanAsset = computed(() => resourceForURL(selectedDailyPlan.value.path));
+const selectedDailyPlanContentType = computed(() => (
+  selectedDailyPlan.value.path
+    ? inferDailyDevotionContentType(selectedDailyPlan.value, selectedDailyPlanAsset.value)
+    : selectedDailyPlan.value.type
 ));
 const conflictAlreadyInGroup = computed(() => members.value.some(
   (member) => Number(member.user_id) === Number(memberConflict.value?.id),
@@ -374,6 +407,54 @@ function updateLearning(path, value) {
   updateLearningValue(path, value);
 }
 
+function setDevotionPlanMode(mode) {
+  updateLearning(['task_sections', 'daily', 'devotion', 'plan_mode'], mode);
+}
+
+function selectDailyPlanDate(value) {
+  const date = String(value || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(date)) dailyPlanDate.value = date;
+}
+
+function updateDailyPlan(patch) {
+  if (!dailyPlanDate.value) return;
+  const next = upsertDailyDevotionPlan(devotion.value, {
+    ...selectedDailyPlan.value,
+    ...patch,
+    date: dailyPlanDate.value,
+  });
+  updateLearning(['task_sections', 'daily', 'devotion'], {
+    ...next,
+    plan_mode: 'custom',
+  });
+}
+
+function updateDailyPlanFile(value) {
+  const path = String(value || '').trim();
+  const selected = resourceForURL(path);
+  updateDailyPlan({
+    path,
+    type: path ? inferDailyDevotionContentType({ ...selectedDailyPlan.value, path }, selected) : '',
+    page_start: '',
+    page_end: '',
+  });
+}
+
+async function saveDailyPlan() {
+  if (!selectedDailyPlanExists.value) updateDailyPlan({});
+  await saveLearningConfig('当天灵修计划已保存');
+}
+
+async function deleteDailyPlan() {
+  if (!selectedDailyPlanExists.value) return;
+  if (!window.confirm(`确认删除 ${dailyPlanDate.value} 的灵修计划？`)) return;
+  updateLearning(['task_sections', 'daily', 'devotion'], {
+    ...removeDailyDevotionPlan(devotion.value, dailyPlanDate.value),
+    plan_mode: 'custom',
+  });
+  await saveLearningConfig('当天灵修计划已删除');
+}
+
 async function setCheckinNotification(key, enabled) {
   const previous = checkinNotifications.value[key] !== false;
   notificationSaving.value = true;
@@ -424,7 +505,7 @@ function resourceForURL(value) {
   )) || null;
 }
 
-function devotionOptionsWithCurrent(currentValue) {
+function devotionOptionsWithCurrent(currentValue, config = devotion.value) {
   const current = String(currentValue || '').trim();
   if (!current || devotionFileOptions.value.some((item) => item.url === current)) {
     return devotionFileOptions.value;
@@ -432,7 +513,7 @@ function devotionOptionsWithCurrent(currentValue) {
   return [{
     title: `${current}（当前配置）`,
     url: current,
-    type: inferDailyDevotionContentType({ ...devotion.value, path: current }),
+    type: inferDailyDevotionContentType({ ...config, path: current }),
   }, ...devotionFileOptions.value];
 }
 
@@ -1002,23 +1083,79 @@ async function selectCalendarDate(day) {
                     <div class="form-stack admin-form-grid">
                       <label class="admin-toggle"><input type="checkbox" :checked="daily.checkin_mode === 'separate'" @change="updateLearning(['task_sections','daily','checkin_mode'], $event.target.checked ? 'separate' : 'combined')" /><span>灵修与读经分别签到</span></label>
                       <label class="admin-toggle"><input type="checkbox" :checked="devotion.enabled !== false" @change="updateLearning(['task_sections','daily','devotion','enabled'], $event.target.checked)" /><span>显示灵修入口</span></label>
-                      <label class="admin-field">
-                        <span class="admin-field-label">灵修文件</span>
-                        <select :value="devotionPath" @change="updateDevotionFile($event.target.value)">
-                          <option value="">未绑定资源</option>
-                          <option v-for="option in devotionOptionsWithCurrent(devotionPath)" :key="option.url" :value="option.url">{{ devotionFileOptionText(option) }}</option>
-                        </select>
-                      </label>
-                      <template v-if="devotionContentType === 'markdown'">
-                        <label class="admin-field"><span class="admin-field-label">文章定位</span><select :value="devotion.mode || 'auto'" @change="updateLearning(['task_sections','daily','devotion','mode'], $event.target.value)"><option value="auto">自动识别</option><option value="numbered">按篇号</option><option value="date">按日期标题</option></select></label>
-                        <label class="admin-field"><span class="admin-field-label">第 1 篇对应日期</span><input type="date" :value="devotion.numbered_start_date || ''" @change="updateLearning(['task_sections','daily','devotion','numbered_start_date'], $event.target.value)" /></label>
-                        <label class="admin-field"><span class="admin-field-label">起始篇号</span><input type="number" min="1" :value="devotion.numbered_start || 1" @change="updateLearning(['task_sections','daily','devotion','numbered_start'], Number($event.target.value || 1))" /></label>
+                      <div class="admin-field">
+                        <span class="admin-field-label">灵修计划方式</span>
+                        <div class="segmented-control daily-plan-mode" role="group" aria-label="灵修计划方式">
+                          <button :class="{ active: devotionPlanMode === 'automatic' }" type="button" @click="setDevotionPlanMode('automatic')">连续计划</button>
+                          <button :class="{ active: devotionPlanMode === 'custom' }" type="button" @click="setDevotionPlanMode('custom')">按日自定义</button>
+                        </div>
+                      </div>
+                      <template v-if="devotionPlanMode === 'automatic'">
+                        <label class="admin-field">
+                          <span class="admin-field-label">灵修文件</span>
+                          <select :value="devotionPath" @change="updateDevotionFile($event.target.value)">
+                            <option value="">未绑定资源</option>
+                            <option v-for="option in devotionOptionsWithCurrent(devotionPath)" :key="option.url" :value="option.url">{{ devotionFileOptionText(option) }}</option>
+                          </select>
+                        </label>
+                        <template v-if="devotionContentType === 'markdown'">
+                          <label class="admin-field"><span class="admin-field-label">文章定位</span><select :value="devotion.mode || 'auto'" @change="updateLearning(['task_sections','daily','devotion','mode'], $event.target.value)"><option value="auto">自动识别</option><option value="numbered">按篇号</option><option value="date">按日期标题</option></select></label>
+                          <label class="admin-field"><span class="admin-field-label">第 1 篇对应日期</span><input type="date" :value="devotion.numbered_start_date || ''" @change="updateLearning(['task_sections','daily','devotion','numbered_start_date'], $event.target.value)" /></label>
+                          <label class="admin-field"><span class="admin-field-label">起始篇号</span><input type="number" min="1" :value="devotion.numbered_start || 1" @change="updateLearning(['task_sections','daily','devotion','numbered_start'], Number($event.target.value || 1))" /></label>
+                        </template>
+                        <template v-else-if="devotionContentType === 'pdf'">
+                          <label class="admin-field"><span class="admin-field-label">PDF 起始日期</span><input type="date" :value="devotion.numbered_start_date || ''" @change="updateLearning(['task_sections','daily','devotion','numbered_start_date'], $event.target.value)" /></label>
+                          <label class="admin-field"><span class="admin-field-label">PDF 起始页码</span><input type="number" min="1" :value="devotion.start_page || 1" @change="updateLearning(['task_sections','daily','devotion','start_page'], Math.max(1, Number($event.target.value || 1)))" /></label>
+                        </template>
+                        <div class="form-actions"><button :class="canEditLearning ? '' : 'secondary'" :disabled="!canEditLearning" type="button" @click="saveLearningConfig">保存学习配置</button></div>
                       </template>
-                      <template v-else-if="devotionContentType === 'pdf'">
-                        <label class="admin-field"><span class="admin-field-label">PDF 起始日期</span><input type="date" :value="devotion.numbered_start_date || ''" @change="updateLearning(['task_sections','daily','devotion','numbered_start_date'], $event.target.value)" /></label>
-                        <label class="admin-field"><span class="admin-field-label">PDF 起始页码</span><input type="number" min="1" :value="devotion.start_page || 1" @change="updateLearning(['task_sections','daily','devotion','start_page'], Math.max(1, Number($event.target.value || 1)))" /></label>
-                      </template>
-                      <div class="form-actions"><button :class="canEditLearning ? '' : 'secondary'" :disabled="!canEditLearning" type="button" @click="saveLearningConfig">保存学习配置</button></div>
+                      <div v-else class="daily-plan-editor">
+                        <label class="admin-field">
+                          <span class="admin-field-label">计划日期</span>
+                          <input type="date" :value="dailyPlanDate" @change="selectDailyPlanDate($event.target.value)" />
+                        </label>
+                        <label class="admin-field">
+                          <span class="admin-field-label">当天标题</span>
+                          <input :value="selectedDailyPlan.title" placeholder="每日灵修" @change="updateDailyPlan({ title: $event.target.value })" />
+                        </label>
+                        <label class="admin-field">
+                          <span class="admin-field-label">灵修文件</span>
+                          <select :value="selectedDailyPlan.path" @change="updateDailyPlanFile($event.target.value)">
+                            <option value="">未绑定资源</option>
+                            <option v-for="option in devotionOptionsWithCurrent(selectedDailyPlan.path, selectedDailyPlan)" :key="option.url" :value="option.url">{{ devotionFileOptionText(option) }}</option>
+                          </select>
+                        </label>
+                        <div v-if="selectedDailyPlanContentType === 'pdf'" class="admin-page-range">
+                          <label class="admin-compact-field">
+                            <span>开始页</span>
+                            <input type="number" min="1" inputmode="numeric" :value="selectedDailyPlan.page_start" @change="updateDailyPlan({ page_start: $event.target.value })" />
+                          </label>
+                          <label class="admin-compact-field">
+                            <span>结束页</span>
+                            <input type="number" min="1" inputmode="numeric" :value="selectedDailyPlan.page_end" @change="updateDailyPlan({ page_end: $event.target.value })" />
+                          </label>
+                        </div>
+                        <div class="form-actions">
+                          <button :disabled="!canEditLearning" type="button" @click="saveDailyPlan">保存当天计划</button>
+                          <button class="danger" :disabled="!canEditLearning || !selectedDailyPlanExists" type="button" @click="deleteDailyPlan">删除当天计划</button>
+                        </div>
+                        <div v-if="configuredDailyPlans.length" class="daily-plan-list">
+                          <span class="admin-field-label">已配置日期</span>
+                          <button
+                            v-for="plan in configuredDailyPlans"
+                            :key="plan.date"
+                            :class="{ active: plan.date === dailyPlanDate }"
+                            type="button"
+                            @click="selectDailyPlanDate(plan.date)"
+                          >
+                            <span>
+                              <b>{{ plan.date }}</b>
+                              <small>{{ plan.title || '每日灵修' }}</small>
+                            </span>
+                            <ChevronRight :size="16" />
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   </div>
                   <div class="card">

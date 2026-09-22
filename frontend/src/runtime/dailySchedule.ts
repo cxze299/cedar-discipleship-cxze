@@ -4,6 +4,90 @@ export type DailyScheduleConfig = Record<string, unknown> & {
   schedule_history?: unknown;
 };
 
+export type DailyDevotionPlan = {
+  date: string;
+  title: string;
+  path: string;
+  type: string;
+  page_start: string;
+  page_end: string;
+};
+
+export function dailyDevotionPlanMode(config: DailyScheduleConfig): 'automatic' | 'custom' {
+  return String(config?.plan_mode || '').trim().toLowerCase() === 'custom' ? 'custom' : 'automatic';
+}
+
+export function dailyDevotionPlans(config: DailyScheduleConfig): DailyDevotionPlan[] {
+  const source = Array.isArray(config?.plans) ? config.plans : [];
+  const plans = new Map<string, DailyDevotionPlan>();
+  for (const item of source) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const raw = item as Record<string, unknown>;
+    const date = String(raw.date || '').trim();
+    if (!validScheduleDate(date)) continue;
+    const pageStart = positiveIntegerString(raw.page_start);
+    const requestedEnd = positiveIntegerString(raw.page_end);
+    const pageEnd = pageStart
+      ? String(Math.max(Number(pageStart), Number(requestedEnd || pageStart)))
+      : '';
+    const type = String(raw.type || '').trim().toLowerCase();
+    plans.set(date, {
+      date,
+      title: String(raw.title || '').trim(),
+      path: String(raw.path || '').trim(),
+      type: type === 'pdf' || type === 'markdown' ? type : '',
+      page_start: pageStart,
+      page_end: pageEnd,
+    });
+  }
+  return [...plans.values()].sort((left, right) => left.date.localeCompare(right.date));
+}
+
+export function dailyDevotionPlanForDate(
+  config: DailyScheduleConfig,
+  date: string,
+): DailyDevotionPlan | null {
+  if (dailyDevotionPlanMode(config) !== 'custom') return null;
+  return dailyDevotionPlans(config).find((plan) => plan.date === date) || null;
+}
+
+export function upsertDailyDevotionPlan(
+  config: DailyScheduleConfig,
+  plan: Partial<DailyDevotionPlan> & { date: string },
+): DailyScheduleConfig & { plans: DailyDevotionPlan[] } {
+  const plans = dailyDevotionPlans({
+    ...config,
+    plans: [...dailyDevotionPlans(config), plan],
+  });
+  return { ...config, plans };
+}
+
+export function removeDailyDevotionPlan(
+  config: DailyScheduleConfig,
+  date: string,
+): DailyScheduleConfig & { plans: DailyDevotionPlan[] } {
+  return {
+    ...config,
+    plans: dailyDevotionPlans(config).filter((plan) => plan.date !== date),
+  };
+}
+
+function validScheduleDate(value: string): boolean {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return false;
+  const parsed = new Date(`${value}T12:00:00`);
+  return !Number.isNaN(parsed.getTime())
+    && parsed.getFullYear() === Number(match[1])
+    && parsed.getMonth() + 1 === Number(match[2])
+    && parsed.getDate() === Number(match[3]);
+}
+
+function positiveIntegerString(value: unknown): string {
+  const number = Number(String(value ?? '').trim());
+  if (!Number.isFinite(number) || number < 1) return '';
+  return String(Math.floor(number));
+}
+
 function scheduleStart(config: DailyScheduleConfig, dateKeys: string[]): string {
   for (const key of dateKeys) {
     const value = String(config?.[key] || '').trim();

@@ -411,7 +411,7 @@ func TaskMaps(tasks []Task) []map[string]any {
 
 func buildTodayTasks(date string, week map[string]any, rawTasks []map[string]any, settings map[string]any, records []TodayRecord) []TodayTaskVO {
 	weekID := mapUint64(week, "id")
-	tasks := dailyTasks(settings)
+	tasks := dailyTasks(date, settings)
 	aggregate := hasAggregateWeeklyTask(rawTasks)
 
 	if week != nil {

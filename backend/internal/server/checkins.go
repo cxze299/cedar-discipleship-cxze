@@ -59,7 +59,7 @@ func (a *app) handleCreateCheckin(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "checkin_save_failed")
 			return
 		}
-		if !learningdomain.DailyTaskTypeEnabled(settings, req.TaskType) {
+		if !learningdomain.DailyTaskTypeEnabledOnDate(settings, req.TaskType, req.LogicalDate) {
 			writeError(w, http.StatusBadRequest, "daily_task_disabled")
 			return
 		}

@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
-import { numberedSectionForDate, pdfPageForDate, resolveEffectiveSchedule, scriptureChaptersForDate } from './dailySchedule';
+import {
+  dailyDevotionPlanForDate,
+  dailyDevotionPlanMode,
+  dailyDevotionPlans,
+  numberedSectionForDate,
+  pdfPageForDate,
+  removeDailyDevotionPlan,
+  resolveEffectiveSchedule,
+  scriptureChaptersForDate,
+  upsertDailyDevotionPlan,
+} from './dailySchedule';
 
 describe('resolveEffectiveSchedule', () => {
   const devotion = {
@@ -108,5 +118,59 @@ describe('resolveEffectiveSchedule', () => {
     expect(scriptureChaptersForDate(scripture, '2026-09-24')).toEqual([
       { bookName: '帖撒罗尼迦前书', bookId: '52', chapter: 1 },
     ]);
+  });
+});
+
+describe('daily devotion custom plans', () => {
+  it('keeps automatic mode as the compatibility default', () => {
+    expect(dailyDevotionPlanMode({})).toBe('automatic');
+    expect(dailyDevotionPlanMode({ plan_mode: 'automatic' })).toBe('automatic');
+    expect(dailyDevotionPlanMode({ plan_mode: 'custom' })).toBe('custom');
+  });
+
+  it('normalizes plans by date and keeps the last duplicate', () => {
+    const plans = dailyDevotionPlans({
+      plans: [
+        { date: '2026-09-23', title: '原计划', page_start: 8, page_end: 6 },
+        { date: 'not-a-date', title: '无效' },
+        { date: '2026-09-22', title: '第一天' },
+        { date: '2026-09-23', title: '更新后', page_start: 12, page_end: 14 },
+      ],
+    });
+
+    expect(plans).toEqual([
+      { date: '2026-09-22', title: '第一天', path: '', type: '', page_start: '', page_end: '' },
+      { date: '2026-09-23', title: '更新后', path: '', type: '', page_start: '12', page_end: '14' },
+    ]);
+  });
+
+  it('resolves, upserts, and removes only the selected date', () => {
+    const config = {
+      plan_mode: 'custom',
+      plans: [{ date: '2026-09-22', title: '第一天' }],
+    };
+
+    expect(dailyDevotionPlanForDate(config, '2026-09-22')?.title).toBe('第一天');
+    expect(dailyDevotionPlanForDate(config, '2026-09-23')).toBeNull();
+    expect(dailyDevotionPlanForDate({ ...config, plan_mode: 'automatic' }, '2026-09-22')).toBeNull();
+
+    const updated = upsertDailyDevotionPlan(config, {
+      date: '2026-09-23',
+      title: '第二天',
+      path: '/api/assets/9/download',
+      type: 'pdf',
+      page_start: '20',
+      page_end: '22',
+    });
+    expect(updated.plans.map((plan) => plan.date)).toEqual(['2026-09-22', '2026-09-23']);
+    expect(dailyDevotionPlanForDate(updated, '2026-09-23')).toMatchObject({
+      title: '第二天',
+      page_start: '20',
+      page_end: '22',
+    });
+
+    const removed = removeDailyDevotionPlan(updated, '2026-09-22');
+    expect(removed.plans).toHaveLength(1);
+    expect(removed.plans[0].date).toBe('2026-09-23');
   });
 });

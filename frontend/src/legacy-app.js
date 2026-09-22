@@ -53,6 +53,8 @@ import {
   buildTaskCompletionMatrix,
 } from './runtime/checkins';
 import {
+  dailyDevotionPlanForDate,
+  dailyDevotionPlanMode,
   numberedSectionForDate,
   pdfPageForDate,
   resolveEffectiveSchedule,
@@ -1340,9 +1342,10 @@ function currentTaskOptions() {
   const videoLinks = currentWeeklyVideoLinks(videoTasks, configPlan);
   const tasks = [];
   const separateDaily = taskSectionsConfig().daily?.checkin_mode === 'separate';
+  const customDevotion = dailyDevotionPlanMode(taskSectionsConfig().daily?.devotion || {}) === 'custom';
   if (separateDaily) {
-    if (taskSectionsConfig().daily?.devotion?.enabled !== false) {
-      const devotionTitle = taskSectionsConfig().daily?.devotion?.title || '每日灵修';
+    if (taskSectionsConfig().daily?.devotion?.enabled !== false && (!customDevotion || devotionLink)) {
+      const devotionTitle = devotionLink?.title || taskSectionsConfig().daily?.devotion?.title || '每日灵修';
       tasks.push({
         type: 'daily_devotion',
         title: devotionTitle,
@@ -1351,7 +1354,7 @@ function currentTaskOptions() {
         detail: devotionTitle,
         summary: devotionLink?.label || devotionTitle,
         contentURL: devotionLink?.url || '',
-        contentLinks: devotionLink ? [devotionLink] : [],
+        contentLinks: devotionLink?.url || devotionLink?.content ? [devotionLink] : [],
       });
     }
     if (taskSectionsConfig().daily?.scripture?.enabled !== false) {
@@ -1367,13 +1370,14 @@ function currentTaskOptions() {
         contentLinks: scriptureLinks,
       });
     }
-  } else if (dailyLinks.length) {
+  } else if (dailyLinks.length || (customDevotion && devotionLink)) {
+    const combinedDailyTitle = customDevotion && devotionLink?.title ? devotionLink.title : dailyLabel;
     tasks.push({
       type: 'daily_devotion',
-      title: dailyLabel,
+      title: combinedDailyTitle,
       icon: '灵修',
       part: '',
-      detail: dailyLabel,
+      detail: combinedDailyTitle,
       summary: dailyLinks.map((item) => item.label).join(' / ') || '完成今日灵修打卡',
       contentURL: dailyLinks[0]?.url || findAssetURL('每日') || '',
       contentLinks: dailyLinks,
@@ -1777,8 +1781,26 @@ function configuredAssetForURL(value) {
 
 function getDailyDevotionPlan(date = state.selectedDate) {
   const daily = taskSectionsConfig().daily || {};
+  const devotion = daily.devotion || {};
+  if (devotion.enabled === false) return null;
+  const customPlan = dailyDevotionPlanForDate(devotion, date);
+  if (dailyDevotionPlanMode(devotion) === 'custom') {
+    if (!customPlan) return null;
+    const title = customPlan.title || toChineseMonthDay(date);
+    const path = customPlan.path || '';
+    const type = path
+      ? inferDailyDevotionContentType(customPlan, configuredAssetForURL(path))
+      : customPlan.type;
+    return {
+      label: title,
+      title,
+      url: path,
+      type,
+      ...(type === 'pdf' ? { pageRange: resolvePdfPageRange(customPlan) } : {}),
+    };
+  }
+
   const cfg = dailyDevotionConfig(date);
-  if (cfg.enabled === false) return null;
   const title = toChineseMonthDay(date);
   const path = cfg.path || daily.path || '';
   const type = inferDailyDevotionContentType({ ...cfg, path }, configuredAssetForURL(path));
