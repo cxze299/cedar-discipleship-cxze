@@ -168,14 +168,14 @@ function markdownDateHeading(line: string): MarkdownDateHeading | null {
   const iso = heading.match(/(?:^|[^\d])(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})(?!\d)/);
   if (iso) return { year: Number(iso[1]), month: Number(iso[2]), day: Number(iso[3]) };
   const numberChars = `0-9${chineseDateNumberChars}`;
-  const chinese = heading.match(new RegExp(`(?:^|[^${numberChars}])([${numberChars}]+)\\s*年\\s*([${numberChars}]+)\\s*月\\s*([${numberChars}]+)\\s*(?:日|号)(?![${numberChars}])`));
+  const chinese = heading.match(new RegExp(`(?:^|[^${numberChars}])([${numberChars}]+)\\s*年\\s*([${numberChars}]+)\\s*月\\s*([${numberChars}]+)\\s*(?:日|号)?(?![${numberChars}])`));
   if (chinese) {
     const year = parseDateNumber(chinese[1]);
     const month = parseDateNumber(chinese[2]);
     const day = parseDateNumber(chinese[3]);
     if (Number.isFinite(year) && Number.isFinite(month) && Number.isFinite(day)) return { year, month, day };
   }
-  const monthDay = heading.match(new RegExp(`(?:^|[^${numberChars}])([${numberChars}]+)\\s*月\\s*([${numberChars}]+)\\s*(?:日|号)(?![${numberChars}])`));
+  const monthDay = heading.match(new RegExp(`(?:^|[^${numberChars}])([${numberChars}]+)\\s*月\\s*([${numberChars}]+)\\s*(?:日|号)?(?![${numberChars}])`));
   if (monthDay) {
     const month = parseDateNumber(monthDay[1]);
     const day = parseDateNumber(monthDay[2]);

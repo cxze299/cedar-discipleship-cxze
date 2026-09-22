@@ -109,6 +109,8 @@ describe('content runtime helpers', () => {
     expect(extractMarkdownSectionForDate(mixed, '2026-09-22', 1)).toEqual(['# 九月22日', '甲']);
     expect(extractMarkdownSectionForDate(mixed, '2026-09-23', 1)).toEqual(['# 9月二十三号', '乙']);
     expect(extractMarkdownSectionForDate(mixed, '2026-09-24', 1)).toEqual(['# 二〇二六年九月二十四日', '丙']);
+    const withoutSuffix = '# 九月二十二\n甲';
+    expect(extractMarkdownSectionForDate(withoutSuffix, '2026-09-22', 1)).toEqual(['# 九月二十二', '甲']);
   });
 
   it('recognizes same-origin protected API URLs', () => {
