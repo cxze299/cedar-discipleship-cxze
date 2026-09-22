@@ -129,13 +129,58 @@ export function extractNumberedMarkdownSection(value: unknown, number: unknown):
 
 type MarkdownDateHeading = { year?: number; month: number; day: number };
 
+const chineseDateNumberChars = '〇零一二三四五六七八九十百千万廿卅';
+
+function parseDateNumber(value: string): number {
+  const source = String(value || '').trim();
+  if (/^\d+$/.test(source)) return Number(source);
+  const digits: Record<string, number> = {
+    '〇': 0, '零': 0, '一': 1, '二': 2, '三': 3, '四': 4,
+    '五': 5, '六': 6, '七': 7, '八': 8, '九': 9,
+  };
+  if ([...source].every((char) => digits[char] !== undefined)) {
+    return Number([...source].map((char) => digits[char]).join(''));
+  }
+  let total = 0;
+  let current = 0;
+  const units: Record<string, number> = { '十': 10, '百': 100, '千': 1000, '万': 10000 };
+  for (const char of source) {
+    if (digits[char] !== undefined) {
+      current = current * 10 + digits[char];
+      continue;
+    }
+    if (char === '廿' || char === '卅') {
+      total += char === '廿' ? 20 : 30;
+      current = 0;
+      continue;
+    }
+    const unit = units[char];
+    if (!unit) return Number.NaN;
+    total += (current || 1) * unit;
+    current = 0;
+  }
+  return total + current;
+}
+
 function markdownDateHeading(line: string): MarkdownDateHeading | null {
   const heading = line.trim().match(/^#{1,6}\s+(.+)$/)?.[1] || '';
   if (!heading) return null;
   const iso = heading.match(/(?:^|[^\d])(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})(?!\d)/);
   if (iso) return { year: Number(iso[1]), month: Number(iso[2]), day: Number(iso[3]) };
-  const chinese = heading.match(/(?:^|[^\d])(\d{1,2})\s*月\s*(\d{1,2})\s*(?:日|号)(?!\d)/);
-  if (chinese) return { month: Number(chinese[1]), day: Number(chinese[2]) };
+  const numberChars = `0-9${chineseDateNumberChars}`;
+  const chinese = heading.match(new RegExp(`(?:^|[^${numberChars}])([${numberChars}]+)\\s*年\\s*([${numberChars}]+)\\s*月\\s*([${numberChars}]+)\\s*(?:日|号)(?![${numberChars}])`));
+  if (chinese) {
+    const year = parseDateNumber(chinese[1]);
+    const month = parseDateNumber(chinese[2]);
+    const day = parseDateNumber(chinese[3]);
+    if (Number.isFinite(year) && Number.isFinite(month) && Number.isFinite(day)) return { year, month, day };
+  }
+  const monthDay = heading.match(new RegExp(`(?:^|[^${numberChars}])([${numberChars}]+)\\s*月\\s*([${numberChars}]+)\\s*(?:日|号)(?![${numberChars}])`));
+  if (monthDay) {
+    const month = parseDateNumber(monthDay[1]);
+    const day = parseDateNumber(monthDay[2]);
+    if (Number.isFinite(month) && Number.isFinite(day)) return { month, day };
+  }
   const slash = heading.match(/(?:^|[^\d])(\d{1,2})\s*\/\s*(\d{1,2})(?!\d)/);
   if (slash) return { month: Number(slash[1]), day: Number(slash[2]) };
   return null;
