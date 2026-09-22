@@ -90,6 +90,14 @@
   gap: 6px;
 }
 
+.app-content-toolbar {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: flex-end;
+  margin-bottom: 20px;
+}
+
 .group-switcher__default {
   height: 32px;
   padding: 0 8px;

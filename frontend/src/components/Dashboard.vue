@@ -27,7 +27,6 @@ const {
   selectedDate,
   maxDate,
   isToday,
-  groupName,
   overallPercent,
   doneSlots,
   totalSlots,
@@ -273,7 +272,6 @@ async function exportRankingChart() {
       <div class="pagehead spread page-header">
         <div>
           <h1>小组统计</h1>
-          <p class="muted">{{ groupName }} · 所选日期的打卡与统计情况</p>
         </div>
         <DateNavigator
           :label="selectedDate"

@@ -34,9 +34,9 @@ import BotManagementAdmin from './BotManagementAdmin.vue';
 import MinistryCatalogAdmin from './MinistryCatalogAdmin.vue';
 import AdminConsole from './AdminConsole.vue';
 import AppMobileNav from './ui/AppMobileNav.vue';
-import AppPageHeader from './ui/AppPageHeader.vue';
 import AppSidebar from './ui/AppSidebar.vue';
 import DateCalendarDialog from './ui/DateCalendarDialog.vue';
+import GroupSwitcher from './ui/GroupSwitcher.vue';
 import StackedWheel from './ui/StackedWheel.vue';
 import ResourceGovernance from './ResourceGovernance.vue';
 import './app-root.css';
@@ -86,7 +86,6 @@ const {
   user,
   tab,
   adminSection,
-  pageTitle,
   navItems,
   groups,
   currentGroupID,
@@ -599,19 +598,19 @@ async function selectCalendarDate(date) {
 
     <!-- Main View Area -->
     <div class="main">
-      <AppPageHeader
-        :page-title="pageTitle"
-        :groups="groups"
-        :current-group-i-d="currentGroupID"
-        :default-group-i-d="defaultGroupID"
-        :active-group="activeGroup"
-        @switch-group="switchGroup"
-        @set-default="setDefaultGroupAction"
-        @logout="logout"
-      />
-
       <!-- Content Area -->
       <main class="content">
+        <div v-if="!showGroupPicker && (groups.length || activeGroup)" class="app-content-toolbar">
+          <GroupSwitcher
+            :groups="groups"
+            :current-group-i-d="currentGroupID"
+            :default-group-i-d="defaultGroupID"
+            :active-group="activeGroup"
+            @switch="switchGroup"
+            @set-default="setDefaultGroupAction"
+          />
+        </div>
+
         <!-- Group Picker Modal/Screen -->
         <section v-if="showGroupPicker" class="panel app-group-picker">
           <div class="app-group-picker__head">

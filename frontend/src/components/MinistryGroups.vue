@@ -835,7 +835,6 @@ function localDateTimeValue() {
     <div class="ministry-page">
       <header class="ministry-header">
         <div>
-          <div class="eyebrow">专项协作</div>
           <h2>小组与服事进展</h2>
         </div>
         <div class="ministry-header-actions">
