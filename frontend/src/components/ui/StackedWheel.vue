@@ -14,9 +14,12 @@ const position = ref(0);
 const dragging = ref(false);
 let frameID = 0;
 let snapTimer = 0;
-let lastY = 0;
+let startX = 0;
+let startY = 0;
+let lastX = 0;
 let lastTime = 0;
 let velocity = 0;
+let pointerID = 0;
 const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
 
 const activeIndex = computed(() => props.items.length ? mod(Math.round(position.value), props.items.length) : 0);
@@ -125,34 +128,49 @@ function inertia() {
 function startDrag(event) {
   if (props.items.length < 2 || event.target.closest('button, a, input, select, textarea, label')) return;
   stopMotion();
-  dragging.value = true;
-  lastY = event.clientY;
+  dragging.value = false;
+  pointerID = event.pointerId;
+  startX = event.clientX;
+  startY = event.clientY;
+  lastX = event.clientX;
   lastTime = performance.now();
   velocity = 0;
-  event.currentTarget.setPointerCapture(event.pointerId);
 }
 
 function moveDrag(event) {
-  if (!dragging.value) return;
+  if (!pointerID || event.pointerId !== pointerID) return;
+  if (!dragging.value) {
+    const distanceX = Math.abs(event.clientX - startX);
+    const distanceY = Math.abs(event.clientY - startY);
+    if (distanceY > distanceX) {
+      pointerID = 0;
+      return;
+    }
+    if (distanceX < 10) return;
+    dragging.value = true;
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
   const now = performance.now();
-  const delta = -(event.clientY - lastY) / Math.max(150, props.cardHeight * .8);
+  const delta = -(event.clientX - lastX) / Math.max(180, event.currentTarget.clientWidth * .72);
   velocity = delta / Math.max(1, now - lastTime);
   position.value += delta;
-  lastY = event.clientY;
+  lastX = event.clientX;
   lastTime = now;
 }
 
 function endDrag() {
+  pointerID = 0;
   if (!dragging.value) return;
   dragging.value = false;
   inertia();
 }
 
 function onWheel(event) {
-  if (props.items.length < 2) return;
+  if (props.items.length < 2 || (Math.abs(event.deltaX) <= Math.abs(event.deltaY) && !event.shiftKey)) return;
   event.preventDefault();
   stopMotion();
-  position.value += Math.max(-90, Math.min(90, event.deltaY)) * .0035;
+  const delta = event.shiftKey ? event.deltaY : event.deltaX;
+  position.value += Math.max(-90, Math.min(90, delta)) * .0035;
   snapTimer = window.setTimeout(snap, 90);
 }
 
@@ -221,7 +239,7 @@ function step(offset) {
 .stacked-wheel__head b { color: var(--cd-text); font-variant-numeric: tabular-nums; }
 .stacked-wheel__controls { display: flex; align-items: center; gap: 4px; }
 .stacked-wheel__controls button { display: grid; width: 32px; min-width: 32px; min-height: 32px; padding: 0; place-items: center; }
-.stacked-wheel__stage { position: relative; height: calc(var(--stack-card-height) + 62px); overflow: hidden; perspective: 900px; transform-style: preserve-3d; touch-action: none; user-select: none; cursor: grab; outline: none; }
+.stacked-wheel__stage { position: relative; height: calc(var(--stack-card-height) + 42px); overflow: hidden; perspective: 900px; transform-style: preserve-3d; touch-action: pan-y; user-select: none; cursor: grab; outline: none; }
 .stacked-wheel__stage:focus-visible { border-radius: var(--cd-radius-card); box-shadow: 0 0 0 3px rgb(47 107 69 / 18%); }
 .stacked-wheel__stage.dragging { cursor: grabbing; }
 .stacked-wheel__card { position: absolute; top: 50%; left: 50%; width: calc(100% - 10px); height: var(--stack-card-height); overflow: hidden; transform-origin: 50% 50% -140px; transform-style: preserve-3d; backface-visibility: hidden; will-change: transform, opacity, filter; }
