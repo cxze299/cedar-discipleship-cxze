@@ -2,6 +2,7 @@ import { useContentViewerStore } from './stores/contentViewer';
 import { useCheckinWorkbenchStore } from './stores/checkinWorkbench';
 import { useDashboardStore } from './stores/dashboard';
 import { useAppStateStore } from './stores/appState';
+import { confirmDialog } from './ui/dialog';
 import {
   currentCalendarWeekRange,
   currentMonthString,
@@ -19,6 +20,8 @@ import {
   buildReaderPageURL,
   deepMerge,
   enabledFlag,
+  extractMarkdownSectionForDate,
+  extractNumberedMarkdownSection,
   extractPdfPageRange,
   isPlainObject,
   normalizePageField,
@@ -783,7 +786,7 @@ export async function openTaskContent(task, link = null) {
 
 function inferResourceType(url, fallback = 'iframe') {
   const clean = String(url || '').split('#')[0].split('?')[0].toLowerCase();
-  if (/\.md$/.test(clean)) return 'markdown';
+  if (/\.(?:md|markdown)$/.test(clean)) return 'markdown';
   if (/\.(pdf)$/.test(clean)) return 'pdf';
   if (/\.(png|jpg|jpeg|gif|webp|svg)$/.test(clean)) return 'image';
   if (/\.(mp4|webm|mov|m4v)$/.test(clean)) return 'video';
@@ -971,27 +974,6 @@ function markdownToHTML(content) {
   return html;
 }
 
-function extractNumberedMarkdownSection(text, number) {
-  const lines = String(text || '').replace(/\r/g, '').split('\n');
-  const startRegex = new RegExp(`^#{1,6}\\s*${Number(number)}\\s*$`);
-  const stopRegex = /^#{1,6}\s*\d+\s*$/;
-  let capturing = false;
-  const content = [];
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-    if (!capturing) {
-      if (startRegex.test(line)) {
-        capturing = true;
-        content.push(rawLine);
-      }
-      continue;
-    }
-    if (stopRegex.test(line) && !startRegex.test(line)) break;
-    content.push(rawLine);
-  }
-  return content;
-}
-
 function isTrimmedPDFSource(url) {
   const apiPath = sameOriginAPIPath(url, window.location.origin);
   return /^\/api\/assets\/\d+\/range\b/.test(apiPath || String(url || ''));
@@ -1079,7 +1061,9 @@ export async function openContentTarget(target) {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     if (type === 'markdown') {
       const text = await res.text();
-      const lines = target.section ? extractNumberedMarkdownSection(text, target.section) : text.split('\n');
+      const lines = target.date
+        ? extractMarkdownSectionForDate(text, target.date, target.section)
+        : (target.section ? extractNumberedMarkdownSection(text, target.section) : text.split('\n'));
       state.viewer = {
         type: 'markdown',
         title,
@@ -1121,7 +1105,9 @@ export async function openContentTarget(target) {
     const res = await fetch(target.url, { cache: 'no-store' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const text = await res.text();
-    const lines = target.section ? extractNumberedMarkdownSection(text, target.section) : text.split('\n');
+    const lines = target.date
+      ? extractMarkdownSectionForDate(text, target.date, target.section)
+      : (target.section ? extractNumberedMarkdownSection(text, target.section) : text.split('\n'));
     state.viewer = {
       type: 'markdown',
       title,
@@ -1605,11 +1591,17 @@ function getDailyDevotionPlan(date = state.selectedDate) {
   if (cfg.enabled === false) return null;
   const title = toChineseMonthDay(date);
   const section = getDailyDevotionSectionNumber(date);
+  const path = cfg.path || daily.path || '';
+  const configuredType = String(cfg.type || '').trim().toLowerCase();
+  const type = /\.(?:md|markdown)(?:[?#]|$)/i.test(path)
+    ? 'markdown'
+    : (configuredType || inferResourceType(path, 'markdown'));
   return {
     label: title,
     title,
-    url: cfg.path || daily.path || '',
-    type: cfg.type || 'markdown',
+    date,
+    url: path,
+    type,
     section,
   };
 }
@@ -1749,7 +1741,7 @@ function isFutureSelected() {
 export async function openMemberCalendar(member, month = state.selectedDate.slice(0, 7)) {
   try {
     const result = await api(`/members/${member.user_id}/calendar?month=${month}`);
-    state.calendar = { member, month, items: result.items || [] };
+    state.calendar = { member, month, selectedDate: state.selectedDate, items: result.items || [] };
     render();
   } catch (error) {
     toast(error.message);
@@ -2123,7 +2115,11 @@ export async function saveWeekDraft() {
         method,
         body: JSON.stringify(force ? { ...payload, force: true } : payload),
       }),
-      () => window.confirm('当前周已有打卡记录。强制修改会替换学习任务，但会保留历史打卡记录。是否继续？'),
+      () => confirmDialog({
+        title: '确认修改任务',
+        message: '当前周已有打卡记录。强制修改会替换学习任务，但会保留历史打卡记录。是否继续？',
+        tone: 'warning',
+      }),
     );
     if (!result) return;
     toast('当前周任务已保存');
@@ -2144,7 +2140,13 @@ export async function deleteWeekDraft() {
     render();
     return;
   }
-  if (!window.confirm('确认删除当前周任务？')) return;
+  const confirmed = await confirmDialog({
+    title: '删除周任务',
+    message: '确认删除当前周任务？',
+    tone: 'danger',
+    confirmLabel: '确认删除',
+  });
+  if (!confirmed) return;
   try {
     await api(`/admin/study-weeks/${draft.id}`, { method: 'DELETE' });
     toast('当前周任务已删除');
@@ -2215,7 +2217,13 @@ export async function setMemberAdmin(member, grant) {
 
 export async function removeMember(member) {
   const name = member.member_name || member.display_name || member.username;
-  if (!window.confirm(`确认从本组删除 ${name}？该操作不会删除账号，也不会删除历史打卡记录。`)) return;
+  const confirmed = await confirmDialog({
+    title: '移除成员',
+    message: `确认从本组删除 ${name}？该操作不会删除账号，也不会删除历史打卡记录。`,
+    tone: 'danger',
+    confirmLabel: '确认删除',
+  });
+  if (!confirmed) return;
   try {
     await api(`/admin/members/${member.member_id}`, { method: 'DELETE' });
     toast('人员已从本组删除');

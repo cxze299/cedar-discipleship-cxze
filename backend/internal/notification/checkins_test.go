@@ -104,6 +104,25 @@ func TestFormatCheckins(t *testing.T) {
 	}
 }
 
+func TestFormatCheckinsPreservesIndependentCompletionTypes(t *testing.T) {
+	t.Parallel()
+
+	daily := FormatCheckins([]Entry{
+		{RecordID: 1, UserID: 10, Name: "张三", TaskType: "daily_devotion"},
+		{RecordID: 2, UserID: 10, Name: "张三", TaskType: "daily_scripture"},
+	}, 2, true)
+	if daily != "每日灵修\n1 张三 灵修 【新】读经" {
+		t.Fatalf("separate daily summary = %q", daily)
+	}
+
+	weekly := FormatCheckins([]Entry{
+		{RecordID: 3, UserID: 10, Name: "张三", TaskType: "weekly_checkin"},
+	}, 3, false)
+	if weekly != "本周任务\n1 张三 【新】周任务" {
+		t.Fatalf("aggregate weekly summary = %q", weekly)
+	}
+}
+
 func TestEligible(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

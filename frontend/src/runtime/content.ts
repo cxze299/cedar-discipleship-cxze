@@ -89,6 +89,134 @@ export function classifyAttachment(input: { filename?: unknown; mimeType?: unkno
   return { action: 'download', type: 'download' };
 }
 
+function numberedMarkdownHeading(line: string): number | null {
+  const match = line.trim().match(/^#{1,6}\s*(?:第\s*)?(\d+)(?=\s|$|[.、:：]|篇|章|[-—])/);
+  if (!match) return null;
+  const value = Number(match[1]);
+  return Number.isInteger(value) && value > 0 ? value : null;
+}
+
+/**
+ * Select one numbered section from a devotion Markdown file.
+ *
+ * Files in the wild use headings such as `## 12`, `## 12. 标题`, and
+ * `## 第12篇`; when a file has no numbered headings, keep the whole file
+ * readable instead of returning an empty viewer.
+ */
+export function extractNumberedMarkdownSection(value: unknown, number: unknown): string[] {
+  const lines = String(value || '').replace(/\r/g, '').split('\n');
+  const requested = Math.max(1, Number(number) || 1);
+  const hasNumberedHeadings = lines.some((line) => numberedMarkdownHeading(line) !== null);
+  let capturing = false;
+  const content: string[] = [];
+
+  for (const rawLine of lines) {
+    const headingNumber = numberedMarkdownHeading(rawLine);
+    if (!capturing) {
+      if (headingNumber === requested) {
+        capturing = true;
+        content.push(rawLine);
+      }
+      continue;
+    }
+    if (headingNumber !== null && headingNumber !== requested) break;
+    content.push(rawLine);
+  }
+
+  if (capturing) return content;
+  return hasNumberedHeadings ? [] : lines;
+}
+
+type MarkdownDateHeading = { year?: number; month: number; day: number };
+
+const chineseDateNumberChars = '〇零一二三四五六七八九十百千万廿卅';
+
+function parseDateNumber(value: string): number {
+  const source = String(value || '').trim();
+  if (/^\d+$/.test(source)) return Number(source);
+  const digits: Record<string, number> = {
+    '〇': 0, '零': 0, '一': 1, '二': 2, '三': 3, '四': 4,
+    '五': 5, '六': 6, '七': 7, '八': 8, '九': 9,
+  };
+  if ([...source].every((char) => digits[char] !== undefined)) {
+    return Number([...source].map((char) => digits[char]).join(''));
+  }
+  let total = 0;
+  let current = 0;
+  const units: Record<string, number> = { '十': 10, '百': 100, '千': 1000, '万': 10000 };
+  for (const char of source) {
+    if (digits[char] !== undefined) {
+      current = current * 10 + digits[char];
+      continue;
+    }
+    if (char === '廿' || char === '卅') {
+      total += char === '廿' ? 20 : 30;
+      current = 0;
+      continue;
+    }
+    const unit = units[char];
+    if (!unit) return Number.NaN;
+    total += (current || 1) * unit;
+    current = 0;
+  }
+  return total + current;
+}
+
+function markdownDateHeading(line: string): MarkdownDateHeading | null {
+  const trimmed = line.trim();
+  if (!trimmed || trimmed.length > 100) return null;
+  // Real devotion files do not always use Markdown heading marks. The zk
+  // reader treats a short line beginning with a date as a section boundary,
+  // so accept both `# 九月二十二日` and `九月二十二日 标题` here.
+  const heading = trimmed.replace(/^#{1,6}\s*/, '');
+  if (!heading) return null;
+  const iso = heading.match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})(?!\d)/);
+  if (iso) return { year: Number(iso[1]), month: Number(iso[2]), day: Number(iso[3]) };
+  const numberChars = `0-9${chineseDateNumberChars}`;
+  const dateEnd = `(?=$|[\\s｜|:：\\-—–_])`;
+  const chinese = heading.match(new RegExp(`^([${numberChars}]+)\\s*年\\s*([${numberChars}]+)\\s*月\\s*([${numberChars}]+)\\s*(?:日|号)?${dateEnd}`));
+  if (chinese) {
+    const year = parseDateNumber(chinese[1]);
+    const month = parseDateNumber(chinese[2]);
+    const day = parseDateNumber(chinese[3]);
+    if (Number.isFinite(year) && Number.isFinite(month) && Number.isFinite(day)) return { year, month, day };
+  }
+  const monthDay = heading.match(new RegExp(`^([${numberChars}]+)\\s*月\\s*([${numberChars}]+)\\s*(?:日|号)?${dateEnd}`));
+  if (monthDay) {
+    const month = parseDateNumber(monthDay[1]);
+    const day = parseDateNumber(monthDay[2]);
+    if (Number.isFinite(month) && Number.isFinite(day)) return { month, day };
+  }
+  const slash = heading.match(/^(\d{1,2})\s*\/\s*(\d{1,2})(?!\d)/);
+  if (slash) return { month: Number(slash[1]), day: Number(slash[2]) };
+  return null;
+}
+
+function sameMarkdownDate(left: MarkdownDateHeading, right: MarkdownDateHeading): boolean {
+  return left.month === right.month && left.day === right.day
+    && (left.year === undefined || right.year === undefined || left.year === right.year);
+}
+
+/** Match a date heading first, then fall back to the configured numbered section. */
+export function extractMarkdownSectionForDate(value: unknown, date: unknown, number: unknown): string[] {
+  const lines = String(value || '').replace(/\r/g, '').split('\n');
+  const targetMatch = String(date || '').match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (!targetMatch) return extractNumberedMarkdownSection(lines.join('\n'), number);
+  const target: MarkdownDateHeading = {
+    year: Number(targetMatch[1]),
+    month: Number(targetMatch[2]),
+    day: Number(targetMatch[3]),
+  };
+  const dateHeadingIndexes = lines
+    .map((line, index) => ({ index, date: markdownDateHeading(line) }))
+    .filter((item): item is { index: number; date: MarkdownDateHeading } => item.date !== null);
+  const matchIndex = dateHeadingIndexes.findIndex((item) => sameMarkdownDate(item.date, target));
+  if (matchIndex < 0) return extractNumberedMarkdownSection(lines.join('\n'), number);
+  const start = dateHeadingIndexes[matchIndex].index;
+  const end = dateHeadingIndexes[matchIndex + 1]?.index ?? lines.length;
+  return lines.slice(start, end);
+}
+
 export function weeklyTitleFromContent(input: {
   title?: unknown;
   book_enabled?: unknown;
@@ -98,6 +226,9 @@ export function weeklyTitleFromContent(input: {
   videos?: Array<{ title?: unknown }>;
   verse_ref?: unknown;
 }): string {
+  const customTitle = String(input.title || '').trim();
+  if (customTitle) return customTitle;
+
   const parts: string[] = [];
   if (enabledFlag(input.book_enabled)) {
     for (const reading of input.readings || []) {

@@ -1,0 +1,8 @@
+/* The supplied Semibold face is shared by UI and reading surfaces. */
+@font-face {
+  font-family: 'PingFang SC';
+  src: url('../../PingFangSC-Semibold.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}

@@ -278,6 +278,9 @@ func BuildTaskDrafts(input WeekInput, existingVerseTitle string) []TaskDraft {
 }
 
 func WeekTitle(input WeekInput) string {
+	if customTitle := strings.TrimSpace(input.Title); customTitle != "" {
+		return customTitle
+	}
 	parts := make([]string, 0, 3)
 	if input.BookEnabled {
 		for _, reading := range input.Readings {

@@ -10,6 +10,7 @@ import {
   X,
 } from '@lucide/vue';
 import { api, fetchWithAuth, toast as showToast } from '../legacy-app';
+import DateField from './ui/DateField.vue';
 
 const props = defineProps({
   groupId: {
@@ -179,9 +180,9 @@ function currentMonth() {
         <h3>月度考勤表</h3>
       </div>
       <div class="attendance-month">
-        <button class="secondary icon-button" type="button" title="上个月" @click="shiftMonth(-1)">‹</button>
-        <input v-model="month" type="month" @change="loadAttendance" />
-        <button class="secondary icon-button" type="button" title="下个月" @click="shiftMonth(1)">›</button>
+        <button class="secondary icon-button" type="button" title="上个月" aria-label="查看上个月" @click="shiftMonth(-1)">‹</button>
+        <DateField v-model="month" mode="month" label="选择考勤月份" @change="loadAttendance" />
+        <button class="secondary icon-button" type="button" title="下个月" aria-label="查看下个月" @click="shiftMonth(1)">›</button>
         <button class="secondary icon-text-button" type="button" @click="exportAttendance">
           <Download :size="16" /> 导出 CSV
         </button>
@@ -213,19 +214,19 @@ function currentMonth() {
           </label>
         </div>
         <div class="extra-date-editor">
-          <label>
+          <div>
             <span>额外考勤日期</span>
             <span class="extra-date-input">
-              <input v-model="extraDateDraft" type="date" />
-              <button class="secondary icon-button" type="button" title="添加日期" @click="addExtraDate">
+              <DateField v-model="extraDateDraft" label="选择额外考勤日期" />
+              <button class="secondary icon-button" type="button" title="添加日期" aria-label="添加额外考勤日期" @click="addExtraDate">
                 <Plus :size="16" />
               </button>
             </span>
-          </label>
+          </div>
           <div class="extra-date-list">
             <span v-for="date in extraDates" :key="date">
               <CalendarDays :size="14" /> {{ date }}
-              <button type="button" title="移除日期" @click="removeExtraDate(date)"><X :size="13" /></button>
+              <button type="button" title="移除日期" :aria-label="`移除考勤日期${date}`" @click="removeExtraDate(date)"><X :size="13" /></button>
             </span>
             <small v-if="!extraDates.length">暂无额外日期</small>
           </div>
@@ -285,3 +286,37 @@ function currentMonth() {
     </template>
   </section>
 </template>
+
+<style scoped>
+.attendance-workspace { min-width: 0; }
+.attendance-toolbar, .attendance-month, .attendance-settings-head, .attendance-table-tools { gap: 12px; }
+.attendance-month :where(button, input),
+.attendance-settings button,
+.attendance-sort :where(button, select) { min-height: 44px; }
+.attendance-month .icon-button, .extra-date-input .icon-button { min-width: 44px; }
+.extra-date-list button { display: inline-grid; place-items: center; width: 44px; min-width: 44px; height: 44px; padding: 0; }
+.attendance-table-scroll { max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; scrollbar-gutter: stable; }
+.attendance-table { width: max-content; min-width: 100%; }
+.attendance-cell { display: inline-grid; place-items: center; min-width: 44px; min-height: 44px; }
+.ministry-loading, .empty { padding: 32px 20px; text-align: center; }
+@media (max-width: 767px) {
+  .attendance-toolbar, .attendance-settings-head, .attendance-table-tools { align-items: stretch; flex-direction: column; }
+  .attendance-month { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; width: 100%; }
+  .attendance-month .icon-text-button { grid-column: 1 / -1; justify-content: center; }
+  .weekday-picker { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .weekday-picker label { min-height: 44px; }
+  .extra-date-input { display: grid; grid-template-columns: minmax(0, 1fr) 44px; }
+  .attendance-sort { display: grid; grid-template-columns: minmax(0, 1fr) auto; width: 100%; }
+  .attendance-table-scroll { margin-inline: -16px; padding-inline: 16px; }
+  .attendance-table th:first-child,
+  .attendance-table td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    min-width: 136px;
+    background: var(--cd-surface, #fff);
+    box-shadow: 1px 0 0 var(--cd-border);
+  }
+  .attendance-table thead th:first-child { z-index: 2; background: var(--cd-surface-subtle); }
+}
+</style>

@@ -5,6 +5,8 @@ import {
   classifyAttachment,
   deepMerge,
   enabledFlag,
+  extractMarkdownSectionForDate,
+  extractNumberedMarkdownSection,
   extractPdfPageRange,
   markdownToSafeHTML,
   normalizeSearchText,
@@ -73,7 +75,7 @@ describe('content runtime helpers', () => {
     expect(weeklyTitleFromContent({
       title: '手动标题',
       readings: [{ title: '读物一' }],
-    })).toBe('读物一');
+    })).toBe('手动标题');
   });
 
   it('renders markdown while escaping raw HTML and unsafe links', () => {
@@ -87,6 +89,36 @@ describe('content runtime helpers', () => {
     expect(html).toContain('href="/api/assets/12/download"');
     expect(html).not.toContain('href="/files/unmanaged.pdf"');
     expect(html).not.toContain('javascript:');
+  });
+
+  it('keeps devotion markdown readable across common section formats', () => {
+    expect(extractNumberedMarkdownSection('## 1. 第一篇\n内容一\n## 2、第二篇\n内容二', 2))
+      .toEqual(['## 2、第二篇', '内容二']);
+    expect(extractNumberedMarkdownSection('# 总标题\n没有分篇的内容', 8))
+      .toEqual(['# 总标题', '没有分篇的内容']);
+    expect(extractNumberedMarkdownSection('## 1\n内容一', 2)).toEqual([]);
+  });
+
+  it('matches date headings before using numbered devotion sections', () => {
+    const markdown = '# 9月21日\n昨天\n# 2026-09-22\n今天\n# 9月23号\n明天';
+    expect(extractMarkdownSectionForDate(markdown, '2026-09-22', 1))
+      .toEqual(['# 2026-09-22', '今天']);
+    expect(extractMarkdownSectionForDate(markdown, '2026-09-23', 1))
+      .toEqual(['# 9月23号', '明天']);
+    const mixed = '# 九月22日\n甲\n# 9月二十三号\n乙\n# 二〇二六年九月二十四日\n丙';
+    expect(extractMarkdownSectionForDate(mixed, '2026-09-22', 1)).toEqual(['# 九月22日', '甲']);
+    expect(extractMarkdownSectionForDate(mixed, '2026-09-23', 1)).toEqual(['# 9月二十三号', '乙']);
+    expect(extractMarkdownSectionForDate(mixed, '2026-09-24', 1)).toEqual(['# 二〇二六年九月二十四日', '丙']);
+    const withoutSuffix = '# 九月二十二\n甲';
+    expect(extractMarkdownSectionForDate(withoutSuffix, '2026-09-22', 1)).toEqual(['# 九月二十二', '甲']);
+    const plainDateLines = '九月二十一日 昨日灵修\n昨天\n九月22日｜今日灵修\n今天\n9月二十三号 明日灵修\n明天';
+    expect(extractMarkdownSectionForDate(plainDateLines, '2026-09-22', 1))
+      .toEqual(['九月22日｜今日灵修', '今天']);
+    expect(extractMarkdownSectionForDate(plainDateLines, '2026-09-23', 1))
+      .toEqual(['9月二十三号 明日灵修', '明天']);
+    const prose = '# 九月二十二日\n正文\n九月二十三章讲到恩典，不是日期标题\n仍属正文\n# 九月二十三日\n次日';
+    expect(extractMarkdownSectionForDate(prose, '2026-09-22', 1))
+      .toEqual(['# 九月二十二日', '正文', '九月二十三章讲到恩典，不是日期标题', '仍属正文']);
   });
 
   it('recognizes same-origin protected API URLs', () => {

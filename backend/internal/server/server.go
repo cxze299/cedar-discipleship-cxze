@@ -63,10 +63,12 @@ type app struct {
 		Enqueue(notificationdomain.Event) error
 	}
 	botManager interface {
-		Chats(context.Context) ([]notificationdomain.Chat, error)
-		Bindings() []notificationdomain.Binding
-		Assign(context.Context, notificationdomain.Target, uint64, time.Time) error
+		Robots(context.Context) []notificationdomain.RobotStatus
+		Register(context.Context, notificationdomain.RobotRegistration) (notificationdomain.RobotStatus, error)
+		Assign(context.Context, string, notificationdomain.Target, uint64, time.Time) error
+		BindingGroupID(string, int64) uint64
 	}
+	botAPIKey []byte
 }
 
 type config struct {
@@ -80,9 +82,11 @@ type config struct {
 	BootstrapDisplayName string
 	TokenTTL             string
 	RefreshTokenTTL      string
+	PotatoRobots         string
 	PotatoBotToken       string
 	PotatoGroups         string
 	NotificationDir      string
+	BotAPIKey            string
 }
 
 type ctxKey string
@@ -164,6 +168,7 @@ func Run() error {
 		pdfRangeCache: newPDFRangeCache(defaultPDFRangeCacheMaxEntries, defaultPDFRangeCacheMaxBytes),
 		cacheRefresh:  make(chan uint64, defaultTodayCacheMaxEntries),
 		users:         userdomain.NewService(userdomain.NewMySQLRepository(db)),
+		botAPIKey:     []byte(cfg.BotAPIKey),
 	}
 	if err := a.runMigrations(); err != nil {
 		return err
@@ -174,34 +179,23 @@ func Run() error {
 	if err := a.bootstrapSuperAdmin(cfg); err != nil {
 		return err
 	}
-	targets, err := notificationdomain.ParseTargets(cfg.PotatoBotToken, cfg.PotatoGroups)
+	robotConfigs, err := notificationdomain.ParseRobotConfigs(cfg.PotatoRobots, cfg.PotatoBotToken, cfg.PotatoGroups)
 	if err != nil {
 		return err
 	}
-	if cfg.PotatoBotToken != "" {
-		client, err := notificationdomain.NewPotatoClient(cfg.PotatoBotToken)
-		if err != nil {
-			return err
-		}
-		manager, err := notificationdomain.NewManager(
-			cfg.NotificationDir, targets, notificationdomain.NewCheckinSource(db, loc), client,
-		)
-		if err != nil {
-			return err
-		}
-		if err := manager.EnqueueInitial(time.Now().UTC()); err != nil {
-			return fmt.Errorf("enqueue initial notification progress: %w", err)
-		}
-		a.notifications = manager
-		a.botManager = manager
-		notificationContext, stopNotifications := context.WithCancel(context.Background())
-		var workers sync.WaitGroup
-		workers.Go(func() { manager.Run(notificationContext) })
-		defer func() {
-			stopNotifications()
-			workers.Wait()
-		}()
+	fleet, err := notificationdomain.NewFleet(cfg.NotificationDir, robotConfigs, notificationdomain.NewCheckinSource(db, loc))
+	if err != nil {
+		return err
 	}
+	if err := fleet.EnqueueInitial(time.Now().UTC()); err != nil {
+		return fmt.Errorf("enqueue initial notification progress: %w", err)
+	}
+	a.notifications = fleet
+	a.botManager = fleet
+	notificationContext, stopNotifications := context.WithCancel(context.Background())
+	var workers sync.WaitGroup
+	workers.Go(func() { fleet.Run(notificationContext) })
+	defer func() { stopNotifications(); workers.Wait() }()
 	cacheContext, stopCache := context.WithCancel(context.Background())
 	defer stopCache()
 	go a.runTodayCacheMaintenance(cacheContext)
@@ -230,9 +224,11 @@ func loadConfig() config {
 		BootstrapDisplayName: env("BOOTSTRAP_SUPERADMIN_DISPLAY_NAME", "超级管理员"),
 		TokenTTL:             env("AGP_TOKEN_TTL", "15m"),
 		RefreshTokenTTL:      env("AGP_REFRESH_TOKEN_TTL", "8760h"),
+		PotatoRobots:         env("AGP_POTATO_ROBOTS", ""),
 		PotatoBotToken:       env("AGP_POTATO_BOT_TOKEN", ""),
 		PotatoGroups:         env("AGP_POTATO_GROUPS", ""),
 		NotificationDir:      env("AGP_NOTIFICATION_DIR", "./data/notifications"),
+		BotAPIKey:            env("AGP_BOT_API_KEY", ""),
 	}
 }
 
@@ -249,7 +245,7 @@ func validateConfig(cfg config) error {
 	if _, err := parseRefreshTokenTTL(cfg.RefreshTokenTTL); err != nil {
 		return err
 	}
-	if _, err := notificationdomain.ParseTargets(cfg.PotatoBotToken, cfg.PotatoGroups); err != nil {
+	if _, err := notificationdomain.ParseRobotConfigs(cfg.PotatoRobots, cfg.PotatoBotToken, cfg.PotatoGroups); err != nil {
 		return err
 	}
 	return nil
@@ -295,6 +291,12 @@ func env(key, fallback string) string {
 
 func (a *app) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/health", a.handleHealth)
+	mux.HandleFunc("GET /api/bot/groups", a.botAuth(a.handleBotGroups))
+	mux.HandleFunc("GET /api/bot/groups/{code}/config", a.botAuth(a.handleBotConfig))
+	mux.HandleFunc("GET /api/bot/groups/{code}/state", a.botAuth(a.handleBotState))
+	mux.HandleFunc("GET /api/bot/groups/{code}/events", a.botAuth(a.handleBotEvents))
+	mux.HandleFunc("POST /api/bot/groups/{code}/checkins", a.botAuth(a.handleBotCreateCheckin))
+	mux.HandleFunc("DELETE /api/bot/groups/{code}/checkins/{id}", a.botAuth(a.handleBotDeleteCheckin))
 	mux.HandleFunc("POST /api/auth/login", a.handleLogin)
 	mux.HandleFunc("POST /api/auth/refresh", a.handleRefreshSession)
 	mux.HandleFunc("POST /api/auth/logout", a.handleLogout)
@@ -402,6 +404,7 @@ func (a *app) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/super-admin/groups/{id}/leaders", a.auth(a.requireSuper(a.handleSuperSetLeader)))
 	mux.HandleFunc("DELETE /api/super-admin/groups/{id}/leaders/{user_id}", a.auth(a.requireSuper(a.handleSuperUnsetLeader)))
 	mux.HandleFunc("GET /api/super-admin/bot-management", a.auth(a.requireSuper(a.handleBotManagement)))
+	mux.HandleFunc("POST /api/super-admin/bot-robots", a.auth(a.requireSuper(a.handleBotRobot)))
 	mux.HandleFunc("PUT /api/super-admin/bot-bindings", a.auth(a.requireSuper(a.handleBotBinding)))
 }
 

@@ -168,10 +168,59 @@ func TestPotatoListChats(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []Chat{
-		{ChatID: 20, ChatType: 3, Title: "2026 bible study"},
-		{ChatID: 10, ChatType: 2, Title: "普通群"},
+		{ChatID: 20, ChatType: 3, Title: "2026 bible study", Joined: true},
+		{ChatID: 10, ChatType: 2, Title: "普通群", Joined: true},
 	}
 	if !reflect.DeepEqual(chats, want) {
 		t.Fatalf("chats = %#v, want %#v", chats, want)
+	}
+}
+
+func TestPotatoIdentity(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/getMe" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		_, _ = io.WriteString(w, `{
+			"ok":true,
+			"result":{"id":10100427,"first_name":" Primary Bot ","last_name":"","username":"primary_bot"}
+		}`)
+	}))
+	defer server.Close()
+	client, err := NewPotatoClient("123:secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.identityEndpoint = server.URL + "/getMe"
+	identity, err := client.Identity(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := RobotIdentity{ID: 10100427, FirstName: "Primary Bot", Username: "primary_bot"}
+	if identity != want {
+		t.Fatalf("Identity() = %#v, want %#v", identity, want)
+	}
+}
+
+func TestPotatoIdentityDoesNotLeakTokenOrResponse(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "secret response", http.StatusUnauthorized)
+	}))
+	defer server.Close()
+	client, err := NewPotatoClient("123:secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.identityEndpoint = server.URL + "/123:secret/getMe"
+	err = func() error {
+		_, err := client.Identity(t.Context())
+		return err
+	}()
+	if err == nil || strings.Contains(err.Error(), "secret") {
+		t.Fatalf("Identity() error = %v", err)
 	}
 }
