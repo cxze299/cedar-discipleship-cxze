@@ -71,21 +71,37 @@ type Chat struct {
 	ChatID   int64  `json:"chat_id"`
 	ChatType int    `json:"chat_type"`
 	Title    string `json:"title"`
+	GroupID  uint64 `json:"group_id,omitempty"`
+	Joined   bool   `json:"joined"`
+}
+
+type RobotIdentity struct {
+	ID        int64  `json:"id"`
+	FirstName string `json:"first_name"`
+	Username  string `json:"username"`
 }
 
 type PotatoClient struct {
-	endpoint       string
-	groupsEndpoint string
-	client         *http.Client
+	endpoint         string
+	groupsEndpoint   string
+	identityEndpoint string
+	client           *http.Client
 }
 
+var newPotatoClient = newPotatoClientWithToken
+
 func NewPotatoClient(token string) (*PotatoClient, error) {
+	return newPotatoClient(token)
+}
+
+func newPotatoClientWithToken(token string) (*PotatoClient, error) {
 	if !tokenPattern.MatchString(token) {
 		return nil, errors.New("invalid AGP_POTATO_BOT_TOKEN")
 	}
 	return &PotatoClient{
-		endpoint:       "https://api.rct2008.com:8443/" + token + "/sendTextMessage",
-		groupsEndpoint: "https://api.rct2008.com:8443/" + token + "/getGroups",
+		endpoint:         "https://api.rct2008.com:8443/" + token + "/sendTextMessage",
+		groupsEndpoint:   "https://api.rct2008.com:8443/" + token + "/getGroups",
+		identityEndpoint: "https://api.rct2008.com:8443/" + token + "/getMe",
 		client: &http.Client{
 			Timeout: 10 * time.Second,
 			CheckRedirect: func(*http.Request, []*http.Request) error {
@@ -93,6 +109,36 @@ func NewPotatoClient(token string) (*PotatoClient, error) {
 			},
 		},
 	}, nil
+}
+
+func (c *PotatoClient) Identity(ctx context.Context) (RobotIdentity, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.identityEndpoint, nil)
+	if err != nil {
+		return RobotIdentity{}, errors.New("create robot identity request")
+	}
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return RobotIdentity{}, errors.New("request robot identity")
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return RobotIdentity{}, fmt.Errorf("robot identity http_%d", resp.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024+1))
+	if err != nil || len(data) > 64*1024 {
+		return RobotIdentity{}, errors.New("read robot identity response")
+	}
+	var result struct {
+		OK     bool          `json:"ok"`
+		Result RobotIdentity `json:"result"`
+	}
+	if err := json.Unmarshal(data, &result); err != nil || !result.OK ||
+		result.Result.ID <= 0 || strings.TrimSpace(result.Result.Username) == "" {
+		return RobotIdentity{}, errors.New("invalid robot identity response")
+	}
+	result.Result.FirstName = strings.TrimSpace(result.Result.FirstName)
+	result.Result.Username = strings.TrimSpace(result.Result.Username)
+	return result.Result, nil
 }
 
 func (c *PotatoClient) ListChats(ctx context.Context) ([]Chat, error) {
@@ -138,7 +184,7 @@ func (c *PotatoClient) ListChats(ctx context.Context) ([]Chat, error) {
 			}
 			seen[item.PeerID] = struct{}{}
 			chats = append(chats, Chat{
-				ChatID: item.PeerID, ChatType: chatType, Title: strings.TrimSpace(item.PeerName),
+				ChatID: item.PeerID, ChatType: chatType, Title: strings.TrimSpace(item.PeerName), Joined: true,
 			})
 		}
 		return nil

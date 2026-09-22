@@ -221,6 +221,22 @@ MYSQL_PASSWORD=agp \
 
 ## 打卡群通知
 
+### 外部门训提醒机器人（多小组）
+
+外部 Potato 提醒机器人使用受密钥保护的 Bot API。部署环境设置一个长随机值：
+
+```dotenv
+AGP_BOT_API_KEY=replace-with-a-long-random-secret
+```
+
+机器人先请求 `GET /api/bot/groups` 获取学习小组，再把每个小组配置为独立站点，站点地址为
+`https://example.com/api/bot/groups/{group_code}`，并携带
+`Authorization: Bearer <AGP_BOT_API_KEY>`。兼容接口包括 `GET /config`、`GET /state`、
+`POST /checkins` 和 `DELETE /checkins/{id}`。
+
+周任务补签会按目标日期查找所属学习周并写入该小组真实的 `week_id` 和 `task_id`；
+不存在对应学习周或任务时会拒绝写入。状态和总结数据从 2026-04-06 开始返回。
+
 使用 Potato 机器人的 `sendTextMessage` 接口。将机器人加入目标群，并在部署环境 `.env` 中设置：
 
 ```dotenv

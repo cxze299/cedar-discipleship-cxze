@@ -1,0 +1,140 @@
+/**
+ * 香柏木 (Cedar Discipleship) - 全局设计 Tokens
+ * 对应 cedar-ui-plan.md 规范
+ */
+
+:root {
+  /* 基础色彩 */
+  --cd-bg: #f5f7f5;
+  --cd-surface: #ffffff;
+  --cd-surface-subtle: #eef1ec;
+  --cd-surface-secondary: var(--cd-surface-subtle);
+  --cd-surface-hover: #e7ece7;
+  --cd-primary: #285c4d;
+  --cd-primary-hover: #204c40;
+  --cd-primary-soft: #e8f0ea;
+  --cd-text: #202b25;
+  --cd-text-primary: var(--cd-text);
+  --cd-text-secondary: #526057;
+  --cd-muted: #657168;
+  --cd-border: #dde3dc;
+  --cd-border-strong: #c8d2ca;
+  --cd-success: #28704c;
+  --cd-warning: #946319;
+  --cd-danger: #b5413b;
+  --cd-info: #376e94;
+  --cd-gold: #a28143;
+  --cd-purple: #796091;
+
+  /* 字体栈 */
+  --cd-font-sans: "PingFang SC", sans-serif;
+  --cd-font-serif: var(--cd-font-sans);
+  --cd-page-width: 1120px;
+  --cd-page-gutter: 32px;
+
+  /* 字体层级 */
+  --cd-font-size-caption: 12px;
+  --cd-font-size-body: 14px;
+  --cd-font-size-card-title: 15px;
+  --cd-font-size-section-title: 18px;
+  --cd-font-size-page-title: 28px;
+  --cd-line-height-tight: 1.35;
+  --cd-line-height-base: 1.6;
+  --cd-font-weight-regular: 400;
+  --cd-font-weight-medium: 500;
+  --cd-font-weight-semibold: 600;
+
+  /* 统一间距刻度 */
+  --cd-space-1: 4px;
+  --cd-space-2: 8px;
+  --cd-space-3: 12px;
+  --cd-space-4: 16px;
+  --cd-space-5: 20px;
+  --cd-space-6: 24px;
+  --cd-space-8: 32px;
+  --cd-space-10: 40px;
+  --cd-space-12: 48px;
+
+  /* 几何倒角 */
+  --cd-radius-sm: 4px;
+  --cd-radius-base: 8px;
+  --cd-radius-card: 14px;
+  --cd-radius-dialog: 16px;
+  --cd-radius-pill: 20px;
+
+  /* 阴影与材料 */
+  --cd-shadow-card: none;
+  --cd-shadow-small: 0 2px 8px rgb(25 43 32 / 6%);
+  --cd-shadow-floating: 0 12px 32px rgb(25 43 32 / 14%);
+  --cd-shadow-dialog: 0 20px 60px rgba(25, 43, 32, 0.18);
+  --cd-backdrop: rgba(22, 34, 27, 0.38);
+
+  /* 焦点与层级 */
+  --cd-focus-ring: #87ad96;
+  --cd-focus-width: 3px;
+  --cd-z-sticky: 100;
+  --cd-z-overlay: 1000;
+  --cd-z-dialog: 1100;
+  --cd-z-toast: 1200;
+
+  /* 控件规格 */
+  --cd-control-h-desktop: 40px;
+  --cd-control-h-mobile: 48px;
+
+  /* 向下兼容旧系统变量 */
+  --bg: var(--cd-bg);
+  --paper: var(--cd-surface);
+  --ink: var(--cd-text);
+  --muted: var(--cd-muted);
+  --line: var(--cd-border);
+  --green: var(--cd-primary);
+  --soft: var(--cd-primary-soft);
+  --gold: var(--cd-gold);
+
+  --primary: var(--cd-primary);
+  --primary-hover: var(--cd-primary-hover);
+  --canvas: var(--cd-bg);
+  --surface: var(--cd-surface);
+  --border: var(--cd-border);
+  --text: var(--cd-text);
+  --danger: var(--cd-danger);
+  --warning: var(--cd-warning);
+  --success: var(--cd-success);
+  --primary-dark: var(--cd-primary-hover);
+  --primary-soft: var(--cd-primary-soft);
+  --surface-strong: var(--cd-surface);
+  --surface-muted: var(--cd-surface-subtle);
+  --surface-soft: var(--cd-surface-subtle);
+  --line-strong: var(--cd-border-strong);
+  --faint: #768178;
+  --red: var(--cd-danger);
+  --amber: var(--cd-warning);
+  --green-soft: var(--cd-primary-soft);
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: var(--cd-radius-card);
+  --radius-xl: var(--cd-radius-dialog);
+  --shadow-soft: var(--cd-shadow-small);
+  --shadow-card: none;
+  --shadow-float: var(--cd-shadow-floating);
+  --blur: none;
+
+  /* Ant Design CSS 变量映射 */
+  --ant-primary: var(--cd-primary);
+  --ant-primary-hover: var(--cd-primary-hover);
+  --ant-primary-active: var(--cd-primary-hover);
+  --ant-primary-bg: var(--cd-primary-soft);
+  --ant-success: var(--cd-success);
+  --ant-error: var(--cd-danger);
+  --ant-warning: var(--cd-warning);
+  --ant-info: var(--cd-info);
+  --ant-text-tertiary: var(--cd-muted);
+  --ant-border-color-secondary: var(--cd-border);
+  --ant-bg-layout: var(--cd-bg);
+  --ant-bg-container: var(--cd-surface);
+  --ant-text: var(--cd-text);
+  --ant-text-secondary: var(--cd-muted);
+  --ant-border-color: var(--cd-border);
+  --ant-border-radius: var(--cd-radius-base);
+  --ant-border-radius-lg: var(--cd-radius-card);
+}

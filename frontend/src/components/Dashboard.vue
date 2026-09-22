@@ -1,11 +1,19 @@
 <script setup>
 import { computed, ref } from 'vue';
 import { storeToRefs } from 'pinia';
-import { ChevronDown, ChevronUp, ChevronsUpDown } from '@lucide/vue';
+import {
+  ChevronDown,
+  ChevronUp,
+  ChevronsUpDown,
+} from '@lucide/vue';
+import DateNavigator from './ui/DateNavigator.vue';
+import DateCalendarDialog from './ui/DateCalendarDialog.vue';
+import DateField from './ui/DateField.vue';
+import RankingChart from './ui/RankingChart.vue';
+import StackedWheel from './ui/StackedWheel.vue';
 import { useDashboardStore } from '../stores/dashboard';
 import {
   openMemberCalendar,
-  saveActiveMemberRule,
   setSelectedDate,
   setStatsDateRange,
   shiftSelectedDate,
@@ -19,7 +27,6 @@ const {
   selectedDate,
   maxDate,
   isToday,
-  groupName,
   overallPercent,
   doneSlots,
   totalSlots,
@@ -35,9 +42,6 @@ const {
   statsFrom,
   statsTo,
   statsMaxDate,
-  activeCount,
-  activeMemberRule,
-  canManageActiveRule,
 } = storeToRefs(store);
 
 const legend = [
@@ -49,7 +53,8 @@ const legend = [
 
 const statsView = ref('chart');
 const activeStatKey = ref('all');
-const activeRuleSaving = ref(false);
+const datePickerOpen = ref(false);
+const datePickerMonth = ref('');
 const matrixSort = ref({ key: 'total', direction: 'desc' });
 const activeLegend = computed(() => legend.find((item) => item.key === activeStatKey.value) || null);
 const visibleLegend = computed(() => (activeLegend.value ? [activeLegend.value] : legend));
@@ -60,10 +65,7 @@ const rankedItems = computed(() => [...ranking.value].sort((left, right) => {
   return Number(left.user_id || 0) - Number(right.user_id || 0);
 }));
 const rankingMaxForView = computed(() => Math.max(1, ...rankedItems.value.map((item) => rankingItemTotal(item))));
-const activeLeader = computed(() => rankedItems.value.find((item) => rankingItemTotal(item) > 0) || null);
 const activeScopeLabel = computed(() => activeLegend.value?.label || '全部分项');
-const activeLeaderName = computed(() => activeLeader.value ? `${activeLeader.value.member_name || activeLeader.value.display_name}` : '-');
-const activeLeaderNote = computed(() => activeLeader.value ? `${rankingItemTotal(activeLeader.value)} 次${activeLegend.value ? activeLegend.value.label : '打卡'}` : '暂无记录');
 const periodRows = computed(() => ranking.value.map((item) => {
   const counts = Object.fromEntries(legend.map((part) => [part.key, segmentCount(item, part.key)]));
   return {
@@ -150,33 +152,14 @@ function matrixSortAria(key) {
   return matrixSort.value.direction === 'asc' ? 'ascending' : 'descending';
 }
 
-async function toggleActiveRuleTask(key) {
-  if (activeRuleSaving.value) return;
-  const selected = [...activeMemberRule.value.task_types];
-  const index = selected.indexOf(key);
-  if (index >= 0) {
-    if (selected.length === 1) return;
-    selected.splice(index, 1);
-  } else {
-    selected.push(key);
-  }
-  await updateActiveRule({ ...activeMemberRule.value, task_types: selected });
+function openDatePicker() {
+  datePickerMonth.value = selectedDate.value.slice(0, 7);
+  datePickerOpen.value = true;
 }
 
-async function setActiveRuleMode(mode) {
-  if (activeRuleSaving.value || activeMemberRule.value.mode === mode) return;
-  await updateActiveRule({ ...activeMemberRule.value, mode });
-}
-
-async function updateActiveRule(rule) {
-  activeRuleSaving.value = true;
-  try {
-    await saveActiveMemberRule(rule);
-  } catch (error) {
-    showToast(error.message);
-  } finally {
-    activeRuleSaving.value = false;
-  }
+function chooseDate(date) {
+  setSelectedDate(date);
+  datePickerOpen.value = false;
 }
 
 function memberTaskTitle(member, state) {
@@ -283,307 +266,432 @@ async function exportRankingChart() {
 </script>
 
 <template>
-  <Teleport v-if="visible" to="#vue-dashboard">
-    <div class="grid">
-      <section class="today-hero dashboard-hero">
-        <div class="today-copy">
-          <div class="eyebrow">{{ groupName }}</div>
-          <h2>小组打卡情况与统计</h2>
+  <Teleport v-if="visible" defer to="#vue-dashboard">
+    <div class="dashboard-page">
+      <!-- Page Header: Title + Date Controls -->
+      <div class="pagehead spread page-header">
+        <div>
+          <h1>小组统计</h1>
         </div>
-        <div class="today-date-cluster">
-          <div class="date-controls">
-            <button class="secondary" type="button" title="前一天" @click="shiftSelectedDate(-1)">‹</button>
-            <input
-              type="date"
-              :value="selectedDate"
-              :max="maxDate"
-              @change="setSelectedDate($event.target.value)"
-            />
-            <button class="secondary" type="button" title="后一天" :disabled="isToday" @click="shiftSelectedDate(1)">›</button>
-            <button v-if="!isToday" class="ghost" type="button" @click="setSelectedDate(maxDate)">回到今天</button>
-          </div>
-        </div>
-        <div class="today-score">
-          <strong>{{ overallPercent }}%</strong>
-          <span>小组完成率</span>
-        </div>
-      </section>
+        <DateNavigator
+          :label="selectedDate"
+          :is-today="isToday"
+          @previous="shiftSelectedDate(-1)"
+          @next="shiftSelectedDate(1)"
+          @today="setSelectedDate(maxDate)"
+          @select="openDatePicker"
+        />
+      </div>
 
-      <div class="grid cols-4 dashboard-strip">
-        <div class="card stat compact-stat dashboard-support-stat">
-          <span class="stat-title">小组完成率</span>
-          <strong>{{ overallPercent }}%</strong>
-          <span class="stat-note">{{ doneSlots }}/{{ totalSlots }}</span>
+      <DateCalendarDialog
+        :open="datePickerOpen"
+        :month="datePickerMonth"
+        :selected-date="selectedDate"
+        :max-date="maxDate"
+        title="选择统计日期"
+        :show-today="!isToday"
+        @month-change="datePickerMonth = $event"
+        @select="chooseDate"
+        @today="chooseDate(maxDate)"
+        @close="datePickerOpen = false"
+      />
+
+      <!-- 4 Metric Cards -->
+      <div class="metricgrid">
+        <div class="panel metric">
+          <span class="muted">任务完成率</span>
+          <b>{{ overallPercent }}<span class="metric__suffix">%</span></b>
+          <span class="small muted">已完成 {{ doneSlots }} / 应完成 {{ totalSlots }}</span>
         </div>
-        <div class="card stat compact-stat dashboard-support-stat">
-          <span class="stat-title">今日成员</span>
-          <strong>{{ memberCount }}</strong>
-          <span class="stat-note">当前小组</span>
+        <div class="panel metric">
+          <span class="muted">小组成员</span>
+          <b>{{ memberCount }}</b>
+          <span class="small muted">当前小组成员数</span>
         </div>
-        <div class="card stat compact-stat dashboard-support-stat">
-          <span class="stat-title">已完成项</span>
-          <strong>{{ doneSlots }}</strong>
-          <span class="stat-note">全组任务</span>
+        <div class="panel metric">
+          <span class="muted">全组完成项</span>
+          <b>{{ doneSlots }}</b>
+          <span class="small muted">所选日期 · 共 {{ totalSlots }} 项</span>
         </div>
-        <div class="card stat compact-stat dashboard-support-stat">
-          <span class="stat-title">我的任务</span>
-          <strong>{{ completed }}/{{ taskCount }}</strong>
-          <span class="stat-note">{{ completed === taskCount ? '全部完成' : '继续完成' }}</span>
+        <div class="panel metric">
+          <span class="muted">我的任务</span>
+          <b>{{ completed }}<span class="metric__suffix"> / {{ taskCount }}</span></b>
+          <span class="small muted">{{ completed === taskCount ? '全部完成' : '继续完成' }}</span>
         </div>
       </div>
 
-      <section>
-        <div class="section-title">
-          <h2>当前组打卡情况</h2>
-        </div>
-        <div class="group-dashboard">
-          <div class="task-progress-row">
-            <div v-for="card in progressCards" :key="`${card.task.type}:${card.task.part || ''}:${card.title}`" class="task-progress-card">
-              <div class="task-progress-head">
-                <span>{{ card.icon }}</span>
-              </div>
-              <div class="progress-track">
-                <span :style="{ width: `${card.percent}%` }"></span>
-              </div>
-              <small>{{ card.count }}/{{ card.total }}</small>
-            </div>
+      <!-- Daily Member Attendance Table -->
+      <div class="panel daily-detail">
+        <div class="spread sectiontitle">
+          <div>
+            <h2 class="section-heading">成员打卡明细</h2>
+            <span class="small muted">所选日期：{{ selectedDate }} · 点击头像查看成员月历</span>
           </div>
-
-          <div class="member-checkin-grid">
-            <div v-for="member in members" :key="member.user_id" class="member-check-card">
-              <div class="member-main">
-                <button class="avatar avatar-button" type="button" @click="openMemberCalendar(member)">
-                  {{ member.avatar }}
-                </button>
-                <div>
-                  <b>{{ member.name }}{{ member.isSelf ? '（我）' : '' }}</b>
-                  <div class="muted">{{ member.username }}</div>
+          <span class="pill">{{ members.length }} 位成员</span>
+        </div>
+        <div class="tablewrap responsive-table daily-table desktop-stack-content">
+          <table>
+            <thead>
+              <tr>
+                <th>成员</th>
+                <th v-for="card in progressCards" :key="card.title">{{ card.title }}</th>
+                <th>今日完成</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="member in members" :key="member.user_id">
+                <td>
+                  <div class="inline member-cell">
+                    <button
+                      class="avatar member-avatar"
+                      type="button"
+                      :title="`查看 ${member.name} 打卡月历`"
+                      @click="openMemberCalendar(member)"
+                    >
+                      {{ member.avatar }}
+                    </button>
+                    <b>{{ member.name }}{{ member.isSelf ? '（我）' : '' }}</b>
+                  </div>
+                </td>
+                <td v-for="item in member.taskStates" :key="item.title">
+                  <button
+                    v-if="member.isSelf"
+                    :class="item.done ? 'taskdone' : 'quiet'"
+                    class="daily-checkin"
+                    type="button"
+                    :title="memberTaskTitle(member, item)"
+                    @click="toggleCheckin(item.taskForMember, member)"
+                  >
+                    {{ item.done ? '✓ 已打卡' : '打卡' }}
+                  </button>
+                  <span v-else-if="item.done" class="check">✓ 已打卡</span>
+                  <span v-else class="muted small">— 待完成</span>
+                </td>
+                <td>
+                  <b class="numeric">
+                    {{ member.taskStates.filter((s) => s.done).length }} / {{ member.taskStates.length }}
+                  </b>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <StackedWheel
+          class="mobile-stack-content"
+          :items="members"
+          :item-key="(member) => member.user_id"
+          aria-label="成员打卡明细"
+          :card-height="280"
+        >
+          <template #default="{ item: member }">
+            <div class="member-stack-card">
+              <header>
+                <button class="avatar member-avatar" type="button" :aria-label="`查看${member.name}打卡月历`" @click="openMemberCalendar(member)">{{ member.avatar }}</button>
+                <div><b>{{ member.name }}{{ member.isSelf ? '（我）' : '' }}</b><small>{{ member.taskStates.filter((state) => state.done).length }} / {{ member.taskStates.length }} 项完成</small></div>
+              </header>
+              <div class="member-stack-tasks">
+                <div v-for="state in member.taskStates" :key="state.title">
+                  <span>{{ state.title }}</span>
+                  <button v-if="member.isSelf" :class="state.done ? 'taskdone' : 'quiet'" type="button" @click="toggleCheckin(state.taskForMember, member)">{{ state.done ? '✓ 已打卡' : '打卡' }}</button>
+                  <strong v-else :class="state.done ? 'check' : 'muted'">{{ state.done ? '✓ 已打卡' : '待完成' }}</strong>
                 </div>
               </div>
-              <div class="member-task-chips">
-                <button
-                  v-for="item in member.taskStates"
-                  :key="`${member.user_id}:${item.task.type}:${item.task.part || ''}:${item.title}`"
-                  class="member-task-chip"
-                  :class="{ done: item.done, clickable: member.isSelf }"
-                  :title="memberTaskTitle(member, item)"
-                  type="button"
-                  @click="member.isSelf && toggleCheckin(item.taskForMember, member)"
-                >
-                  <span class="member-task-code">{{ item.shortLabel || item.icon }}</span>
-                </button>
-              </div>
             </div>
-          </div>
-        </div>
-      </section>
+          </template>
+        </StackedWheel>
+      </div>
 
-      <section class="stats-center">
-        <div class="stats-center-head">
+      <!-- Category Progress Horizontal Bar Chart -->
+      <div class="panel progress-panel">
+        <div class="spread sectiontitle">
           <div>
-            <div class="eyebrow">周期完成统计</div>
-            <h2>香柏木数据统计中心</h2>
+            <h2 class="section-heading">各项完成情况</h2>
+            <span class="small muted">{{ selectedDate }} · 每项 {{ memberCount }} 人</span>
           </div>
-          <div class="stats-center-tags">
-            <div class="stats-range-controls" aria-label="统计时间范围">
-              <input
-                type="date"
-                :value="statsFrom"
-                :max="statsMaxDate"
-                @change="setStatsDateRange('from', $event.target.value)"
+        </div>
+        <div class="chart">
+          <div
+            v-for="card in progressCards"
+            :key="`${card.task.type}:${card.task.part || ''}:${card.title}`"
+            class="barrow"
+          >
+            <span class="progress-label">{{ card.title }}</span>
+            <div class="bar">
+              <i :style="{ width: `${card.percent}%` }"></i>
+            </div>
+            <b class="progress-count">{{ card.count }}</b>
+          </div>
+        </div>
+      </div>
+
+      <section class="panel stats-center">
+        <div class="stats-center-head spread">
+          <div>
+            <h2 class="stats-center__title">周期统计</h2>
+            <p class="small muted">选择日期范围，查看各项完成情况</p>
+          </div>
+          <div class="inline stats-controls">
+            <div class="inline date-range" aria-label="统计时间范围">
+              <DateField
+                :model-value="statsFrom"
+                label="统计开始日期"
+                :max="statsTo || statsMaxDate"
+                @update:model-value="setStatsDateRange('from', $event)"
               />
-              <span>至</span>
-              <input
-                type="date"
-                :value="statsTo"
+              <span class="muted">至</span>
+              <DateField
+                :model-value="statsTo"
+                label="统计结束日期"
+                :min="statsFrom"
                 :max="statsMaxDate"
-                @change="setStatsDateRange('to', $event.target.value)"
+                @update:model-value="setStatsDateRange('to', $event)"
               />
             </div>
-            <div class="segmented-control" aria-label="统计展示方式">
-              <button type="button" :class="{ active: statsView === 'chart' }" @click="statsView = 'chart'">柱状图</button>
-              <button type="button" :class="{ active: statsView === 'table' }" @click="statsView = 'table'">板块表格</button>
-            </div>
-            <span class="stats-tag active">分项完成榜</span>
-          </div>
-        </div>
-
-        <div class="grid cols-2 stats-mini-cards">
-          <div class="card stat compact-stat">
-            <span class="stat-title">{{ activeScopeLabel }}榜首</span>
-            <strong>{{ activeLeaderName }}</strong>
-            <span class="stat-note">{{ activeLeaderNote }}</span>
-          </div>
-          <div class="card stat compact-stat active-rule-card">
-            <span class="stat-title">活跃成员</span>
-            <strong>{{ activeCount }}人</strong>
-            <div v-if="canManageActiveRule" class="active-rule-editor">
-              <div class="active-rule-task-buttons">
-                <button
-                  v-for="item in legend"
-                  :key="item.key"
-                  type="button"
-                  :class="{ active: activeMemberRule.task_types.includes(item.key) }"
-                  :aria-pressed="activeMemberRule.task_types.includes(item.key)"
-                  :disabled="activeRuleSaving"
-                  @click="toggleActiveRuleTask(item.key)"
-                >
-                  {{ item.label }}
-                </button>
-              </div>
-              <div class="segmented-control active-rule-mode" aria-label="活跃成员组合方式">
-                <button
-                  type="button"
-                  :class="{ active: activeMemberRule.mode === 'any' }"
-                  :disabled="activeRuleSaving"
-                  @click="setActiveRuleMode('any')"
-                >
-                  并集
-                </button>
-                <button
-                  type="button"
-                  :class="{ active: activeMemberRule.mode === 'all' }"
-                  :disabled="activeRuleSaving"
-                  @click="setActiveRuleMode('all')"
-                >
-                  交集
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div v-if="statsView === 'chart'" class="bar-chart-toolbar">
-          <button class="secondary" type="button" @click="exportRankingChart">导出柱状图 PNG</button>
-        </div>
-
-        <div v-if="statsView === 'chart'" class="bar-chart-card">
-          <div class="bar-chart-meta">
-            <strong>{{ activeScopeLabel }}完成数</strong>
-            <div class="bar-legend">
+            <div class="inline view-toggle" aria-label="统计视图">
               <button
-                class="legend-item legend-button"
-                :class="{ active: activeStatKey === 'all' }"
+                class="quiet compact-control"
+                :class="{ primary: statsView === 'chart' }"
+                :aria-pressed="statsView === 'chart'"
+                type="button"
+                @click="statsView = 'chart'"
+              >
+                完成排行
+              </button>
+              <button
+                class="quiet compact-control"
+                :class="{ primary: statsView === 'table' }"
+                :aria-pressed="statsView === 'table'"
+                type="button"
+                @click="statsView = 'table'"
+              >
+                分类明细
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="statsView === 'chart'" class="export-row">
+          <button class="quiet" type="button" @click="exportRankingChart">导出柱状图 PNG</button>
+        </div>
+
+        <div v-if="statsView === 'chart'">
+          <div class="spread chart-head">
+            <strong class="chart-head__title">{{ activeScopeLabel }}完成数</strong>
+            <div class="inline filter-list" aria-label="统计分类筛选">
+              <button
+                class="quiet filter-chip"
+                :class="{ primary: activeStatKey === 'all' }"
                 type="button"
                 @click="activeStatKey = 'all'"
               >
-                <span>全部</span>
+                全部
               </button>
               <button
                 v-for="item in legend"
                 :key="item.key"
-                class="legend-item legend-button"
-                :class="[`legend-${item.key}`, { active: activeStatKey === item.key }]"
+                class="quiet filter-chip"
+                :class="{ primary: activeStatKey === item.key }"
                 type="button"
                 @click="setActiveStat(item.key)"
               >
-                <i></i>
-                <span>{{ item.label }}</span>
+                {{ item.label }}
               </button>
             </div>
           </div>
-          <div class="bar-chart">
-            <div v-for="member in rankedItems" :key="member.user_id || member.member_name" class="bar-item">
-              <div class="bar-track">
-                <div v-if="rankingItemTotal(member)" class="bar-stack" :style="{ height: `${stackHeight(member)}%` }">
-                  <span
-                    v-if="segmentCount(member, 'daily_devotion') && (!activeLegend || activeLegend.key === 'daily_devotion')"
-                    class="bar-segment devotion"
-                    :style="{ height: `${segmentPercent(member, 'daily_devotion')}%` }"
-                    :title="`灵修 ${segmentCount(member, 'daily_devotion')} 次`"
-                  ></span>
-                  <span
-                    v-if="segmentCount(member, 'weekly_book') && (!activeLegend || activeLegend.key === 'weekly_book')"
-                    class="bar-segment book"
-                    :style="{ height: `${segmentPercent(member, 'weekly_book')}%` }"
-                    :title="`书籍 ${segmentCount(member, 'weekly_book')} 次`"
-                  ></span>
-                  <span
-                    v-if="segmentCount(member, 'weekly_video') && (!activeLegend || activeLegend.key === 'weekly_video')"
-                    class="bar-segment video"
-                    :style="{ height: `${segmentPercent(member, 'weekly_video')}%` }"
-                    :title="`音视频 ${segmentCount(member, 'weekly_video')} 次`"
-                  ></span>
-                  <span
-                    v-if="segmentCount(member, 'weekly_outline') && (!activeLegend || activeLegend.key === 'weekly_outline')"
-                    class="bar-segment outline"
-                    :style="{ height: `${segmentPercent(member, 'weekly_outline')}%` }"
-                    :title="`背大纲 ${segmentCount(member, 'weekly_outline')} 次`"
-                  ></span>
-                </div>
-                <span v-else class="bar-empty"></span>
+          <RankingChart
+            class="desktop-stack-content"
+            :items="rankedItems"
+            :get-key="(member) => member.user_id || member.member_name"
+            :get-total="rankingItemTotal"
+            :get-height="stackHeight"
+            :get-label="chartMemberLabel"
+          />
+          <StackedWheel
+            class="mobile-stack-content"
+            :items="rankedItems"
+            :item-key="(member) => member.user_id || member.member_name"
+            aria-label="成员完成排行"
+            :card-height="190"
+          >
+            <template #default="{ item: member }">
+              <div class="ranking-stack-card">
+                <header><span class="avatar">{{ chartMemberLabel(member) }}</span><div><b>{{ member.member_name || member.display_name || member.username }}</b><small>{{ activeScopeLabel }}</small></div><strong>{{ rankingItemTotal(member) }} 次</strong></header>
+                <div class="ranking-stack-bar"><span :style="{ width: `${stackHeight(member)}%` }"></span></div>
+                <div class="ranking-stack-parts"><span v-for="part in visibleLegend" :key="part.key">{{ part.label }} {{ segmentCount(member, part.key) }}</span></div>
               </div>
-              <span class="bar-label">{{ chartMemberLabel(member) }}</span>
-              <small>{{ rankingItemTotal(member) }} 次</small>
-            </div>
-          </div>
+            </template>
+          </StackedWheel>
         </div>
 
-        <div v-else class="task-section-tables">
-          <section class="task-section-table period-matrix-table-card">
-            <div class="task-section-table-head">
-              <div>
-                <h3>周期完成数</h3>
-                <p>{{ rankingFrom }} 至 {{ rankingTo }} · {{ periodRows.length }} 位成员</p>
+        <div v-else>
+          <div class="spread sectiontitle">
+            <div>
+              <h3 class="table-heading">周期完成数</h3>
+              <p class="muted small">{{ rankingFrom }} 至 {{ rankingTo }} · {{ periodRows.length }} 位成员</p>
+            </div>
+            <span class="pill">0 次人数：{{ zeroCountSummary }}</span>
+          </div>
+          <div class="tablewrap responsive-table matrix-table desktop-stack-content">
+            <table>
+              <thead>
+                <tr>
+                  <th :aria-sort="matrixSortAria('name')">
+                    <button class="quiet sort-button" type="button" @click="setMatrixSort('name')">
+                      <span>成员</span>
+                      <ChevronUp v-if="matrixSort.key === 'name' && matrixSort.direction === 'asc'" :size="14" />
+                      <ChevronDown v-else-if="matrixSort.key === 'name'" :size="14" />
+                      <ChevronsUpDown v-else :size="14" />
+                    </button>
+                  </th>
+                  <th v-for="item in legend" :key="item.key" :aria-sort="matrixSortAria(item.key)">
+                    <button class="quiet sort-button" type="button" @click="setMatrixSort(item.key)">
+                      <span>{{ item.label }}</span>
+                      <ChevronUp v-if="matrixSort.key === item.key && matrixSort.direction === 'asc'" :size="14" />
+                      <ChevronDown v-else-if="matrixSort.key === item.key" :size="14" />
+                      <ChevronsUpDown v-else :size="14" />
+                    </button>
+                  </th>
+                  <th :aria-sort="matrixSortAria('total')">
+                    <button class="quiet sort-button" type="button" @click="setMatrixSort('total')">
+                      <span>合计</span>
+                      <ChevronUp v-if="matrixSort.key === 'total' && matrixSort.direction === 'asc'" :size="14" />
+                      <ChevronDown v-else-if="matrixSort.key === 'total'" :size="14" />
+                      <ChevronsUpDown v-else :size="14" />
+                    </button>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in sortedPeriodRows" :key="row.userID">
+                  <td>
+                    <b>{{ row.name }}</b>
+                    <small v-if="row.username" class="muted username">{{ row.username }}</small>
+                  </td>
+                  <td v-for="item in legend" :key="`${row.userID}:${item.key}`">
+                    <span :class="{ muted: row.counts[item.key] === 0 }">
+                      {{ row.counts[item.key] }} 次
+                    </span>
+                  </td>
+                  <td><strong>{{ row.total }} 次</strong></td>
+                </tr>
+              </tbody>
+              <tfoot>
+                <tr class="totals-row">
+                  <td>合计</td>
+                  <td v-for="item in legend" :key="`total:${item.key}`">{{ periodTotals[item.key] }} 次</td>
+                  <td>{{ periodGrandTotal }} 次</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <StackedWheel
+            class="mobile-stack-content"
+            :items="sortedPeriodRows"
+            :item-key="(row) => row.userID"
+            aria-label="周期成员完成数"
+            :card-height="230"
+          >
+            <template #default="{ item: row }">
+              <div class="matrix-stack-card">
+                <header><div><b>{{ row.name }}</b><small v-if="row.username">{{ row.username }}</small></div><strong>{{ row.total }} 次</strong></header>
+                <dl><div v-for="part in legend" :key="part.key"><dt>{{ part.label }}</dt><dd>{{ row.counts[part.key] }} 次</dd></div></dl>
               </div>
-              <span class="missing-summary">0 次人数：{{ zeroCountSummary }}</span>
-            </div>
-            <div class="table-scroll">
-              <table class="period-matrix-table">
-                <thead>
-                  <tr>
-                    <th :aria-sort="matrixSortAria('name')">
-                      <button class="matrix-sort-button" type="button" @click="setMatrixSort('name')">
-                        <span>成员</span>
-                        <ChevronUp v-if="matrixSort.key === 'name' && matrixSort.direction === 'asc'" :size="14" />
-                        <ChevronDown v-else-if="matrixSort.key === 'name'" :size="14" />
-                        <ChevronsUpDown v-else :size="14" />
-                      </button>
-                    </th>
-                    <th v-for="item in legend" :key="item.key" :aria-sort="matrixSortAria(item.key)">
-                      <button class="matrix-sort-button" type="button" @click="setMatrixSort(item.key)">
-                        <span>{{ item.label }}</span>
-                        <ChevronUp v-if="matrixSort.key === item.key && matrixSort.direction === 'asc'" :size="14" />
-                        <ChevronDown v-else-if="matrixSort.key === item.key" :size="14" />
-                        <ChevronsUpDown v-else :size="14" />
-                      </button>
-                    </th>
-                    <th :aria-sort="matrixSortAria('total')">
-                      <button class="matrix-sort-button" type="button" @click="setMatrixSort('total')">
-                        <span>合计</span>
-                        <ChevronUp v-if="matrixSort.key === 'total' && matrixSort.direction === 'asc'" :size="14" />
-                        <ChevronDown v-else-if="matrixSort.key === 'total'" :size="14" />
-                        <ChevronsUpDown v-else :size="14" />
-                      </button>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="row in sortedPeriodRows" :key="row.userID">
-                    <td>
-                      <b>{{ row.name }}</b>
-                      <small v-if="row.username">{{ row.username }}</small>
-                    </td>
-                    <td v-for="item in legend" :key="`${row.userID}:${item.key}`">
-                      <span class="completion-count" :class="{ empty: row.counts[item.key] === 0 }">
-                        {{ row.counts[item.key] }} 次
-                      </span>
-                    </td>
-                    <td><strong>{{ row.total }} 次</strong></td>
-                  </tr>
-                </tbody>
-                <tfoot>
-                  <tr>
-                    <td>合计</td>
-                    <td v-for="item in legend" :key="`total:${item.key}`">{{ periodTotals[item.key] }} 次</td>
-                    <td>{{ periodGrandTotal }} 次</td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          </section>
+            </template>
+          </StackedWheel>
         </div>
       </section>
     </div>
   </Teleport>
 </template>
+
+<style scoped>
+.dashboard-page { min-width: 0; }
+.page-header { margin-bottom: 24px; }
+.metric__suffix { font-size: 16px; }
+.daily-detail { margin-bottom: 24px; }
+.sectiontitle { margin-bottom: 16px; }
+.section-heading { font-size: 18px; }
+.responsive-table { max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; }
+.daily-table th:first-child { min-width: 140px; }
+.member-cell { gap: 10px; }
+.member-avatar { width: 44px; height: 44px; border: 0; font-size: 12px; cursor: pointer; }
+.daily-checkin { min-height: 44px; padding: 4px 12px; font-size: 12px; }
+.numeric, .progress-count { font-variant-numeric: tabular-nums; }
+.progress-panel { margin-bottom: 32px; }
+.progress-label { font-weight: 500; }
+.progress-count { text-align: right; }
+.stats-center { margin-top: 16px; }
+.stats-center-head { flex-wrap: wrap; gap: 16px; margin-bottom: 24px; text-align: left; }
+.stats-center-head > .inline { min-width: 0; max-width: 100%; }
+.stats-center__eyebrow { margin-bottom: 6px; }
+.stats-center__title { font-size: 20px; }
+.stats-controls { flex-wrap: wrap; gap: 12px; }
+.date-range, .view-toggle { border: 1px solid var(--cd-border); border-radius: var(--cd-radius-base); background: var(--cd-surface, #fff); }
+.date-range { min-width: 0; max-width: 100%; padding: 3px 8px; font-size: 13px; }
+.date-range :deep(.date-field) { width: 168px; }
+.date-range :deep(.date-field__trigger) { min-height: 38px; border: 0; background: transparent; font-size: 13px; }
+.view-toggle { gap: 4px; padding: 2px; }
+.compact-control, .filter-chip { min-height: 36px; padding: 4px 12px; font-size: 12px; }
+.filter-chip { border: 1px solid var(--cd-border); }
+.filter-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.export-row { display: flex; justify-content: flex-end; margin-bottom: 16px; }
+.chart-head { margin-bottom: 16px; }
+.chart-head__title { font-size: 15px; }
+.table-heading { margin: 0; font-size: 16px; }
+.sort-button { min-height: 36px; padding: 0 4px; font-weight: 600; }
+.username { display: block; font-size: 11px; }
+.totals-row { background: var(--cd-surface-subtle); font-weight: 600; }
+.mobile-stack-content { display: none; }
+.member-stack-card, .ranking-stack-card, .matrix-stack-card { height: 100%; padding: 16px; overflow: hidden; border: 1px solid var(--cd-border); border-radius: var(--cd-radius-card); background: var(--cd-surface); box-shadow: var(--cd-shadow-card); }
+.member-stack-card header, .ranking-stack-card header, .matrix-stack-card header { display: flex; min-width: 0; align-items: center; gap: 10px; }
+.member-stack-card header > div, .ranking-stack-card header > div, .matrix-stack-card header > div { display: grid; min-width: 0; gap: 2px; }
+.member-stack-card header small, .ranking-stack-card header small, .matrix-stack-card header small { color: var(--cd-muted); font-size: 11px; }
+.member-stack-tasks { display: grid; gap: 8px; margin-top: 14px; }
+.member-stack-tasks > div { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 10px; padding-top: 8px; border-top: 1px solid var(--cd-border); font-size: 13px; }
+.member-stack-tasks button { min-height: 36px; padding: 4px 10px; }
+.ranking-stack-card header > strong, .matrix-stack-card header > strong { margin-left: auto; color: var(--cd-primary); font-size: 20px; white-space: nowrap; }
+.ranking-stack-bar { height: 12px; margin: 22px 0 16px; overflow: hidden; border-radius: 999px; background: var(--cd-surface-subtle); }
+.ranking-stack-bar span { display: block; height: 100%; border-radius: inherit; background: var(--cd-primary); }
+.ranking-stack-parts { display: flex; flex-wrap: wrap; gap: 6px; }
+.ranking-stack-parts span { padding: 5px 8px; border-radius: 999px; background: var(--cd-primary-soft); color: var(--cd-primary); font-size: 11px; }
+.matrix-stack-card dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 18px 0 0; }
+.matrix-stack-card dl > div { padding: 10px; border-radius: 8px; background: var(--cd-surface-subtle); }
+.matrix-stack-card dt { color: var(--cd-muted); font-size: 11px; }
+.matrix-stack-card dd { margin: 4px 0 0; font-weight: 700; }
+@media (max-width: 767px) {
+  .page-header { align-items: stretch; gap: 16px; }
+  .panel { padding: 16px; }
+  .metric { padding: 16px 12px; }
+  .spread { flex-wrap: wrap; gap: 10px; }
+  .spread > .inline { flex-wrap: wrap; }
+  .stats-center-head { align-items: stretch; }
+  .stats-center-head > div { width: 100%; }
+  .date-range { width: 100%; gap: 4px; }
+  .date-range :deep(.date-field) { flex: 1; width: 0; }
+  .view-toggle { width: 100%; }
+  .view-toggle button { flex: 1; min-height: 44px; }
+  .filter-chip, .sort-button, .export-row button { min-height: 44px; }
+  .desktop-stack-content { display: none; }
+  .mobile-stack-content { display: block; }
+  .stats-center { min-width: 0; overflow: hidden; }
+  .chart-head { align-items: flex-start; }
+  .filter-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
+  .filter-list button { width: 100%; }
+  .responsive-table { margin-inline: -16px; padding-inline: 16px; }
+  .responsive-table table { width: max-content; min-width: 100%; }
+  .responsive-table th:first-child,
+  .responsive-table td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    min-width: 136px;
+    max-width: 156px;
+    background: var(--cd-surface, #fff);
+    box-shadow: 1px 0 0 var(--cd-border);
+  }
+  .responsive-table thead th:first-child { z-index: 2; background: var(--cd-surface-subtle); }
+  .responsive-table tfoot td:first-child { background: var(--cd-surface-subtle); }
+  .tablewrap td:first-child .inline { max-width: 150px; }
+  .tablewrap td:first-child b { white-space: normal; overflow-wrap: anywhere; }
+}
+</style>
