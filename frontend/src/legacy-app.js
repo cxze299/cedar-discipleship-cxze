@@ -31,6 +31,7 @@ import {
   normalizePageField,
   normalizeSearchText,
   parsePdfPageRangeParts,
+  pdfViewerSinglePage,
   resolvePdfPageRange,
   sameOriginAPIPath,
   shouldRenderWeeklyTask,
@@ -1169,7 +1170,7 @@ export async function openContentTarget(target) {
         externalURL: target.hideExternalLink ? '' : objectURL,
         pageRange,
         dailyPage: target.taskType === 'daily_devotion' && blobType === 'pdf'
-          ? (isTrimmedPDFSource(sourceAPIPath) ? 1 : Number(pageRange.split('-')[0]))
+          ? pdfViewerSinglePage(target.taskType, pageRange, sourceAPIPath, window.location.origin)
           : 0,
         relatedSections: target.relatedSections || (isMediaResourceType(blobType) ? buildMediaViewerSections({ ...target, sourceURL, url: viewerURL, type: blobType, title }) : []),
       };
@@ -1215,7 +1216,7 @@ export async function openContentTarget(target) {
     externalURL: target.hideExternalLink ? '' : sourceURL,
     pageRange,
     dailyPage: target.taskType === 'daily_devotion' && type === 'pdf'
-      ? Number(pageRange.split('-')[0])
+      ? pdfViewerSinglePage(target.taskType, pageRange, sourceURL, window.location.origin)
       : 0,
     relatedSections: target.relatedSections || (isMediaResourceType(type) ? buildMediaViewerSections({ ...target, sourceURL, url: viewerURL, type, title }) : []),
   };

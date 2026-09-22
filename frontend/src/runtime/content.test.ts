@@ -18,6 +18,7 @@ import {
   normalizeSearchText,
   parsePdfPageRangeParts,
   parseReaderPageRequest,
+  pdfViewerSinglePage,
   resolvePdfPageRange,
   sameOriginAPIPath,
   shouldRenderWeeklyTask,
@@ -290,5 +291,32 @@ describe('content runtime helpers', () => {
       '88-96',
       'http://localhost:5114',
     )).toBe('iframe');
+  });
+
+  it('renders every page in a multi-page daily PDF range while preserving single-page behavior', () => {
+    expect(pdfViewerSinglePage(
+      'daily_devotion',
+      '1-10',
+      '/api/assets/22/range?pages=1-10',
+      'http://localhost:5114',
+    )).toBe(0);
+    expect(pdfViewerSinglePage(
+      'daily_devotion',
+      '10-10',
+      '/api/assets/22/range?pages=10-10',
+      'http://localhost:5114',
+    )).toBe(1);
+    expect(pdfViewerSinglePage(
+      'daily_devotion',
+      '10-12',
+      'https://example.com/book.pdf',
+      'http://localhost:5114',
+    )).toBe(10);
+    expect(pdfViewerSinglePage(
+      'weekly_book',
+      '1-10',
+      '/api/assets/22/range?pages=1-10',
+      'http://localhost:5114',
+    )).toBe(0);
   });
 });

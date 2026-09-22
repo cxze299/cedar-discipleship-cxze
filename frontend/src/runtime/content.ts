@@ -83,6 +83,22 @@ export function normalizeContentViewerType(
   return type;
 }
 
+export function pdfViewerSinglePage(
+  taskType: unknown,
+  pageRange: unknown,
+  sourceURL: unknown,
+  origin = '',
+): number {
+  if (taskType !== 'daily_devotion') return 0;
+  const normalizedRange = resolvePdfPageRange({ pageRange });
+  if (!normalizedRange) return 0;
+  const [start, end] = normalizedRange.split('-').map(Number);
+  const apiPath = sameOriginAPIPath(sourceURL, origin) || String(sourceURL || '');
+  const trimmedSource = /^\/api\/assets\/\d+\/range\b/.test(apiPath);
+  if (trimmedSource && end > start) return 0;
+  return trimmedSource ? 1 : start;
+}
+
 export type AttachmentPresentation = {
   action: 'preview' | 'download';
   type: 'pdf' | 'image' | 'video' | 'audio' | 'markdown' | 'download';
