@@ -242,6 +242,11 @@ func botTaskLabel(taskType string, values ...string) string {
 	case "daily_devotion":
 		return "每日灵修"
 	case "daily_scripture":
+		for _, value := range values {
+			if label := strings.TrimSpace(value); label != "" {
+				return label
+			}
+		}
 		return "每日读经"
 	case "weekly_book":
 		return "周读物"
@@ -250,6 +255,11 @@ func botTaskLabel(taskType string, values ...string) string {
 	case "weekly_verse":
 		return "周背经"
 	case "weekly_outline":
+		for _, value := range values {
+			if label := strings.TrimSpace(value); label != "" {
+				return label
+			}
+		}
 		return "提纲背诵"
 	}
 	for _, value := range values {
