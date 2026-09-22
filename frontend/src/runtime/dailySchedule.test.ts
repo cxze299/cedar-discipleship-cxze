@@ -75,7 +75,8 @@ describe('resolveEffectiveSchedule', () => {
         { book: '乙', book_id: '2', chapters: 2 },
       ],
     };
-    expect(scriptureChaptersForDate(scripture, '2026-05-10')).toEqual([
+    expect(scriptureChaptersForDate(scripture, '2026-05-10')).toEqual([]);
+    expect(scriptureChaptersForDate(scripture, '2026-05-11')).toEqual([
       { bookName: '甲', bookId: '1', chapter: 2 },
       { bookName: '甲', bookId: '1', chapter: 3 },
     ]);
@@ -85,5 +86,27 @@ describe('resolveEffectiveSchedule', () => {
     ]);
     expect(scriptureChaptersForDate(scripture, '2026-05-13')).toEqual([]);
     expect(scriptureChaptersForDate({ ...scripture, type: 'checkin' }, '2026-05-11')).toEqual([]);
+  });
+
+  it('uses the archived scripture plan until the next one starts', () => {
+    const scripture = {
+      start_date: '2026-09-24',
+      book: '帖撒罗尼迦前书',
+      book_id: '52',
+      max_chapters: 5,
+      schedule_history: [{
+        start_date: '2026-09-20',
+        book: '约翰福音',
+        book_id: '43',
+        max_chapters: 21,
+      }],
+    };
+    expect(scriptureChaptersForDate(scripture, '2026-09-19')).toEqual([]);
+    expect(scriptureChaptersForDate(scripture, '2026-09-22')).toEqual([
+      { bookName: '约翰福音', bookId: '43', chapter: 3 },
+    ]);
+    expect(scriptureChaptersForDate(scripture, '2026-09-24')).toEqual([
+      { bookName: '帖撒罗尼迦前书', bookId: '52', chapter: 1 },
+    ]);
   });
 });

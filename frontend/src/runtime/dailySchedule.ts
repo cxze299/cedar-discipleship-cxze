@@ -74,7 +74,9 @@ export function scriptureChaptersForDate(
   const books = normalizeScriptureBooks(effective);
   if (!books.length) return [];
 
-  let offset = Math.max(0, dayOffsetFrom(startDate, date)) * chaptersPerDay;
+  const daysSinceStart = dayOffsetFrom(startDate, date);
+  if (daysSinceStart < 0) return [];
+  let offset = daysSinceStart * chaptersPerDay;
   let firstChapter = Math.max(1, Number(effective.start_chapter || 1));
   for (let index = 0; index < books.length; index += 1) {
     const book = books[index];
