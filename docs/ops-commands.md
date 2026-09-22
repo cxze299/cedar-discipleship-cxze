@@ -16,6 +16,36 @@ docs/deploy-new-environment.md
 docs/migrate-other-groups.md
 ```
 
+## 推荐生产发布：预构建镜像
+
+`master` 推送后，GitHub Actions 会构建并推送以下镜像：
+
+```text
+ghcr.io/wangz5940/cedar-discipleship-backend:<commit-sha>
+ghcr.io/wangz5940/cedar-discipleship-frontend:<commit-sha>
+```
+
+NAS 上发布时不再编译代码，只拉取当前 Git 提交对应的镜像并替换后端/前端容器：
+
+```bash
+cd /volume2/docker/cedar-discipleship
+./scripts/nas-deploy-prebuilt.sh
+```
+
+如果 GHCR 包是私有的，NAS 需要先登录一次：
+
+```bash
+sudo /usr/local/bin/docker login ghcr.io -u <github-user>
+```
+
+脚本会使用 `/tmp/cedar-prebuilt-deploy.lock` 防止重复发布并发执行。需要回滚时指定目标提交：
+
+```bash
+AGP_GIT_REF=<commit-sha> ./scripts/nas-deploy-prebuilt.sh
+```
+
+本地开发和应急发布仍可继续使用 `docker compose ... up -d --build`。
+
 ## 启动与停止
 
 在项目根目录执行：
@@ -388,7 +418,7 @@ EXECUTE_IMPORT=true \
 ./scripts/migrate-legacy-project.sh
 ```
 
-正式导入会写入新学习小组、成员、周任务、任务资源绑定和打卡记录，并迁移本组独有资料文件。其他小组已共享的同名同类资源会优先复用。
+正式导入会写入新学习小组、成员、周任务、任务资源绑定和打卡记录，并迁移本组独有资料文件。资源按 `SHA-256 + 文件字节长度` 精确判重；跨组命中时通过有效共享授权导入，不复制物理文件。
 
 迁移报告会输出到：
 
@@ -396,10 +426,11 @@ EXECUTE_IMPORT=true \
 data/migration-reports/
 ```
 
-当前导入规则：
+导入规则：
 
 - `config.json` 导入 `study_groups`、`group_settings`、`users`、`group_members`、`user_group_roles`、`study_weeks`、`study_tasks`、`assets`、`task_assets`。
 - `records.json` 导入 `checkin_records`。
+- 目标小组已存在时复用原记录并保留其启停状态。
 - 成员账号由系统按中文姓名生成拼音。
 - `daily=done` -> `daily_devotion`。
 - `book=done` -> `weekly_book`。

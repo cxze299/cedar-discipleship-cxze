@@ -282,7 +282,7 @@ func InsertWeekTx(ctx context.Context, tx *sql.Tx, groupID uint64, input WeekInp
 }
 
 func (r *MySQLRepository) taskAssets(ctx context.Context, groupID, taskID uint64) ([]TaskAsset, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT a.id,a.category,a.title,a.original_name,ta.usage_type
+	rows, err := r.db.QueryContext(ctx, `SELECT a.id,a.category,a.title,a.original_name,a.mime_type,ta.usage_type
 		FROM task_assets ta JOIN assets a ON a.id=ta.asset_id
 		WHERE ta.group_id=? AND ta.task_id=? AND a.group_id=ta.group_id
 		ORDER BY ta.sort_order,ta.id`, groupID, taskID)
@@ -294,7 +294,7 @@ func (r *MySQLRepository) taskAssets(ctx context.Context, groupID, taskID uint64
 	var assets []TaskAsset
 	for rows.Next() {
 		var asset TaskAsset
-		if err := rows.Scan(&asset.ID, &asset.Category, &asset.Title, &asset.OriginalName, &asset.UsageType); err != nil {
+		if err := rows.Scan(&asset.ID, &asset.Category, &asset.Title, &asset.OriginalName, &asset.MimeType, &asset.UsageType); err != nil {
 			return nil, err
 		}
 		assets = append(assets, asset)
@@ -384,7 +384,7 @@ func ReplaceWeekTasksWithIDsTx(
 
 func insertStudyTaskTx(ctx context.Context, tx *sql.Tx, groupID, weekID uint64, task TaskDraft, now time.Time) (uint64, error) {
 	res, err := tx.ExecContext(ctx, `INSERT INTO study_tasks (group_id,week_id,task_type,title,content,required,enabled,sort_order,created_at,updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?)`, groupID, weekID, task.TaskType, task.Title, task.Content, true, true, task.SortOrder, now, now)
+		VALUES (?,?,?,?,?,?,?,?,?,?)`, groupID, weekID, task.TaskType, task.Title, task.Content, !task.Optional, true, task.SortOrder, now, now)
 	if err != nil {
 		return 0, err
 	}

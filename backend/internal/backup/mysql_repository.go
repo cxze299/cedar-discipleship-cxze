@@ -1150,7 +1150,7 @@ func resolveCheckinTargetTx(
 	taskIDs map[uint64]uint64,
 	checkin Checkin,
 ) (any, any, error) {
-	if checkin.TaskType == "daily_devotion" {
+	if checkin.TaskType == "daily_devotion" || checkin.TaskType == "daily_scripture" {
 		return nil, nil, nil
 	}
 	weekID := weekIDs[checkin.WeekID]

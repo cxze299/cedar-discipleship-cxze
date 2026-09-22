@@ -17,7 +17,7 @@ usage() {
 
 说明:
   默认 dry-run，不写数据库。
-  默认 PREFER_SHARED_ASSETS=true，会优先复用其他小组已共享的同名同类资源。
+  资源文件按 SHA-256 和字节长度判重；跨组命中时只允许导入共享资源。
   EXECUTE_IMPORT=true 时，会在数据导入后迁移本小组独有资料文件。
 EOF
 }
@@ -56,9 +56,8 @@ fi
 
 CONFIG_PATH="${CONFIG_PATH:-$SOURCE_PROJECT_DIR/config.json}"
 RECORDS_PATH="${RECORDS_PATH:-$SOURCE_PROJECT_DIR/data/records.json}"
-PREFER_SHARED_ASSETS="${PREFER_SHARED_ASSETS:-true}"
 EXECUTE_IMPORT="${EXECUTE_IMPORT:-false}"
-export CONFIG_PATH RECORDS_PATH PREFER_SHARED_ASSETS
+export CONFIG_PATH RECORDS_PATH
 
 "$ROOT_DIR/scripts/migrate-group.sh"
 

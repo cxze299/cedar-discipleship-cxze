@@ -164,7 +164,7 @@ export RESOURCE_LEGACY_ROOT='/absolute/path/to/old-resource-root'
 
 ### 已上线后继续迁移其他组
 
-旧独立项目目录迁移使用一站式入口。它会读取旧项目下的 `config.json` 和 `data/records.json`，正式导入后迁移本组独有资料文件；已由其他小组共享的同名同类资源会优先复用，不重复复制文件。
+旧独立项目目录迁移使用一站式入口。它会读取旧项目下的 `config.json` 和 `data/records.json`，正式导入后按 `SHA-256 + 文件字节长度` 判断文件是否唯一；其他小组已有相同内容时必须通过有效共享授权导入，不重复复制文件。
 
 ```bash
 SOURCE_PROJECT_DIR='/volume1/docker/zw1-checkin' \
@@ -221,30 +221,17 @@ MYSQL_PASSWORD=agp \
 
 ## 打卡群通知
 
-### 外部门训提醒机器人（多小组）
-
-外部 Potato 提醒机器人使用受密钥保护的 Bot API。部署环境设置一个长随机值：
+使用 Potato 机器人的 `sendTextMessage` 接口。推荐在部署环境 `.env` 中集中配置多个机器人：
 
 ```dotenv
-AGP_BOT_API_KEY=replace-with-a-long-random-secret
+AGP_POTATO_ROBOTS='{"primary":{"name":"主机器人","token":"123:secret","groups":{"1":{"chat_id":12345678,"chat_type":2}}},"backup":{"name":"备用机器人","token":"456:secret"}}'
 ```
 
-机器人先请求 `GET /api/bot/groups` 获取学习小组，再把每个小组配置为独立站点，站点地址为
-`https://example.com/api/bot/groups/{group_code}`，并携带
-`Authorization: Bearer <AGP_BOT_API_KEY>`。兼容接口包括 `GET /config`、`GET /state`、
-`POST /checkins` 和 `DELETE /checkins/{id}`。
+`groups` 仅用于机器人首次启动时导入绑定。之后由超级管理员在“管理后台 → 机器人管理”中新增机器人、查看每个机器人的认证状态、队列状态和已加入群聊，并设置对应学习小组。同一机器人的一个群聊只能绑定一个学习小组；不同机器人可以使用相同的群聊 ID。
 
-周任务补签会按目标日期查找所属学习周并写入该小组真实的 `week_id` 和 `task_id`；
-不存在对应学习周或任务时会拒绝写入。状态和总结数据从 2026-04-06 开始返回。
+机器人 ID 使用小写字母开头，可包含小写字母、数字、`_` 和 `-`，最多配置 32 个机器人。未设置 `AGP_POTATO_ROBOTS` 时，系统继续读取原有的 `AGP_POTATO_BOT_TOKEN` 和 `AGP_POTATO_GROUPS`，并注册为 `default` 机器人。该机器人的现有绑定、队列和已发送状态仍保存在 `${AGP_NOTIFICATION_DIR}`；其他机器人保存在 `${AGP_NOTIFICATION_DIR}/robots/{robot_id}`。页面新增的机器人 Token 保存在 `${AGP_NOTIFICATION_DIR}/robots.json`，文件权限为 `0600`，API 和前端状态不会返回 Token。
 
-使用 Potato 机器人的 `sendTextMessage` 接口。将机器人加入目标群，并在部署环境 `.env` 中设置：
-
-```dotenv
-AGP_POTATO_BOT_TOKEN='机器人 Token'
-AGP_POTATO_GROUPS='{"1":{"chat_id":12345678,"chat_type":2},"2":{"chat_id":23456789,"chat_type":3}}'
-```
-
-`AGP_POTATO_GROUPS` 仅用于首次启动时导入绑定。之后由超级管理员在“管理后台 → 机器人管理”中查看机器人当前加入的群聊，并设置对应学习小组。绑定保存在 `${AGP_NOTIFICATION_DIR}/bindings.json`；一个群聊只能绑定一个学习小组，一个学习小组可绑定多个群聊。Token 仅保存在服务端环境中。
+Potato 不提供机器人主动加入指定群聊的 API。需先允许机器人被加入群聊，再由群管理员在 Potato 客户端中完成添加。接口、参数、认证、响应、权限和限流说明见 [Potato 机器人加入群聊能力](docs/potato-bot-group-joining.md)。
 
 重新构建并启动后端：
 
@@ -282,11 +269,11 @@ docker compose --env-file .env -f deploy/docker-compose.separated.yml up -d --bu
 2 李四 史剧 【新】视频
 ```
 
-待发、完成、失败记录分别保存在 `${AGP_DATA_DIR}/notifications/{pending,completed,failed}`，每群每类别最后成功发送状态保存在 `${AGP_DATA_DIR}/notifications/last-sent`。Compose 默认路径为 `data/notifications`。每个队列目录由一个后端实例使用；备份和清理时按服务数据管理，其中包含群内通知正文。完成、失败记录保留用于排查，可按运维留存周期归档。直接运行 Go 后端时可通过 `AGP_NOTIFICATION_DIR` 设置队列路径，保持独立于公开资源目录。
+默认机器人的待发、完成、失败记录分别保存在 `${AGP_DATA_DIR}/notifications/{pending,completed,failed}`，其他机器人保存在 `${AGP_DATA_DIR}/notifications/robots/{robot_id}/`。每群每类别最后成功发送状态位于各机器人目录的 `last-sent`。Compose 默认根路径为 `data/notifications`。每个队列目录由一个后端实例使用；备份和清理时按服务数据管理，其中包含群内通知正文。完成、失败记录保留用于排查，可按运维留存周期归档。直接运行 Go 后端时可通过 `AGP_NOTIFICATION_DIR` 设置队列根路径，保持独立于公开资源目录。
 
 升级时会从现有 `completed` 记录自动建立 `last-sent` 状态，避免重复发送历史通知。
 
-发送超时为 10 秒，队列每秒最多发送一段。网络错误、HTTP 429/5xx、Potato 1001/1007/4048 最多尝试 5 次，按 10/20/40/80 秒退避并遵守 `Retry-After`。永久错误进入 `failed`；超过当天或本周有效期的消息归档为 `skipped`。重试使用已保存的正文；周任务保留已冻结的【新】标记。
+发送超时为 10 秒，每个机器人有独立队列且每秒最多发送一段。网络错误、HTTP 429/5xx、Potato 1001/1007/4048 最多尝试 5 次，按 10/20/40/80 秒退避并遵守 `Retry-After`。永久错误进入该机器人的 `failed`；超过当天或本周有效期的消息归档为 `skipped`。重试使用已保存的正文；周任务保留已冻结的【新】标记。
 
 查看发送日志：
 

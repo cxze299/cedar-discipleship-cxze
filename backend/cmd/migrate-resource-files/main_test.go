@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -54,6 +56,154 @@ func TestLegacyRelativePath(t *testing.T) {
 				t.Fatalf("legacyRelativePath() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestFingerprintFileUsesContentAndSize(t *testing.T) {
+	t.Parallel()
+
+	leftDir := t.TempDir()
+	rightDir := t.TempDir()
+	left := filepath.Join(leftDir, "first.pdf")
+	right := filepath.Join(rightDir, "renamed.pptx")
+	for _, filePath := range []string{left, right} {
+		if err := os.WriteFile(filePath, []byte("same bytes"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	leftFingerprint, err := fingerprintFile(left)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rightFingerprint, err := fingerprintFile(right)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if leftFingerprint != rightFingerprint {
+		t.Fatalf("fingerprints differ: %#v %#v", leftFingerprint, rightFingerprint)
+	}
+
+	if err := os.WriteFile(right, []byte("different bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	differentFingerprint, err := fingerprintFile(right)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if differentFingerprint == leftFingerprint {
+		t.Fatal("different content has the same fingerprint")
+	}
+}
+
+func TestSelectReusableAssetRequiresImportableOwnedSource(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		candidates []reusableAsset
+		hasMatch   bool
+		wantID     uint64
+		wantReuse  bool
+		wantErr    error
+	}{
+		{
+			name: "no cross-group match",
+		},
+		{
+			name: "one importable match",
+			candidates: []reusableAsset{
+				{ID: 20, GroupID: 2, Importable: true},
+			},
+			hasMatch:  true,
+			wantID:    20,
+			wantReuse: true,
+		},
+		{
+			name: "stable provider selection",
+			candidates: []reusableAsset{
+				{ID: 30, GroupID: 3, Importable: true},
+				{ID: 21, GroupID: 2, Importable: true},
+				{ID: 20, GroupID: 2, Importable: true},
+			},
+			hasMatch:  true,
+			wantID:    20,
+			wantReuse: true,
+		},
+		{
+			name: "matching content not shared",
+			candidates: []reusableAsset{
+				{ID: 20, GroupID: 2},
+			},
+			hasMatch: true,
+			wantErr:  errCrossGroupFileNotImportable,
+		},
+		{
+			name:     "dangling imported match",
+			hasMatch: true,
+			wantErr:  errCrossGroupFileNotImportable,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, reused, err := selectReusableAsset(tt.candidates, tt.hasMatch)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("error = %v, want %v", err, tt.wantErr)
+			}
+			if got.ID != tt.wantID || reused != tt.wantReuse {
+				t.Fatalf("selectReusableAsset() = (%#v,%v), want id=%d reused=%v",
+					got, reused, tt.wantID, tt.wantReuse)
+			}
+		})
+	}
+}
+
+func TestReplaceAssetIDUpdatesNestedDownloadURLs(t *testing.T) {
+	t.Parallel()
+
+	var settings any = map[string]any{
+		"daily": map[string]any{
+			"path": "/api/assets/10/download",
+			"items": []any{
+				"https://example.com/api/assets/10/download",
+				"/api/assets/11/download",
+			},
+		},
+	}
+	if !replaceAssetID(&settings, 10, 20) {
+		t.Fatal("replaceAssetID() changed = false")
+	}
+	payload, err := json.Marshal(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(payload)
+	if strings.Count(got, "/api/assets/20/download") != 2 ||
+		strings.Contains(got, "/api/assets/10/download") ||
+		!strings.Contains(got, "/api/assets/11/download") {
+		t.Fatalf("settings = %s", got)
+	}
+}
+
+func TestReplaceLegacyPathUpdatesOnlyExactNormalizedPath(t *testing.T) {
+	t.Parallel()
+
+	var settings any = map[string]any{
+		"path": "/Book/%E5%9F%BA%E7%9D%A3.pdf",
+		"other": map[string]any{
+			"path": "/Book/other.pdf",
+		},
+	}
+	if !replaceLegacyPath(&settings, "Book/基督.pdf", 20) {
+		t.Fatal("replaceLegacyPath() changed = false")
+	}
+	payload, err := json.Marshal(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(payload)
+	if !strings.Contains(got, "/api/assets/20/download") ||
+		!strings.Contains(got, "/Book/other.pdf") {
+		t.Fatalf("settings = %s", got)
 	}
 }
 

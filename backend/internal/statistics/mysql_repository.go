@@ -16,7 +16,7 @@ func NewMySQLRepository(db *sql.DB) *MySQLRepository {
 }
 
 func (r *MySQLRepository) DailySummary(ctx context.Context, groupID uint64, from, to string) (map[string]int, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT task_type, COUNT(*) FROM checkin_records WHERE group_id=? AND logical_date BETWEEN ? AND ? AND deleted_at IS NULL GROUP BY task_type`, groupID, from, to)
+	rows, err := r.db.QueryContext(ctx, `SELECT task_type, COUNT(*) FROM checkin_records WHERE group_id=? AND logical_date BETWEEN ? AND ? AND deleted_at IS NULL AND status='done' GROUP BY task_type`, groupID, from, to)
 	if err != nil {
 		return nil, err
 	}
@@ -59,8 +59,8 @@ func (r *MySQLRepository) Members(ctx context.Context, groupID uint64) ([]Member
 func (r *MySQLRepository) MonthlyNonVideoTaskCounts(ctx context.Context, groupID uint64, from, to string) ([]TaskCount, error) {
 	rows, err := r.db.QueryContext(ctx, `SELECT user_id,task_type,COUNT(*)
 		FROM checkin_records
-		WHERE group_id=? AND logical_date BETWEEN ? AND ? AND deleted_at IS NULL
-		  AND task_type IN ('daily_devotion','weekly_book','weekly_outline')
+		WHERE group_id=? AND logical_date BETWEEN ? AND ? AND deleted_at IS NULL AND status='done'
+		  AND task_type IN ('daily_devotion','daily_scripture','weekly_checkin','weekly_book','weekly_outline')
 		GROUP BY user_id,task_type`, groupID, from, to)
 	if err != nil {
 		return nil, err
@@ -110,6 +110,7 @@ func (r *MySQLRepository) MonthlyVideoCompletionCounts(ctx context.Context, grou
 		      AND c.user_id=gm.user_id
 		      AND c.task_type='weekly_video'
 		      AND c.deleted_at IS NULL
+		      AND c.status='done'
 		      AND (
 		        c.task_id=current_task.id
 		        OR (
@@ -150,7 +151,7 @@ func (r *MySQLRepository) MonthlyVideoCompletionCounts(ctx context.Context, grou
 }
 
 func (r *MySQLRepository) MemberCalendar(ctx context.Context, groupID, userID uint64, from, to string) ([]CalendarItem, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT logical_date, task_type, part FROM checkin_records WHERE group_id=? AND user_id=? AND logical_date BETWEEN ? AND ? AND deleted_at IS NULL ORDER BY logical_date`, groupID, userID, from, to)
+	rows, err := r.db.QueryContext(ctx, `SELECT logical_date, task_type, part FROM checkin_records WHERE group_id=? AND user_id=? AND logical_date BETWEEN ? AND ? AND deleted_at IS NULL AND status='done' ORDER BY logical_date`, groupID, userID, from, to)
 	if err != nil {
 		return nil, err
 	}

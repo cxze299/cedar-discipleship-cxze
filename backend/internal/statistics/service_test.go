@@ -2,6 +2,7 @@ package statistics
 
 import (
 	"context"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -96,8 +97,10 @@ func TestSummaryUsesVideoCompletionCounts(t *testing.T) {
 
 	service := NewService(&serviceTestRepository{
 		summary: map[string]int{
-			"daily_devotion": 4,
-			"weekly_video":   0,
+			"daily_devotion":  4,
+			"daily_scripture": 2,
+			"weekly_checkin":  1,
+			"weekly_video":    0,
 		},
 		videoCounts: []TaskCount{
 			{UserID: 2, TaskType: "weekly_video", Count: 1},
@@ -114,6 +117,9 @@ func TestSummaryUsesVideoCompletionCounts(t *testing.T) {
 	}
 	if got := result.Summary["daily_devotion"]; got != 4 {
 		t.Fatalf("daily devotion summary = %d, want 4", got)
+	}
+	if result.Summary["daily_scripture"] != 2 || result.Summary["weekly_checkin"] != 1 {
+		t.Fatalf("summary lost independent task identities: %#v", result.Summary)
 	}
 }
 
@@ -144,4 +150,85 @@ func TestMonthlyRankingIncludesUniqueVideoResourceCompletions(t *testing.T) {
 	if got := result.Items[0].Total; got != 4 {
 		t.Fatalf("total = %d, want 4", got)
 	}
+}
+
+func TestMonthlyRankingTaskTypes(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		counts []TaskCount
+		want   map[string]int
+		total  int
+	}{
+		{
+			name: "empty counts expose independent types",
+			want: map[string]int{
+				"daily_devotion": 0, "daily_scripture": 0, "weekly_checkin": 0,
+				"weekly_book": 0, "weekly_video": 0, "weekly_outline": 0,
+			},
+		},
+		{
+			name: "scripture and aggregate do not complete devotion or books",
+			counts: []TaskCount{
+				{UserID: 2, TaskType: "daily_scripture", Count: 3},
+				{UserID: 2, TaskType: "weekly_checkin", Count: 1},
+				{UserID: 99, TaskType: "daily_scripture", Count: 50},
+			},
+			want: map[string]int{
+				"daily_devotion": 0, "daily_scripture": 3, "weekly_checkin": 1,
+				"weekly_book": 0, "weekly_video": 0, "weekly_outline": 0,
+			},
+			total: 4,
+		},
+		{
+			name: "old and new task counts coexist",
+			counts: []TaskCount{
+				{UserID: 2, TaskType: "daily_devotion", Count: 2},
+				{UserID: 2, TaskType: "daily_scripture", Count: 3},
+				{UserID: 2, TaskType: "weekly_checkin", Count: 1},
+				{UserID: 2, TaskType: "weekly_book", Count: 4},
+				{UserID: 2, TaskType: "weekly_outline", Count: 1},
+			},
+			want: map[string]int{
+				"daily_devotion": 2, "daily_scripture": 3, "weekly_checkin": 1,
+				"weekly_book": 4, "weekly_video": 0, "weekly_outline": 1,
+			},
+			total: 11,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			service := NewService(&serviceTestRepository{
+				members: []Member{{MemberID: 1, UserID: 2, MemberName: "member"}},
+				counts:  tt.counts,
+			})
+			result, err := service.MonthlyRanking(t.Context(), 1, "2026-08", "", "", time.UTC)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(result.Items) != 1 {
+				t.Fatalf("ranking includes nonmembers: %#v", result.Items)
+			}
+			item := result.Items[0]
+			if !reflect.DeepEqual(item.Counts, tt.want) || item.Total != tt.total {
+				t.Fatalf("ranking = %#v, want counts=%#v total=%d", item, tt.want, tt.total)
+			}
+		})
+	}
+	t.Run("legacy devotion tie breaker remains unchanged", func(t *testing.T) {
+		service := NewService(&serviceTestRepository{
+			members: []Member{{UserID: 1}, {UserID: 2}},
+			counts: []TaskCount{
+				{UserID: 1, TaskType: "daily_scripture", Count: 2},
+				{UserID: 2, TaskType: "daily_devotion", Count: 2},
+			},
+		})
+		result, err := service.MonthlyRanking(t.Context(), 1, "2026-08", "", "", time.UTC)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(result.Items) != 2 || result.Items[0].UserID != 2 {
+			t.Fatalf("legacy tie breaker changed: %#v", result.Items)
+		}
+	})
 }

@@ -18,13 +18,16 @@ zw1-checkin/
 
 ## 迁移原则
 
-- 每个旧项目迁入为一个新的学习小组。
+- 每个旧项目按 `GROUP_CODE` 迁入一个学习小组；编码不存在时创建，已存在时复用。
 - `GROUP_NAME` 是后台展示和维护的小组名称。
 - `GROUP_CODE` 是迁移和资源目录使用的内部稳定标识，迁入后后台不再修改。
+- `GROUP_CODE` 已存在时复用原小组；可同步展示名称，但不会修改该小组的启停状态。
 - 成员只以中文姓名导入，系统生成拼音账号。
 - 周任务、任务资源绑定和历史打卡按小组隔离写入。
-- 资源迁移优先复用其他小组已共享的同名同类资源。
-- 未命中共享资源的本组独有文件复制到 `data/resources`。
+- 文件唯一性只由 `SHA-256 + 文件字节长度` 判断；文件名、标题、目录和分类不参与判重。
+- 当前小组已有相同指纹时复用当前记录；其他小组已有相同指纹时，只允许从启用小组的有效自有资源导入，且必须存在面向当前小组或所有小组的有效导入授权。
+- 其他小组存在相同文件但无有效授权时，迁移以 `cross_group_file_not_importable` 失败，不会复制第二份。
+- 系统中不存在相同指纹时，该文件才视为本组独有文件并复制到 `data/resources`。
 - NAS 独立数据目录通过 `.env` 的 `AGP_RESOURCE_ROOT` 或 `AGP_DATA_DIR/resources` 定位；如果配置缺失，会自动识别同级 `cedar-discipleship-data/resources`。
 
 ## Dry Run
@@ -51,7 +54,7 @@ data/migration-reports/
 - 小组名称和内部编码正确。
 - 成员、周任务、打卡记录数量符合旧项目。
 - `warnings` 和 `failures` 为空或已确认。
-- `shared_assets` 中列出的资源确实可复用。
+- 资源文件 dry-run 中的 `imported_files` 和 `would import` 与预期一致。
 
 ## 正式迁移
 
@@ -76,7 +79,6 @@ EXECUTE_IMPORT=true \
 ## 可选参数
 
 ```bash
-PREFER_SHARED_ASSETS=true
 ALLOW_DUPLICATE_AS_DELETED=false
 FAIL_ON_GENERATED_USERNAMES=false
 RESOURCE_MIGRATION_DRY_RUN_ONLY=false
@@ -85,11 +87,12 @@ RESOURCE_LEGACY_ASSETS_ROOT=/volume1/docker/zw1-checkin/data/assets
 
 说明：
 
-- `PREFER_SHARED_ASSETS=true`：优先复用其他小组已共享资源。
 - `ALLOW_DUPLICATE_AS_DELETED=true`：重复打卡以软删除历史保留。
 - `FAIL_ON_GENERATED_USERNAMES=true`：需要自动生成账号时直接失败。
 - `RESOURCE_MIGRATION_DRY_RUN_ONLY=true`：只写入数据，不复制资源文件。
 - `RESOURCE_LEGACY_ASSETS_ROOT`：旧项目存在额外上传目录时指定。
+
+`migrate-json --prefer-shared-assets` 仅作为无行为影响的 CLI 兼容参数保留。资源迁移始终在资源文件阶段读取实际文件内容，并按上述指纹规则决定导入或复制。
 
 ## 验收清单
 

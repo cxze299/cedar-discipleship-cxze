@@ -39,6 +39,7 @@ type TaskAsset struct {
 	Category     string
 	Title        string
 	OriginalName string
+	MimeType     string
 	UsageType    string
 }
 
@@ -49,4 +50,5 @@ type TaskDraft struct {
 	SortOrder int
 	AssetID   uint64
 	UsageType string
+	Optional  bool
 }

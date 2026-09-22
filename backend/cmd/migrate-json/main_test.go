@@ -1,9 +1,112 @@
 package main
 
 import (
+	"context"
+	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
+	"errors"
+	"io"
+	"strings"
 	"testing"
 )
+
+type existingGroupConnector struct {
+	t *testing.T
+}
+
+func (c *existingGroupConnector) Connect(context.Context) (driver.Conn, error) {
+	return &existingGroupConn{t: c.t}, nil
+}
+
+func (*existingGroupConnector) Driver() driver.Driver { return existingGroupDriver{} }
+
+type existingGroupDriver struct{}
+
+func (existingGroupDriver) Open(string) (driver.Conn, error) {
+	return nil, errors.New("use connector")
+}
+
+type existingGroupConn struct {
+	t *testing.T
+}
+
+func (*existingGroupConn) Prepare(string) (driver.Stmt, error) {
+	return nil, errors.New("unexpected prepare")
+}
+
+func (*existingGroupConn) Close() error { return nil }
+
+func (*existingGroupConn) Begin() (driver.Tx, error) { return existingGroupTx{}, nil }
+
+func (c *existingGroupConn) QueryContext(
+	_ context.Context,
+	query string,
+	args []driver.NamedValue,
+) (driver.Rows, error) {
+	if !strings.Contains(query, "SELECT id FROM study_groups WHERE code=?") {
+		c.t.Fatalf("unexpected query: %s", query)
+	}
+	if len(args) != 1 || args[0].Value != "existing" {
+		c.t.Fatalf("query args = %#v", args)
+	}
+	return &existingGroupRows{rows: [][]driver.Value{{int64(42)}}}, nil
+}
+
+func (c *existingGroupConn) ExecContext(
+	_ context.Context,
+	query string,
+	args []driver.NamedValue,
+) (driver.Result, error) {
+	if !strings.Contains(query, "UPDATE study_groups SET name=?, updated_at=? WHERE id=?") ||
+		strings.Contains(strings.ToLower(query), "status") {
+		c.t.Fatalf("existing group update changes status: %s", query)
+	}
+	if len(args) != 3 || args[0].Value != "replacement" || args[2].Value != int64(42) {
+		c.t.Fatalf("exec args = %#v", args)
+	}
+	return driver.RowsAffected(1), nil
+}
+
+type existingGroupTx struct{}
+
+func (existingGroupTx) Commit() error   { return nil }
+func (existingGroupTx) Rollback() error { return nil }
+
+type existingGroupRows struct {
+	rows [][]driver.Value
+}
+
+func (*existingGroupRows) Columns() []string { return []string{"id"} }
+func (*existingGroupRows) Close() error      { return nil }
+
+func (r *existingGroupRows) Next(dest []driver.Value) error {
+	if len(r.rows) == 0 {
+		return io.EOF
+	}
+	copy(dest, r.rows[0])
+	r.rows = r.rows[1:]
+	return nil
+}
+
+func TestEnsureGroupPreservesExistingGroupStatus(t *testing.T) {
+	t.Parallel()
+	db := sql.OpenDB(&existingGroupConnector{t: t})
+	defer db.Close()
+	tx, err := db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+
+	id, created, err := ensureGroup(t.Context(), tx, "existing", "replacement", "hash", "2026-09-20")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != 42 || created {
+		t.Fatalf("ensureGroup() = (%d,%v), want (42,false)", id, created)
+	}
+}
 
 func TestTasksForWeekSplitsMultipleReadingsIntoMultipleWeeklyBookTasks(t *testing.T) {
 	titleJSON, err := json.Marshal([]string{
