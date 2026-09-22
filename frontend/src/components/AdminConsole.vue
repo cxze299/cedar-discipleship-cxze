@@ -167,6 +167,14 @@ function markdownOptionsWithCurrent(currentValue) {
   return [{ title: `${current}（当前配置）`, url: current, type: 'markdown' }, ...markdownFileOptions.value];
 }
 
+function selectDevotionFile(value) {
+  const selectedURL = String(value || '').trim();
+  updateLearning(['task_sections', 'daily', 'devotion', 'path'], selectedURL);
+  // A protected asset URL does not expose its .md extension. Persist the
+  // selected library type so the reader never falls back to a stale PDF type.
+  if (selectedURL) updateLearning(['task_sections', 'daily', 'devotion', 'type'], 'markdown');
+}
+
 async function uploadSelectedFile() {
   await uploadLibraryFile(uploadInput.value, uploadCategory.value);
 }
@@ -296,7 +304,7 @@ async function runLocalBackupImport() {
                       <label class="admin-toggle"><input type="checkbox" :checked="devotion.enabled !== false" @change="updateLearning(['task_sections','daily','devotion','enabled'], $event.target.checked)" /><span>显示灵修入口</span></label>
                       <label class="admin-field">
                         <span class="admin-field-label">灵修文件</span>
-                        <select :value="devotion.path || ''" @change="updateLearning(['task_sections','daily','devotion','path'], $event.target.value)">
+                        <select :value="devotion.path || ''" @change="selectDevotionFile($event.target.value)">
                           <option value="">未绑定资源</option>
                           <option v-for="option in markdownOptionsWithCurrent(devotion.path || daily.path)" :key="option.url" :value="option.url">{{ fileOptionText(option) }}</option>
                         </select>

@@ -5,6 +5,7 @@ import {
   classifyAttachment,
   deepMerge,
   enabledFlag,
+  extractNumberedMarkdownSection,
   extractPdfPageRange,
   markdownToSafeHTML,
   normalizeSearchText,
@@ -87,6 +88,14 @@ describe('content runtime helpers', () => {
     expect(html).toContain('href="/api/assets/12/download"');
     expect(html).not.toContain('href="/files/unmanaged.pdf"');
     expect(html).not.toContain('javascript:');
+  });
+
+  it('keeps devotion markdown readable across common section formats', () => {
+    expect(extractNumberedMarkdownSection('## 1. 第一篇\n内容一\n## 2、第二篇\n内容二', 2))
+      .toEqual(['## 2、第二篇', '内容二']);
+    expect(extractNumberedMarkdownSection('# 总标题\n没有分篇的内容', 8))
+      .toEqual(['# 总标题', '没有分篇的内容']);
+    expect(extractNumberedMarkdownSection('## 1\n内容一', 2)).toEqual([]);
   });
 
   it('recognizes same-origin protected API URLs', () => {

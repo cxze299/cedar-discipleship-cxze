@@ -20,6 +20,7 @@ import {
   buildReaderPageURL,
   deepMerge,
   enabledFlag,
+  extractNumberedMarkdownSection,
   extractPdfPageRange,
   isPlainObject,
   normalizePageField,
@@ -784,7 +785,7 @@ export async function openTaskContent(task, link = null) {
 
 function inferResourceType(url, fallback = 'iframe') {
   const clean = String(url || '').split('#')[0].split('?')[0].toLowerCase();
-  if (/\.md$/.test(clean)) return 'markdown';
+  if (/\.(?:md|markdown)$/.test(clean)) return 'markdown';
   if (/\.(pdf)$/.test(clean)) return 'pdf';
   if (/\.(png|jpg|jpeg|gif|webp|svg)$/.test(clean)) return 'image';
   if (/\.(mp4|webm|mov|m4v)$/.test(clean)) return 'video';
@@ -970,27 +971,6 @@ function markdownToHTML(content) {
   html = html.replace(/<p><h([1-6])>(.*?)<\/h\1><\/p>/g, '<h$1>$2</h$1>');
   html = html.replace(/<p><h3 class="viewer-section-heading">(.*?)<\/h3><\/p>/g, '<h3 class="viewer-section-heading">$1</h3>');
   return html;
-}
-
-function extractNumberedMarkdownSection(text, number) {
-  const lines = String(text || '').replace(/\r/g, '').split('\n');
-  const startRegex = new RegExp(`^#{1,6}\\s*${Number(number)}\\s*$`);
-  const stopRegex = /^#{1,6}\s*\d+\s*$/;
-  let capturing = false;
-  const content = [];
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-    if (!capturing) {
-      if (startRegex.test(line)) {
-        capturing = true;
-        content.push(rawLine);
-      }
-      continue;
-    }
-    if (stopRegex.test(line) && !startRegex.test(line)) break;
-    content.push(rawLine);
-  }
-  return content;
 }
 
 function isTrimmedPDFSource(url) {
@@ -1606,11 +1586,16 @@ function getDailyDevotionPlan(date = state.selectedDate) {
   if (cfg.enabled === false) return null;
   const title = toChineseMonthDay(date);
   const section = getDailyDevotionSectionNumber(date);
+  const path = cfg.path || daily.path || '';
+  const configuredType = String(cfg.type || '').trim().toLowerCase();
+  const type = /\.(?:md|markdown)(?:[?#]|$)/i.test(path)
+    ? 'markdown'
+    : (configuredType || inferResourceType(path, 'markdown'));
   return {
     label: title,
     title,
-    url: cfg.path || daily.path || '',
-    type: cfg.type || 'markdown',
+    url: path,
+    type,
     section,
   };
 }

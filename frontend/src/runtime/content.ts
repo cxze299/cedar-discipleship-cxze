@@ -89,6 +89,44 @@ export function classifyAttachment(input: { filename?: unknown; mimeType?: unkno
   return { action: 'download', type: 'download' };
 }
 
+function numberedMarkdownHeading(line: string): number | null {
+  const match = line.trim().match(/^#{1,6}\s*(?:第\s*)?(\d+)(?=\s|$|[.、:：]|篇|章|[-—])/);
+  if (!match) return null;
+  const value = Number(match[1]);
+  return Number.isInteger(value) && value > 0 ? value : null;
+}
+
+/**
+ * Select one numbered section from a devotion Markdown file.
+ *
+ * Files in the wild use headings such as `## 12`, `## 12. 标题`, and
+ * `## 第12篇`; when a file has no numbered headings, keep the whole file
+ * readable instead of returning an empty viewer.
+ */
+export function extractNumberedMarkdownSection(value: unknown, number: unknown): string[] {
+  const lines = String(value || '').replace(/\r/g, '').split('\n');
+  const requested = Math.max(1, Number(number) || 1);
+  const hasNumberedHeadings = lines.some((line) => numberedMarkdownHeading(line) !== null);
+  let capturing = false;
+  const content: string[] = [];
+
+  for (const rawLine of lines) {
+    const headingNumber = numberedMarkdownHeading(rawLine);
+    if (!capturing) {
+      if (headingNumber === requested) {
+        capturing = true;
+        content.push(rawLine);
+      }
+      continue;
+    }
+    if (headingNumber !== null && headingNumber !== requested) break;
+    content.push(rawLine);
+  }
+
+  if (capturing) return content;
+  return hasNumberedHeadings ? [] : lines;
+}
+
 export function weeklyTitleFromContent(input: {
   title?: unknown;
   book_enabled?: unknown;
