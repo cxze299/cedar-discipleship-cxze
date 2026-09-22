@@ -24,6 +24,7 @@ const readerFontSize = ref(readerPreferences.fontSize);
 const readerLineHeight = ref(readerPreferences.lineHeight);
 const readerSettingsOpen = ref(false);
 const readerMain = ref(null);
+const readerProgress = ref(0);
 const relatedMenu = ref(null);
 const videoElement = ref(null);
 const videoSource = ref('');
@@ -41,6 +42,7 @@ watch(
   [readerFontSize, readerLineHeight],
   ([fontSize, lineHeight]) => {
     localStorage.setItem(readerPreferenceKey, JSON.stringify({ fontSize, lineHeight }));
+    nextTick(updateReaderProgress);
   },
 );
 
@@ -50,6 +52,7 @@ const relatedSections = computed(() => {
 });
 
 const isMediaViewer = computed(() => ['video', 'audio'].includes(viewer.value?.type));
+const isMarkdownViewer = computed(() => viewer.value?.type === 'markdown');
 const hasRelatedSidebar = computed(() => relatedSections.value.length > 0);
 const activeSection = computed(() => {
   return relatedSections.value.find((section) => section.items?.some((item) => sameViewerItem(item, viewer.value))) || null;
@@ -76,13 +79,15 @@ const videoLoadingLabel = computed(() => {
 });
 
 watch(
-  () => [viewer.value?.type, viewer.value?.url],
+  () => [viewer.value?.type, viewer.value?.url, viewer.value?.html],
   ([type, url]) => {
     resetVideoLoading();
     readerSettingsOpen.value = false;
+    readerProgress.value = 0;
     nextTick(() => {
       if (readerMain.value) readerMain.value.scrollTop = 0;
       if (relatedMenu.value) relatedMenu.value.open = false;
+      updateReaderProgress();
     });
     if (type !== 'video' || !url) return;
     videoLoadState.value = 'loading';
@@ -226,6 +231,15 @@ function retryVideoLoad() {
   });
 }
 
+function updateReaderProgress() {
+  const element = readerMain.value;
+  if (!element || !isMarkdownViewer.value) return;
+  const scrollable = Math.max(0, element.scrollHeight - element.clientHeight);
+  readerProgress.value = scrollable === 0
+    ? 100
+    : Math.min(100, Math.max(0, Math.round((element.scrollTop / scrollable) * 100)));
+}
+
 function openItem(item) {
   return openContentTarget({
     title: item.title,
@@ -259,7 +273,10 @@ function openAdjacentItem(item) {
     :open="Boolean(viewer)"
     variant="viewer"
     title-id="content-viewer-title"
-    :panel-class="['viewer-modal', { 'viewer-modal-pdf': viewer?.type === 'pdf' }]"
+    :panel-class="['viewer-modal', {
+      'viewer-modal-pdf': viewer?.type === 'pdf',
+      'viewer-modal-reading': isMarkdownViewer && !hasRelatedSidebar,
+    }]"
     header-class="viewer-head"
     :body-class="[
       'viewer-body',
@@ -348,6 +365,7 @@ function openAdjacentItem(item) {
             'viewer-main-video': isMediaViewer,
             'viewer-main-pdf': viewer.type === 'pdf',
           }"
+          @scroll.passive="updateReaderProgress"
         >
           <div v-if="activeSection || viewer.type === 'markdown'" class="viewer-main-toolbar">
             <div v-if="activeSection" class="viewer-main-context">
@@ -363,6 +381,9 @@ function openAdjacentItem(item) {
             >
               {{ readerSettingsOpen ? '收起设置' : '字号与行距' }}
             </button>
+            <span v-if="viewer.type === 'markdown'" class="reader-progress-label">
+              已阅读 {{ readerProgress }}%
+            </span>
             <div v-if="viewer.type === 'markdown'" class="reader-controls" :class="{ expanded: readerSettingsOpen }" aria-label="阅读显示设置">
               <label>
                 <span>字号 {{ readerFontSize }}</span>
@@ -454,6 +475,12 @@ function openAdjacentItem(item) {
             :title="viewer.title"
           ></iframe>
         </div>
+    <template v-if="isMarkdownViewer" #footer>
+      <div class="reader-footer-progress" role="progressbar" aria-label="阅读进度" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="readerProgress">
+        <span :style="{ width: `${readerProgress}%` }"></span>
+      </div>
+      <button class="primary reader-finish-button" type="button" @click="closeViewer">关闭阅读</button>
+    </template>
   </AppOverlay>
 </template>
 
@@ -467,6 +494,22 @@ function openAdjacentItem(item) {
   height: min(920px, 90dvh);
   max-height: 90dvh;
 }
+:global(.viewer-modal.viewer-modal-reading) {
+  width: min(680px, calc(100vw - 32px));
+  height: min(850px, 85dvh);
+}
+:global(.viewer-modal.viewer-modal-reading .viewer-head) { position: relative; padding-top: 26px; }
+:global(.viewer-modal.viewer-modal-reading .viewer-head::before) {
+  content: '';
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  width: 40px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--cd-border);
+  transform: translateX(-50%);
+}
 :global(.viewer-modal .viewer-body) {
   flex: 1 1 auto;
   min-height: 0;
@@ -477,7 +520,7 @@ function openAdjacentItem(item) {
   grid-template-columns: minmax(230px, 280px) minmax(0, 1fr);
   align-items: stretch;
 }
-.viewer-main { min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.viewer-main { min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .viewer-main-pdf { display: flex; overflow: hidden; }
 .viewer-main-pdf > :deep(*) { flex: 1; min-width: 0; min-height: 0; }
 .viewer-sidebar { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
@@ -485,12 +528,17 @@ function openAdjacentItem(item) {
 .reader-settings-toggle { display: inline-flex; min-height: 44px; }
 .reader-controls { display: none; }
 .reader-controls.expanded { display: grid; width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
-.viewer-main-toolbar { display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 12px; padding: 12px 16px; }
+.viewer-main-toolbar { position: sticky; top: 0; z-index: 4; display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--cd-border); background: color-mix(in srgb, var(--cd-surface) 94%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
 .viewer-main-context { min-width: 0; }
 .viewer-main-pager { margin-left: auto; }
 .viewer-main-pager button { min-height: 44px; }
 .viewer-open-link { display: inline-flex; align-items: center; gap: 6px; }
 .viewer-markdown { max-width: 760px; margin-inline: auto; width: 100%; }
+.reader-progress-label { display: inline-flex; min-height: 44px; align-items: center; margin-left: auto; color: var(--cd-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+:global(.viewer-modal .app-overlay__footer) { align-items: center; }
+.reader-footer-progress { flex: 1 1 auto; height: 4px; overflow: hidden; border-radius: 999px; background: var(--cd-primary-soft); }
+.reader-footer-progress span { display: block; height: 100%; border-radius: inherit; background: var(--cd-primary); transition: width 120ms ease; }
+.reader-finish-button { flex: 0 0 auto; min-width: 140px; }
 
 @media (max-width: 900px) {
   :global(.viewer-modal .viewer-body.viewer-body-split) { display: flex; flex-direction: column; }
@@ -509,18 +557,22 @@ function openAdjacentItem(item) {
 
 @media (max-width: 767px) {
   :global(.viewer-modal) { width: 100%; height: 100dvh; max-height: 100dvh; border: 0; border-radius: 0; }
+  :global(.viewer-modal.viewer-modal-reading) { width: calc(100vw - 16px); height: 88dvh; max-height: 88dvh; border: 1px solid var(--cd-border); border-radius: 20px; }
   :global(.viewer-modal .viewer-head) { display: grid; flex: 0 0 auto; grid-template-columns: 44px minmax(0, 1fr) 44px; gap: 10px; }
   .viewer-head-copy { grid-column: 2; grid-row: 1; align-self: center; }
   :global(.viewer-modal .viewer-close-button) { grid-column: 3; grid-row: 1; }
   :global(.viewer-modal .viewer-head h2) { display: -webkit-box; overflow: hidden; text-overflow: unset; white-space: normal; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
   :global(.viewer-modal .viewer-body),
   :global(.viewer-modal .viewer-body.viewer-body-split) { min-height: 0; padding: 8px; overflow: hidden; }
-  .viewer-main-toolbar { position: static; padding: 10px 12px; gap: 8px; }
+  .viewer-main-toolbar { padding: 10px 12px; gap: 8px; }
   .viewer-main-context { flex: 1 1 100%; }
   .reader-settings-toggle { display: inline-flex; width: auto; min-height: 44px; }
   .reader-controls { display: none; }
   .reader-controls.expanded { display: grid; order: 3; grid-template-columns: 1fr; gap: 12px; }
   .viewer-main-pager { display: flex; gap: 4px; }
   .viewer-markdown { min-height: auto; padding: 24px 18px calc(48px + env(safe-area-inset-bottom)); }
+  .reader-progress-label { min-height: 44px; margin-left: 0; }
+  :global(.viewer-modal-reading .app-overlay__footer) { padding: 12px 16px max(12px, env(safe-area-inset-bottom)); }
+  .reader-finish-button { min-width: 112px; }
 }
 </style>

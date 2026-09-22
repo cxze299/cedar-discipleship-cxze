@@ -111,6 +111,14 @@ describe('content runtime helpers', () => {
     expect(extractMarkdownSectionForDate(mixed, '2026-09-24', 1)).toEqual(['# 二〇二六年九月二十四日', '丙']);
     const withoutSuffix = '# 九月二十二\n甲';
     expect(extractMarkdownSectionForDate(withoutSuffix, '2026-09-22', 1)).toEqual(['# 九月二十二', '甲']);
+    const plainDateLines = '九月二十一日 昨日灵修\n昨天\n九月22日｜今日灵修\n今天\n9月二十三号 明日灵修\n明天';
+    expect(extractMarkdownSectionForDate(plainDateLines, '2026-09-22', 1))
+      .toEqual(['九月22日｜今日灵修', '今天']);
+    expect(extractMarkdownSectionForDate(plainDateLines, '2026-09-23', 1))
+      .toEqual(['9月二十三号 明日灵修', '明天']);
+    const prose = '# 九月二十二日\n正文\n九月二十三章讲到恩典，不是日期标题\n仍属正文\n# 九月二十三日\n次日';
+    expect(extractMarkdownSectionForDate(prose, '2026-09-22', 1))
+      .toEqual(['# 九月二十二日', '正文', '九月二十三章讲到恩典，不是日期标题', '仍属正文']);
   });
 
   it('recognizes same-origin protected API URLs', () => {

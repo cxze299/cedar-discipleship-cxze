@@ -163,25 +163,31 @@ function parseDateNumber(value: string): number {
 }
 
 function markdownDateHeading(line: string): MarkdownDateHeading | null {
-  const heading = line.trim().match(/^#{1,6}\s+(.+)$/)?.[1] || '';
+  const trimmed = line.trim();
+  if (!trimmed || trimmed.length > 100) return null;
+  // Real devotion files do not always use Markdown heading marks. The zk
+  // reader treats a short line beginning with a date as a section boundary,
+  // so accept both `# 九月二十二日` and `九月二十二日 标题` here.
+  const heading = trimmed.replace(/^#{1,6}\s*/, '');
   if (!heading) return null;
-  const iso = heading.match(/(?:^|[^\d])(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})(?!\d)/);
+  const iso = heading.match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})(?!\d)/);
   if (iso) return { year: Number(iso[1]), month: Number(iso[2]), day: Number(iso[3]) };
   const numberChars = `0-9${chineseDateNumberChars}`;
-  const chinese = heading.match(new RegExp(`(?:^|[^${numberChars}])([${numberChars}]+)\\s*年\\s*([${numberChars}]+)\\s*月\\s*([${numberChars}]+)\\s*(?:日|号)?(?![${numberChars}])`));
+  const dateEnd = `(?=$|[\\s｜|:：\\-—–_])`;
+  const chinese = heading.match(new RegExp(`^([${numberChars}]+)\\s*年\\s*([${numberChars}]+)\\s*月\\s*([${numberChars}]+)\\s*(?:日|号)?${dateEnd}`));
   if (chinese) {
     const year = parseDateNumber(chinese[1]);
     const month = parseDateNumber(chinese[2]);
     const day = parseDateNumber(chinese[3]);
     if (Number.isFinite(year) && Number.isFinite(month) && Number.isFinite(day)) return { year, month, day };
   }
-  const monthDay = heading.match(new RegExp(`(?:^|[^${numberChars}])([${numberChars}]+)\\s*月\\s*([${numberChars}]+)\\s*(?:日|号)?(?![${numberChars}])`));
+  const monthDay = heading.match(new RegExp(`^([${numberChars}]+)\\s*月\\s*([${numberChars}]+)\\s*(?:日|号)?${dateEnd}`));
   if (monthDay) {
     const month = parseDateNumber(monthDay[1]);
     const day = parseDateNumber(monthDay[2]);
     if (Number.isFinite(month) && Number.isFinite(day)) return { month, day };
   }
-  const slash = heading.match(/(?:^|[^\d])(\d{1,2})\s*\/\s*(\d{1,2})(?!\d)/);
+  const slash = heading.match(/^(\d{1,2})\s*\/\s*(\d{1,2})(?!\d)/);
   if (slash) return { month: Number(slash[1]), day: Number(slash[2]) };
   return null;
 }
