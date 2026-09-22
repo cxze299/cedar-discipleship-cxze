@@ -47,6 +47,18 @@ func TestParseRefreshTokenTTLRequiresPositiveDuration(t *testing.T) {
 	}
 }
 
+func TestBotTaskLabelPreservesLegacyAndUsesCustomContent(t *testing.T) {
+	if got := botTaskLabel("weekly_book", "内在生活 10-11页"); got != "周读物" {
+		t.Fatalf("legacy weekly book label = %q, want 周读物", got)
+	}
+	if got := botTaskLabel("daily_scripture", "自定义读经"); got != "每日读经" {
+		t.Fatalf("daily scripture label = %q, want 每日读经", got)
+	}
+	if got := botTaskLabel("weekly_checkin", "生命操练"); got != "生命操练" {
+		t.Fatalf("custom weekly label = %q, want 生命操练", got)
+	}
+}
+
 func TestAuthCookiesUseHttpOnlyRefreshAndReadableCSRF(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
 	request.Header.Set("X-Forwarded-Proto", "https")
