@@ -49,8 +49,9 @@ type CreateMemberInput struct {
 }
 
 type ExistingUserVO struct {
-	ID          uint64 `json:"id"`
-	Username    string `json:"username"`
-	DisplayName string `json:"display_name"`
-	Status      int    `json:"status"`
+	ID          uint64  `json:"id"`
+	Username    string  `json:"username"`
+	DisplayName string  `json:"display_name"`
+	Status      int     `json:"status"`
+	Groups      []Group `json:"study_groups"`
 }

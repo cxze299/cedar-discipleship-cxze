@@ -259,6 +259,10 @@ func (r *MySQLRepository) ListGroups(ctx context.Context, userID uint64, isSuper
 	if isSuperAdmin {
 		return r.allGroups(ctx)
 	}
+	return r.ListMembershipGroups(ctx, userID)
+}
+
+func (r *MySQLRepository) ListMembershipGroups(ctx context.Context, userID uint64) ([]Group, error) {
 	rows, err := r.db.QueryContext(ctx, `SELECT g.id,g.code,g.name FROM study_groups g JOIN group_members m ON m.group_id=g.id WHERE m.user_id=? AND m.status=1 AND g.status=1 ORDER BY g.id`, userID)
 	if err != nil {
 		return nil, err

@@ -165,7 +165,7 @@ func (s *Service) CreateMember(ctx context.Context, groupID, actorID uint64, inp
 		}
 		existing, err := s.repo.FindByUsername(ctx, input.Username)
 		if err == nil {
-			return 0, usernameConflict(existing)
+			return 0, s.usernameConflict(ctx, existing)
 		}
 		if !errors.Is(err, ErrUserNotFound) {
 			return 0, err
@@ -179,19 +179,26 @@ func (s *Service) CreateMember(ctx context.Context, groupID, actorID uint64, inp
 	if input.CreateUser && errors.Is(err, ErrUsernameExists) {
 		existing, findErr := s.repo.FindByUsername(ctx, input.Username)
 		if findErr == nil {
-			return 0, usernameConflict(existing)
+			return 0, s.usernameConflict(ctx, existing)
 		}
 	}
 	return userID, err
 }
 
-func usernameConflict(item *User) error {
+func (s *Service) usernameConflict(ctx context.Context, item *User) error {
+	groups, err := s.repo.ListMembershipGroups(ctx, item.ID)
+	if err != nil {
+		// Membership names are informational; preserve the existing conflict path if
+		// they cannot be loaded.
+		groups = nil
+	}
 	return &UsernameConflictError{
 		ExistingUser: ExistingUserVO{
 			ID:          item.ID,
 			Username:    item.Username,
 			DisplayName: item.DisplayName,
 			Status:      item.Status,
+			Groups:      groups,
 		},
 	}
 }

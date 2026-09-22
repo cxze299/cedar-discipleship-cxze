@@ -158,6 +158,15 @@ const conflictCanBeAdded = computed(() => Boolean(
   !conflictAlreadyInGroup.value &&
   (memberConflict.value.status === undefined || Number(memberConflict.value.status) === 1),
 ));
+const conflictJoinedGroupNames = computed(() => {
+  const joinedGroups = Array.isArray(memberConflict.value?.study_groups)
+    ? memberConflict.value.study_groups
+    : [];
+  const names = joinedGroups
+    .map((group) => String(group?.name || group?.code || '').trim())
+    .filter(Boolean);
+  return names.length ? names.join('、') : '尚未加入小组';
+});
 const readingOptions = computed(() => libraryItems.value.filter((item) => (
   ['book', 'passage', 'markdown'].includes(normalizeResourceCategory(item.category))
 )));
@@ -1218,6 +1227,8 @@ async function selectCalendarDate(day) {
           <dd>{{ memberConflict.username }}</dd>
           <dt>状态</dt>
           <dd>{{ Number(memberConflict.status) === 1 ? '正常' : '已停用' }}</dd>
+          <dt>已加入小组</dt>
+          <dd>{{ conflictJoinedGroupNames }}</dd>
         </dl>
         <p v-if="conflictAlreadyInGroup" class="member-conflict-warning">该成员已经在当前小组中。</p>
         <p v-else-if="Number(memberConflict.status) !== 1" class="member-conflict-warning">该账号已停用，不能加入小组。</p>

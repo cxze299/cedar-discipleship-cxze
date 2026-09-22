@@ -12,6 +12,7 @@ import (
 type createMemberTestRepository struct {
 	Repository
 	existingUser *User
+	groups       []Group
 	findErr      error
 	createdInput CreateMemberInput
 	created      bool
@@ -26,6 +27,10 @@ func (r *createMemberTestRepository) FindByUsername(context.Context, string) (*U
 		return nil, ErrUserNotFound
 	}
 	return r.existingUser, nil
+}
+
+func (r *createMemberTestRepository) ListMembershipGroups(context.Context, uint64) ([]Group, error) {
+	return r.groups, nil
 }
 
 func (r *createMemberTestRepository) CreateMember(
@@ -84,6 +89,10 @@ func TestServiceCreateMemberReturnsExistingAccountInformation(t *testing.T) {
 			DisplayName: "已有成员",
 			Status:      1,
 		},
+		groups: []Group{
+			{ID: 2, Code: "alpha", Name: "甲组"},
+			{ID: 5, Code: "beta", Name: "乙组"},
+		},
 	}
 
 	_, err := NewService(repo).CreateMember(context.Background(), 7, 9, CreateMemberInput{
@@ -100,6 +109,11 @@ func TestServiceCreateMemberReturnsExistingAccountInformation(t *testing.T) {
 		conflict.ExistingUser.Username != "existing" ||
 		conflict.ExistingUser.DisplayName != "已有成员" {
 		t.Fatalf("existing user = %+v", conflict.ExistingUser)
+	}
+	if len(conflict.ExistingUser.Groups) != 2 ||
+		conflict.ExistingUser.Groups[0].Name != "甲组" ||
+		conflict.ExistingUser.Groups[1].Name != "乙组" {
+		t.Fatalf("existing user groups = %+v", conflict.ExistingUser.Groups)
 	}
 	if repo.created {
 		t.Fatal("repository CreateMember called after username conflict")

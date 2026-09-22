@@ -14,6 +14,7 @@ import (
 type adminMemberTestRepository struct {
 	userdomain.Repository
 	existingUser *userdomain.User
+	groups       []userdomain.Group
 	createdInput userdomain.CreateMemberInput
 	created      bool
 }
@@ -23,6 +24,10 @@ func (r *adminMemberTestRepository) FindByUsername(context.Context, string) (*us
 		return nil, userdomain.ErrUserNotFound
 	}
 	return r.existingUser, nil
+}
+
+func (r *adminMemberTestRepository) ListMembershipGroups(context.Context, uint64) ([]userdomain.Group, error) {
+	return r.groups, nil
 }
 
 func (r *adminMemberTestRepository) CreateMember(
@@ -45,6 +50,10 @@ func TestHandleAdminCreateMemberReturnsExistingAccountDetails(t *testing.T) {
 			DisplayName:  "已有成员",
 			PasswordHash: "must-not-leak",
 			Status:       1,
+		},
+		groups: []userdomain.Group{
+			{ID: 2, Code: "alpha", Name: "甲组"},
+			{ID: 5, Code: "beta", Name: "乙组"},
 		},
 	}
 	a := &app{users: userdomain.NewService(repo)}
@@ -70,7 +79,10 @@ func TestHandleAdminCreateMemberReturnsExistingAccountDetails(t *testing.T) {
 	if payload.Error != "username_exists" ||
 		payload.ExistingUser.ID != 23 ||
 		payload.ExistingUser.Username != "existing" ||
-		payload.ExistingUser.DisplayName != "已有成员" {
+		payload.ExistingUser.DisplayName != "已有成员" ||
+		len(payload.ExistingUser.Groups) != 2 ||
+		payload.ExistingUser.Groups[0].Name != "甲组" ||
+		payload.ExistingUser.Groups[1].Name != "乙组" {
 		t.Fatalf("response = %+v", payload)
 	}
 	if bytes.Contains(recorder.Body.Bytes(), []byte("must-not-leak")) {
