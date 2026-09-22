@@ -16,7 +16,7 @@ let frameID = 0;
 let snapTimer = 0;
 let startX = 0;
 let startY = 0;
-let lastX = 0;
+let lastY = 0;
 let lastTime = 0;
 let velocity = 0;
 let pointerID = 0;
@@ -126,13 +126,17 @@ function inertia() {
 }
 
 function startDrag(event) {
-  if (props.items.length < 2 || event.target.closest('button, a, input, select, textarea, label')) return;
+  if (
+    props.items.length < 2
+    || event.target.closest('button, a, input, select, textarea, label')
+    || !event.target.closest('.stacked-wheel__card.active')
+  ) return;
   stopMotion();
   dragging.value = false;
   pointerID = event.pointerId;
   startX = event.clientX;
   startY = event.clientY;
-  lastX = event.clientX;
+  lastY = event.clientY;
   lastTime = performance.now();
   velocity = 0;
 }
@@ -142,19 +146,20 @@ function moveDrag(event) {
   if (!dragging.value) {
     const distanceX = Math.abs(event.clientX - startX);
     const distanceY = Math.abs(event.clientY - startY);
-    if (distanceY > distanceX) {
+    if (distanceX > distanceY) {
       pointerID = 0;
       return;
     }
-    if (distanceX < 10) return;
+    if (distanceY < 10) return;
     dragging.value = true;
+    event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
   }
   const now = performance.now();
-  const delta = -(event.clientX - lastX) / Math.max(180, event.currentTarget.clientWidth * .72);
+  const delta = -(event.clientY - lastY) / Math.max(150, props.cardHeight * .8);
   velocity = delta / Math.max(1, now - lastTime);
   position.value += delta;
-  lastX = event.clientX;
+  lastY = event.clientY;
   lastTime = now;
 }
 
@@ -166,10 +171,10 @@ function endDrag() {
 }
 
 function onWheel(event) {
-  if (props.items.length < 2 || (Math.abs(event.deltaX) <= Math.abs(event.deltaY) && !event.shiftKey)) return;
+  if (props.items.length < 2 || !event.target.closest('.stacked-wheel__card.active')) return;
   event.preventDefault();
   stopMotion();
-  const delta = event.shiftKey ? event.deltaY : event.deltaX;
+  const delta = event.deltaY;
   position.value += Math.max(-90, Math.min(90, delta)) * .0035;
   snapTimer = window.setTimeout(snap, 90);
 }
@@ -243,6 +248,7 @@ function step(offset) {
 .stacked-wheel__stage:focus-visible { border-radius: var(--cd-radius-card); box-shadow: 0 0 0 3px rgb(47 107 69 / 18%); }
 .stacked-wheel__stage.dragging { cursor: grabbing; }
 .stacked-wheel__card { position: absolute; top: 50%; left: 50%; width: calc(100% - 10px); height: var(--stack-card-height); overflow: hidden; transform-origin: 50% 50% -140px; transform-style: preserve-3d; backface-visibility: hidden; will-change: transform, opacity, filter; }
+.stacked-wheel__card.active { touch-action: none; }
 .stacked-wheel__card:not(.active), .stacked-wheel__stage.dragging .stacked-wheel__card { pointer-events: none; }
 .stacked-wheel__card > :deep(*) { height: 100%; }
 .stacked-wheel__empty { display: grid; min-height: 112px; place-items: center; border: 1px dashed var(--cd-border); border-radius: var(--cd-radius-card); color: var(--cd-muted); font-size: 13px; }
