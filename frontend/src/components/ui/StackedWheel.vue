@@ -152,8 +152,6 @@ function moveDrag(event) {
     }
     if (distanceY < 10) return;
     dragging.value = true;
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
   }
   const now = performance.now();
   const delta = -(event.clientY - lastY) / Math.max(150, props.cardHeight * .8);
@@ -248,7 +246,7 @@ function step(offset) {
 .stacked-wheel__stage:focus-visible { border-radius: var(--cd-radius-card); box-shadow: 0 0 0 3px rgb(47 107 69 / 18%); }
 .stacked-wheel__stage.dragging { cursor: grabbing; }
 .stacked-wheel__card { position: absolute; top: 50%; left: 50%; width: calc(100% - 10px); height: var(--stack-card-height); overflow: hidden; transform-origin: 50% 50% -140px; transform-style: preserve-3d; backface-visibility: hidden; will-change: transform, opacity, filter; }
-.stacked-wheel__card.active { touch-action: none; }
+.stacked-wheel__card.active { touch-action: pan-y; }
 .stacked-wheel__card:not(.active), .stacked-wheel__stage.dragging .stacked-wheel__card { pointer-events: none; }
 .stacked-wheel__card > :deep(*) { height: 100%; }
 .stacked-wheel__empty { display: grid; min-height: 112px; place-items: center; border: 1px dashed var(--cd-border); border-radius: var(--cd-radius-card); color: var(--cd-muted); font-size: 13px; }
