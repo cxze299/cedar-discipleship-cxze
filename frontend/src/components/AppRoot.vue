@@ -1,7 +1,22 @@
 <script setup>
 import { computed, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
-import { ChevronDown, ChevronRight, Download, LogOut, Trash2 } from '@lucide/vue';
+import {
+  AlertCircle,
+  Book,
+  Download,
+  FileText,
+  Lock,
+  LogOut,
+  Play,
+  Search,
+  Settings,
+  User,
+  Users,
+  X,
+} from '@lucide/vue';
+import { alertDialog, confirmDialog, promptDialog } from '../ui/dialog';
+import { vDialogFocus } from '../ui/dialogFocus';
 import { useAppStateStore } from '../stores/appState';
 import { useDownloadManagerStore } from '../stores/downloadManager';
 import { downloadErrorMessage } from '../runtime/downloads';
@@ -17,7 +32,14 @@ import {
 } from '../runtime/resources';
 import BotManagementAdmin from './BotManagementAdmin.vue';
 import MinistryCatalogAdmin from './MinistryCatalogAdmin.vue';
+import AdminConsole from './AdminConsole.vue';
+import AppMobileNav from './ui/AppMobileNav.vue';
+import AppPageHeader from './ui/AppPageHeader.vue';
+import AppSidebar from './ui/AppSidebar.vue';
+import DateCalendarDialog from './ui/DateCalendarDialog.vue';
+import StackedWheel from './ui/StackedWheel.vue';
 import ResourceGovernance from './ResourceGovernance.vue';
+import './app-root.css';
 import {
   addWeekBinding,
   api,
@@ -49,7 +71,6 @@ import {
   setTab,
   switchGroup,
   toast as showToast,
-  toggleSidebar,
   updateGroupPassword,
   updateLearningValue,
   updateWeekBinding,
@@ -65,7 +86,6 @@ const {
   user,
   tab,
   adminSection,
-  sidebarCollapsed,
   pageTitle,
   navItems,
   groups,
@@ -103,8 +123,11 @@ const resourceSearchQuery = ref('');
 const resourceTypeFilter = ref('');
 const resourceDateFilter = ref('');
 const resourceStatusFilter = ref('all');
+const calendarMaxDate = (() => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+})();
 const notificationSaving = ref(false);
-const memberGroupSwitching = ref(false);
 
 const activeGroup = computed(() => groups.value.find((item) => Number(item.id) === Number(currentGroupID.value)));
 const canManageRoles = computed(() => Boolean(user.value?.is_super_admin || user.value?.roles?.some((role) => ['group_admin', 'group_leader'].includes(role))));
@@ -184,27 +207,12 @@ watch(activeGroup, (group) => {
   groupEditName.value = group?.name || '';
 }, { immediate: true });
 
-function navLabel(item) {
-  return sidebarCollapsed.value ? item[1].slice(0, 1) : item[1];
-}
+const isLoggingIn = ref(false);
+const loginError = ref('');
+const showMobileMoreMenu = ref(false);
 
 function selectAdmin(section) {
   setAdminSection(section);
-}
-
-async function selectMemberGroup(event) {
-  const groupID = Number(event.target.value || 0);
-  if (!groupID || groupID === Number(currentGroupID.value)) return;
-  memberGroupSwitching.value = true;
-  try {
-    await switchGroup(groupID);
-    memberName.value = '';
-    groupPassword.value = '';
-  } catch (error) {
-    showToast(error.message);
-  } finally {
-    memberGroupSwitching.value = false;
-  }
 }
 
 function resourceSectionKey(section) {
@@ -226,10 +234,17 @@ function toggleResourceSection(section, admin = false) {
 }
 
 async function submitLogin() {
+  if (isLoggingIn.value) return;
+  loginError.value = '';
+  isLoggingIn.value = true;
   try {
     await login(loginUsername.value, loginPassword.value);
   } catch (error) {
-    showToast(error.message === 'invalid_username_or_password' ? '账号或密码错误' : error.message);
+    const msg = error.message === 'invalid_username_or_password' ? '账号或密码错误' : error.message;
+    loginError.value = msg;
+    showToast(msg);
+  } finally {
+    isLoggingIn.value = false;
   }
 }
 
@@ -239,7 +254,11 @@ async function createGroup() {
       method: 'POST',
       body: JSON.stringify({ name: groupName.value }),
     });
-    window.alert(`小组已创建，默认密码：${result.default_password}`);
+    await alertDialog({
+      title: '小组已创建',
+      message: `小组创建成功，默认密码为：${result.default_password}`,
+      tone: 'success',
+    });
     await switchGroup(result.id);
   } catch (error) {
     showToast(groupSaveErrorMessage(error.message));
@@ -263,7 +282,14 @@ async function updateCurrentGroup() {
 async function deleteCurrentGroup() {
   const group = activeGroup.value;
   if (!group?.id) return;
-  const input = window.prompt(`删除小组会清除「${group.name}」的成员、打卡、学习任务、专项小组和本组自有资源文件。请输入小组名称确认。`);
+  const input = await promptDialog({
+    title: '确认删除小组',
+    message: `删除小组会清除「${group.name}」的成员、打卡、学习任务、专项小组和本组自有资源文件。请输入小组名称确认。`,
+    placeholder: group.name,
+    tone: 'danger',
+    confirmLabel: '删除小组',
+  });
+  if (!input) return;
   if (input !== group.name) {
     showToast('小组名称不匹配，已取消删除');
     return;
@@ -480,654 +506,361 @@ function roleLabel(member) {
   return '';
 }
 
-function calendarItemsByDate(items) {
-  const map = new Map();
-  for (const item of items || []) {
-    const list = map.get(item.date) || [];
-    list.push(item);
-    map.set(item.date, list);
-  }
-  return map;
-}
+const calendarCounts = computed(() => {
+  const counts = {};
+  for (const item of calendar.value?.items || []) counts[item.date] = (counts[item.date] || 0) + 1;
+  return counts;
+});
 
-function calendarDays(month) {
-  const [year, mm] = String(month || '').split('-').map(Number);
-  if (!year || !mm) return [];
-  const first = new Date(year, mm - 1, 1);
-  const total = new Date(year, mm, 0).getDate();
-  return [...Array(first.getDay()).fill(null), ...Array.from({ length: total }, (_, index) => index + 1)];
-}
-
-function shiftMonth(month, delta) {
-  const [year, mm] = String(month || '').split('-').map(Number);
-  const d = new Date(year, mm - 1 + delta, 1);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-}
-
-async function selectCalendarDate(day) {
-  if (!day || !calendar.value?.month) return;
-  const date = `${calendar.value.month}-${String(day).padStart(2, '0')}`;
+async function selectCalendarDate(date) {
+  if (!date) return;
   closeCalendar();
   await setSelectedDate(date);
 }
 </script>
 
 <template>
-  <div v-if="!authenticated" class="login-shell">
-    <div class="login-card">
-      <div class="brand-mark">
-        <img src="/site-avatar.png" alt="" />
+  <!-- Cedar Login Screen -->
+  <div v-if="!authenticated" class="cd-login-screen">
+    <div class="cd-login-container">
+      <div class="cd-login-card app-login-card">
+      <div class="cd-login-hero app-login-hero">
+        <div class="brand">
+          <div class="brandmark">
+            <svg viewBox="0 0 24 24" width="24" height="24">
+              <path d="M12 2 5 10h4l-6 7h8v5h2v-5h8l-6-7h4Z" fill="currentColor"/>
+            </svg>
+          </div>
+          <div class="brandcopy">
+            <b>香柏木</b>
+            <span class="eyebrow">CEDAR DISCIPLESHIP</span>
+          </div>
+        </div>
+        <h1>继续今天的学习</h1>
+        <p>输入账号与密码，进入学习空间。</p>
       </div>
-      <div class="eyebrow">Cedar Discipleship</div>
-      <h1>继续今天的学习</h1>
-      <div class="form-stack">
-        <label class="auth-field">
-          <span>账号</span>
-          <input v-model="loginUsername" autocomplete="username" @keydown.enter="submitLogin" />
-        </label>
-        <label class="auth-field">
-          <span>密码</span>
-          <input v-model="loginPassword" autocomplete="current-password" type="password" @keydown.enter="submitLogin" />
-        </label>
-        <button type="button" @click="submitLogin">登录</button>
+
+        <form class="app-login-form" @submit.prevent="submitLogin">
+          <div v-if="loginError" class="cd-login-error">
+            <AlertCircle :size="16" />
+            <span>{{ loginError }}</span>
+          </div>
+
+          <div class="cd-form-item">
+            <label class="cd-form-label" for="login-username">账号</label>
+            <div class="cd-input-box">
+              <span class="cd-input-icon"><User :size="18" /></span>
+              <input
+                id="login-username"
+                v-model="loginUsername"
+                autocomplete="username"
+                placeholder="请输入账号"
+                required
+              />
+            </div>
+          </div>
+
+          <div class="cd-form-item">
+            <label class="cd-form-label" for="login-password">密码</label>
+            <div class="cd-input-box">
+              <span class="cd-input-icon"><Lock :size="18" /></span>
+              <input
+                id="login-password"
+                v-model="loginPassword"
+                autocomplete="current-password"
+                type="password"
+                placeholder="请输入密码"
+                required
+              />
+            </div>
+          </div>
+
+          <button class="primary cd-login-button" type="submit" :disabled="isLoggingIn">
+            {{ isLoggingIn ? '登录中...' : '登 录' }}
+          </button>
+        </form>
       </div>
     </div>
   </div>
 
-  <div v-else class="app-shell" :class="{ 'sidebar-collapsed': sidebarCollapsed }">
-    <aside class="sidebar" :class="{ collapsed: sidebarCollapsed }">
-      <div class="sidebar-topbar">
-        <button
-          class="ghost sidebar-toggle"
-          type="button"
-          :aria-label="sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'"
-          :title="sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'"
-          @click="toggleSidebar"
-        >
-          {{ sidebarCollapsed ? '›' : '‹' }}
-        </button>
-      </div>
-      <div class="sidebar-logo">
-        <div class="brand-mark">
-          <img src="/site-avatar.png" alt="" />
-        </div>
-        <div>
-          <b>知行</b>
-          <div class="muted">{{ user?.display_name || '' }}</div>
-        </div>
-      </div>
-      <nav class="nav">
-        <button
-          v-for="item in navItems"
-          :key="item[0]"
-          :class="{ active: tab === item[0] }"
-          :title="item[1]"
-          type="button"
-          @click="setTab(item[0])"
-        >
-          <span class="nav-label">{{ navLabel(item) }}</span>
-          <span v-if="!sidebarCollapsed" class="nav-meta">{{ item[2] }}</span>
-        </button>
-      </nav>
-      <div class="sidebar-footer">
-        <div class="user-chip">
-          <span class="avatar mini">{{ (user?.display_name || '?').slice(0, 1) }}</span>
-          <span v-if="!sidebarCollapsed">{{ user?.username || '' }}</span>
-        </div>
-        <button class="ghost" type="button" @click="logout">退出</button>
-      </div>
-    </aside>
+  <!-- Cedar Main Layout Shell -->
+  <div v-else class="cedar-app-shell">
+    <AppSidebar
+      :nav-items="navItems"
+      :tab="tab"
+      :can-admin="canAdmin"
+      :user="user"
+      :role="roleLabel(user || {}) || '组员'"
+      :unfinished-count="downloadManager.unfinishedCount"
+      @navigate="setTab"
+      @downloads="downloadManager.openPanel()"
+      @logout="logout"
+    />
 
-    <main class="main-panel">
-      <div class="page-chrome">
-        <section class="page-title-card">
-          <div class="page-title-copy">
-            <div class="eyebrow">学习工作台</div>
-            <h1>{{ pageTitle }}</h1>
-            <p class="page-title-subtitle">
-              {{ activeGroup?.name || '当前工作区' }} · {{ user?.display_name || user?.username || '当前用户' }}
-            </p>
+    <!-- Main View Area -->
+    <div class="main">
+      <AppPageHeader
+        :page-title="pageTitle"
+        :groups="groups"
+        :current-group-i-d="currentGroupID"
+        :default-group-i-d="defaultGroupID"
+        :active-group="activeGroup"
+        @switch-group="switchGroup"
+        @set-default="setDefaultGroupAction"
+        @logout="logout"
+      />
+
+      <!-- Content Area -->
+      <main class="content">
+        <!-- Group Picker Modal/Screen -->
+        <section v-if="showGroupPicker" class="panel app-group-picker">
+          <div class="app-group-picker__head">
+            <h2>选择小组</h2>
+            <p class="muted">你的学习任务、打卡和资料会按所选小组独立显示。</p>
+          </div>
+          <div class="cd-group-grid">
+            <div
+              v-for="group in groups"
+              :key="group.id"
+              class="cd-group-card"
+            >
+              <div class="spread">
+                <div>
+                  <h3 class="app-group-card__title">{{ group.name }}</h3>
+                  <span class="pill">{{ group.code }}</span>
+                </div>
+              </div>
+              <div class="app-group-card__actions">
+                <button class="primary app-group-card__enter" type="button" @click="switchGroup(group.id)">
+                  进入小组
+                </button>
+                <button
+                  class="quiet"
+                  type="button"
+                  :disabled="defaultGroupID === group.id"
+                  @click="setDefaultGroupAction(group.id)"
+                >
+                  {{ defaultGroupID === group.id ? '当前默认' : '设为默认' }}
+                </button>
+              </div>
+            </div>
           </div>
         </section>
-        <div v-if="groups.length > 1" class="toolbar-card toolbar-card-group">
-          <div class="toolbar-card-label">
-            <span class="eyebrow">当前小组</span>
-            <strong>{{ activeGroup?.name || '切换小组' }}</strong>
+
+        <!-- Dynamic Content Mounts (Teleport Targets) -->
+        <div v-show="!showGroupPicker && tab === 'home'" id="vue-checkin-workbench"></div>
+        <div v-show="!showGroupPicker && tab === 'dashboard'" id="vue-dashboard"></div>
+        <div v-show="!showGroupPicker && tab === 'groups'" id="vue-ministry-groups"></div>
+
+        <!-- Cedar Public Library (tab === 'resources') -->
+        <section v-if="!showGroupPicker && tab === 'resources'">
+          <div class="pagehead spread">
+            <div>
+              <h1>小组资料库</h1>
+              <p class="muted">共 {{ filteredResources.length }} 项资料，选择一份开始学习</p>
+            </div>
+            <div v-if="selectedResourceKeys.size" class="inline app-resource-selection">
+              <span class="pill">已选 {{ selectedResourceKeys.size }} 项</span>
+              <button class="primary" type="button" @click="downloadSelectedResources">
+                批量下载
+              </button>
+            </div>
           </div>
-          <div class="group-controls">
-            <select :value="currentGroupID || ''" class="group-select" @change="$event.target.value && switchGroup($event.target.value)">
-              <option v-if="groups.length > 1 && !currentGroupID" value="">请选择小组</option>
-              <option v-for="group in groups" :key="group.id" :value="group.id">{{ group.name }}</option>
-            </select>
+
+          <div class="toolbar app-resource-toolbar">
+            <div class="app-resource-search">
+              <span class="app-resource-search__icon" aria-hidden="true">
+                <Search :size="18" />
+              </span>
+              <input
+                v-model.trim="resourceSearchQuery"
+                type="search"
+                placeholder="搜索标题或文件名"
+                aria-label="搜索资料"
+                class="app-resource-search__input"
+              />
+            </div>
             <button
-              v-if="currentGroupID"
-              class="secondary"
+              :class="resourceTypeFilter === '' ? 'primary' : 'quiet'"
               type="button"
-              :disabled="defaultGroupID === currentGroupID"
-              @click="setDefaultGroupAction(currentGroupID)"
+              @click="resourceTypeFilter = ''"
             >
-              {{ defaultGroupID === currentGroupID ? '默认小组' : '设为默认' }}
+              全部资料
+            </button>
+            <button
+              v-for="type in resourceTypeOptions"
+              :key="type"
+              :class="resourceTypeFilter === type ? 'primary' : 'quiet'"
+              type="button"
+              @click="resourceTypeFilter = type"
+            >
+              {{ resourceCategoryLabel(type) }}
             </button>
           </div>
-        </div>
-      </div>
 
-      <div class="content-shell">
-        <section v-if="showGroupPicker">
-          <div class="section-title"><h2>选择小组</h2></div>
-          <div class="grid cols-2">
-            <div v-for="group in groups" :key="group.id" class="card quick-access-card">
-              <h2>{{ group.name }}</h2>
-              <p class="muted">{{ group.code }}</p>
-              <div class="form-stack">
-                <button type="button" @click="switchGroup(group.id)">进入小组</button>
-                <button class="secondary" type="button" @click="setDefaultGroupAction(group.id)">设为默认</button>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <div v-else-if="tab === 'home'" id="vue-checkin-workbench" class="vue-checkin-workbench-host"></div>
-        <div v-else-if="tab === 'dashboard'" id="vue-dashboard" class="vue-dashboard-host"></div>
-        <div v-else-if="tab === 'groups'" id="vue-ministry-groups" class="vue-ministry-groups-host"></div>
-        <section v-else-if="tab === 'resources'">
-          <div class="section-title"><h2>资料文件</h2></div>
-          <div v-if="resources.length" class="grid">
-            <section class="resource-library-hero">
-              <div class="resource-library-copy">
-                <div class="eyebrow">学习资料</div>
-                <h3>当前小组资料库</h3>
-              </div>
-              <div class="resource-library-stats">
-                <div class="resource-library-stat">
-                  <strong>{{ filteredResources.length }}</strong>
-                  <span>资料总数</span>
-                </div>
-                <div class="resource-library-stat">
-                  <strong>{{ resourceCategoryCount }}</strong>
-                  <span>资料分类</span>
-                </div>
-                <div class="resource-library-stat">
-                  <strong>{{ resourcePrimaryCategory }}</strong>
-                  <span>当前主类目</span>
-                </div>
-              </div>
-            </section>
-
-            <div class="resource-filter-bar resource-center-filter-bar">
-              <input v-model.trim="resourceSearchQuery" type="search" placeholder="搜索标题、文件名或类型" />
-              <select v-model="resourceTypeFilter">
-                <option value="">全部资源类型</option>
-                <option v-for="type in resourceTypeOptions" :key="type" :value="type">{{ resourceCategoryLabel(type) }}</option>
-              </select>
-              <select v-model="resourceStatusFilter">
-                <option value="all">全部来源</option>
-                <option value="available">本组资源</option>
-                <option value="imported">已导入资源</option>
-              </select>
-              <input v-model="resourceDateFilter" type="date" title="最早更新时间" />
-            </div>
-
-            <div class="resource-download-toolbar">
-              <label class="resource-select-all">
-                <input
-                  type="checkbox"
-                  :checked="allVisibleResourcesSelected"
-                  :indeterminate="selectedVisibleResources.length > 0 && selectedVisibleResources.length < filteredResources.length"
-                  :disabled="!filteredResources.length"
-                  @change="toggleAllResources"
-                />
-                <span>选择当前结果</span>
-              </label>
-              <span class="muted">已选择 {{ selectedResourceKeys.size }} 项，当前筛选 {{ filteredResources.length }} 项</span>
-              <button
-                class="secondary icon-text-button"
-                type="button"
-                :disabled="!selectedResourceKeys.size"
-                @click="downloadSelectedResources"
-              >
-                <Download :size="16" />下载所选
-              </button>
-            </div>
-
-            <section
-              v-for="section in groupedResources"
-              :key="section.key"
-              class="resource-group-section"
+          <div v-if="filteredResources.length" class="cd-resource-grid app-resource-grid--desktop">
+            <article
+              v-for="asset in filteredResources"
+              :key="resourceSelectionKey(asset)"
+              class="cd-resource-card"
             >
-              <div class="resource-group-head">
-                <div>
-                  <div class="eyebrow">资料分类</div>
-                  <h3>{{ section.label }}</h3>
-                  <p class="muted">{{ section.description }}</p>
+              <div
+                class="tile"
+                :class="{
+                  gold: asset.type === 'video' || asset.category === 'video',
+                  purple: asset.category === 'outline',
+                  blue: asset.type === 'markdown' || asset.category === 'book',
+                }"
+              >
+                <Play v-if="asset.type === 'video' || asset.category === 'video'" :size="20" />
+                <Book v-else-if="asset.category === 'book'" :size="20" />
+                <FileText v-else :size="20" />
+              </div>
+              <div class="app-resource-card__copy">
+                <div class="inline app-resource-card__meta">
+                  <span class="pill app-resource-card__pill">
+                    {{ resourceTypeLabel(asset) }}
+                  </span>
                 </div>
-                <div class="resource-section-controls">
-                  <span class="pill">{{ section.items.length }} 份资料</span>
-                  <button
-                    class="ghost resource-collapse-button"
-                    type="button"
-                    :title="resourceSectionCollapsed(section) ? '展开分类' : '收起分类'"
-                    :aria-label="resourceSectionCollapsed(section) ? `展开${section.label}` : `收起${section.label}`"
-                    :aria-expanded="!resourceSectionCollapsed(section)"
-                    @click="toggleResourceSection(section)"
-                  >
-                    <ChevronRight v-if="resourceSectionCollapsed(section)" :size="18" />
-                    <ChevronDown v-else :size="18" />
+                <h3 class="resource-title app-resource-card__title">
+                  <button type="button" :aria-label="`查看${optionText(asset)}`" @click="openAsset(asset)">
+                    {{ optionText(asset) }}
                   </button>
-                </div>
+                </h3>
+                <p class="muted small app-resource-card__path">
+                  <template v-if="asset.folder">{{ asset.folder }} / </template>{{ asset.original_name }}
+                </p>
               </div>
-
-              <div v-if="!resourceSectionCollapsed(section)" class="grid cols-2">
-                <div v-for="asset in section.items" :key="resourceSelectionKey(asset)" class="card resource-browser-card">
-                  <div class="resource-browser-meta">
-                    <label class="resource-card-selector">
-                      <input type="checkbox" :checked="resourceSelected(asset)" @change="toggleResourceSelection(asset)" />
-                      <span class="pill">{{ resourceTypeLabel(asset) }}</span>
-                    </label>
-                    <span class="resource-browser-index">#{{ asset.id }}</span>
-                  </div>
-                  <h3>{{ asset.title }}</h3>
-                  <p class="muted">{{ asset.original_name }}</p>
-                  <div class="resource-browser-footnotes">
-                    <span>来源：资源库归档</span>
-                  </div>
-                  <div class="resource-browser-actions">
-                    <button class="secondary" type="button" @click="openAsset(asset)">打开</button>
-                    <button class="ghost icon-text-button" type="button" @click="enqueueResources([asset])">
-                      <Download :size="16" />下载
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </section>
-            <div v-if="!groupedResources.length" class="empty">没有符合筛选条件的资料。</div>
+              <span class="app-resource-card__cta" aria-hidden="true">查看 →</span>
+            </article>
           </div>
-          <div v-else class="empty">暂无资源，请在管理后台登记资料。</div>
-        </section>
-
-        <section v-else-if="tab === 'admin'">
-          <div v-if="!canAdmin" class="empty">当前账号没有管理权限。</div>
-          <div v-else class="grid">
-            <div class="admin-tabs">
-              <button :class="{ active: adminSection === 'learning' }" type="button" @click="selectAdmin('learning')">学习内容</button>
-              <button :class="{ active: adminSection === 'members' }" type="button" @click="selectAdmin('members')">人员管理</button>
-              <button
-                v-if="user?.is_super_admin"
-                :class="{ active: adminSection === 'bot' }"
-                type="button"
-                @click="selectAdmin('bot')"
-              >
-                机器人管理
-              </button>
-              <button
-                v-if="canManageMinistryCatalog"
-                :class="{ active: adminSection === 'ministry' }"
-                type="button"
-                @click="selectAdmin('ministry')"
-              >
-                专项小组
-              </button>
-              <button :class="{ active: adminSection === 'library' }" type="button" @click="selectAdmin('library')">资源库</button>
-              <button :class="{ active: adminSection === 'data' }" type="button" @click="selectAdmin('data')">数据工具</button>
-            </div>
-
-            <div v-if="adminLoading && !['members', 'ministry', 'bot'].includes(adminSection)" class="empty">正在加载管理配置…</div>
-
-            <section v-else-if="adminSection === 'members'">
-              <div class="section-title"><h2>成员与权限管理</h2></div>
-              <div class="card admin-member-scope">
-                <label class="admin-field">
-                  <span>管理小组</span>
-                  <select
-                    :value="currentGroupID || ''"
-                    :disabled="memberGroupSwitching"
-                    @change="selectMemberGroup"
-                  >
-                    <option value="" disabled>请选择小组</option>
-                    <option v-for="group in groups" :key="group.id" :value="group.id">{{ group.name }}</option>
-                  </select>
-                </label>
-                <span v-if="activeGroup" class="muted">{{ members.length }} 位成员</span>
-              </div>
-              <div v-if="user?.is_super_admin" class="card">
-                <h2>超级管理员：创建小组</h2>
-                <div class="form-stack">
-                  <input v-model="groupName" placeholder="小组名称" />
-                  <button type="button" @click="createGroup">创建小组</button>
+          <StackedWheel
+            v-if="filteredResources.length"
+            class="app-resource-grid--mobile"
+            :items="filteredResources"
+            :item-key="resourceSelectionKey"
+            aria-label="学习资料"
+            :card-height="220"
+          >
+            <template #default="{ item: asset }">
+              <article class="cd-resource-card app-resource-stack-card">
+                <div class="tile" :class="{ gold: asset.type === 'video' || asset.category === 'video', purple: asset.category === 'outline', blue: asset.type === 'markdown' || asset.category === 'book' }">
+                  <Play v-if="asset.type === 'video' || asset.category === 'video'" :size="20" />
+                  <Book v-else-if="asset.category === 'book'" :size="20" />
+                  <FileText v-else :size="20" />
                 </div>
-              </div>
-              <div v-if="memberGroupSwitching" class="empty">正在切换小组…</div>
-              <div v-else-if="!currentGroupID" class="empty">请选择需要管理的小组。</div>
-              <div v-else class="grid">
-                <div class="grid cols-2">
-                  <div v-if="user?.is_super_admin" class="card">
-                    <h2>修改当前小组</h2>
-                    <div class="form-stack">
-                      <input v-model="groupEditName" placeholder="小组名称" />
-                      <button type="button" @click="updateCurrentGroup">保存小组信息</button>
-                      <button class="danger" type="button" @click="deleteCurrentGroup">
-                        <Trash2 :size="16" />
-                        删除当前小组
-                      </button>
-                    </div>
-                  </div>
-                  <div class="card">
-                    <h2>修改本组默认密码</h2>
-                    <div class="form-stack">
-                      <input v-model="groupPassword" placeholder="新的本组默认密码（至少 8 位）" type="password" />
-                      <button type="button" @click="updateGroupPassword(groupPassword)">更新默认密码</button>
-                    </div>
-                  </div>
-                  <div v-if="canManageRoles" class="card">
-                    <h2>添加成员</h2>
-                    <div class="form-stack">
-                      <input v-model="memberName" placeholder="成员姓名" />
-                      <button type="button" @click="createMember">创建本组成员</button>
-                    </div>
-                  </div>
+                <div class="app-resource-card__copy">
+                  <span class="pill app-resource-card__pill">{{ resourceTypeLabel(asset) }}</span>
+                  <h3 class="resource-title app-resource-card__title">{{ optionText(asset) }}</h3>
+                  <p class="muted small app-resource-card__path"><template v-if="asset.folder">{{ asset.folder }} / </template>{{ asset.original_name }}</p>
                 </div>
-                <div>
-                  <div class="member-list admin-member-list">
-                    <div v-for="member in members" :key="member.member_id" class="member-card admin-member-card">
-                      <div class="member-main">
-                        <div class="avatar">{{ (member.member_name || member.display_name || '?').slice(0, 1) }}</div>
-                        <div>
-                          <b>{{ member.member_name || member.display_name }}</b>
-                          <div class="muted">{{ member.username }}</div>
-                        </div>
-                      </div>
-                      <div class="member-actions">
-                        <span v-if="roleLabel(member)" class="pill role-pill" :class="{ 'role-admin': member.roles?.includes('group_admin') }">
-                          {{ roleLabel(member) }}
-                        </span>
-                        <button
-                          v-if="canManageRoles && !member.is_super_admin && !member.roles?.includes('group_leader')"
-                          :class="member.roles?.includes('group_admin') ? 'secondary' : 'ok'"
-                          type="button"
-                          @click="setMemberAdmin(member, !member.roles?.includes('group_admin'))"
-                        >
-                          {{ member.roles?.includes('group_admin') ? '取消管理员' : '设为管理员' }}
-                        </button>
-                        <button
-                          v-if="canManageRoles && member.user_id !== user?.id && !member.is_super_admin && !member.roles?.includes('group_leader')"
-                          class="danger"
-                          type="button"
-                          @click="removeMember(member)"
-                        >
-                          删除人员
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                  <div v-if="!members.length" class="empty">本组暂无成员。</div>
-                </div>
-              </div>
-            </section>
-
-            <MinistryCatalogAdmin v-else-if="adminSection === 'ministry' && canManageMinistryCatalog" />
-
-            <BotManagementAdmin v-else-if="adminSection === 'bot' && user?.is_super_admin" />
-
-            <section v-else-if="adminSection === 'learning'">
-              <div class="section-title"><h2>学习内容管理</h2></div>
-              <div class="grid admin-learning-stack">
-                <div class="card">
-                  <h2>打卡通知</h2>
-                  <div class="admin-checkbox-row notification-toggle-row">
-                    <label class="admin-toggle">
-                      <input
-                        type="checkbox"
-                        :checked="checkinNotifications.daily_enabled !== false"
-                        :disabled="!canEditLearning || notificationSaving"
-                        @change="setCheckinNotification('daily_enabled', $event.target.checked)"
-                      />
-                      <span>每日灵修通知</span>
-                    </label>
-                    <label class="admin-toggle">
-                      <input
-                        type="checkbox"
-                        :checked="checkinNotifications.weekly_enabled !== false"
-                        :disabled="!canEditLearning || notificationSaving"
-                        @change="setCheckinNotification('weekly_enabled', $event.target.checked)"
-                      />
-                      <span>周任务通知</span>
-                    </label>
-                  </div>
-                </div>
-                <div class="grid cols-2 admin-grid">
-                  <div class="card">
-                    <h2>每日学习配置</h2>
-                    <div class="form-stack admin-form-grid">
-                      <label class="admin-toggle"><input type="checkbox" :checked="daily.checkin_mode === 'separate'" @change="updateLearning(['task_sections','daily','checkin_mode'], $event.target.checked ? 'separate' : 'combined')" /><span>灵修与读经分别签到</span></label>
-                      <label class="admin-toggle"><input type="checkbox" :checked="devotion.enabled !== false" @change="updateLearning(['task_sections','daily','devotion','enabled'], $event.target.checked)" /><span>显示灵修入口</span></label>
-                      <label class="admin-field">
-                        <span class="admin-field-label">灵修文件</span>
-                        <select :value="devotion.path || ''" @change="updateLearning(['task_sections','daily','devotion','path'], $event.target.value)">
-                          <option value="">未绑定资源</option>
-                          <option v-for="option in markdownOptionsWithCurrent(devotion.path || daily.path)" :key="option.url" :value="option.url">{{ fileOptionText(option) }}</option>
-                        </select>
-                      </label>
-                      <label class="admin-field"><span class="admin-field-label">文章定位</span><select :value="devotion.mode || 'auto'" @change="updateLearning(['task_sections','daily','devotion','mode'], $event.target.value)"><option value="auto">自动识别</option><option value="numbered">按篇号</option><option value="date">按日期标题</option></select></label>
-                      <label class="admin-field"><span class="admin-field-label">第 1 篇对应日期</span><input type="date" :value="devotion.numbered_start_date || ''" @change="updateLearning(['task_sections','daily','devotion','numbered_start_date'], $event.target.value)" /></label>
-                      <label class="admin-field"><span class="admin-field-label">起始篇号</span><input type="number" min="1" :value="devotion.numbered_start || 1" @change="updateLearning(['task_sections','daily','devotion','numbered_start'], Number($event.target.value || 1))" /></label>
-                      <div class="form-actions"><button :class="canEditLearning ? '' : 'secondary'" :disabled="!canEditLearning" type="button" @click="saveLearningConfig">保存学习配置</button></div>
-                    </div>
-                  </div>
-                  <div class="card">
-                    <h2>每日读经配置</h2>
-                    <div class="form-stack admin-form-grid">
-                      <label class="admin-toggle"><input type="checkbox" :checked="scripture.enabled !== false" @change="updateLearning(['task_sections','daily','scripture','enabled'], $event.target.checked)" /><span>显示每日读经</span></label>
-                      <label class="admin-field">
-                        <span class="admin-field-label">起始书卷</span>
-                        <select :value="scripture.book_id || ''" @change="updateScriptureBook($event.target.value)">
-                          <option v-for="book in scriptureBookOptions" :key="book.book_id || book.book" :value="book.book_id">{{ book.book }}（共 {{ book.chapters }} 章）</option>
-                        </select>
-                      </label>
-                      <label class="admin-field"><span class="admin-field-label">读经起始日期</span><input type="date" :value="scripture.start_date || ''" @change="updateLearning(['task_sections','daily','scripture','start_date'], $event.target.value)" /></label>
-                      <label class="admin-field"><span class="admin-field-label">起始章</span><input type="number" min="1" :value="scripture.start_chapter || 1" @change="updateLearning(['task_sections','daily','scripture','start_chapter'], Number($event.target.value || 1))" /></label>
-                      <label class="admin-field"><span class="admin-field-label">每日章数</span><input type="number" min="1" :value="scripture.chapters_per_day || 1" @change="updateLearning(['task_sections','daily','scripture','chapters_per_day'], Number($event.target.value || 1))" /></label>
-                      <div class="form-actions"><button :class="canEditLearning ? '' : 'secondary'" :disabled="!canEditLearning" type="button" @click="saveLearningConfig">保存学习配置</button></div>
-                    </div>
-                  </div>
-                </div>
-                <div v-if="weekDraft" class="card week-planner-card">
-                  <div class="section-title">
-                    <h2>周任务</h2>
-                    <div class="inline-actions">
-                      <select
-                        class="week-picker"
-                        :title="weekDraft.id ? weekOptionText(weekDraft) : '新增一周'"
-                        :value="weekDraft.id || 0"
-                        @change="selectWeekDraft(Number($event.target.value || 0))"
-                      >
-                        <option v-for="week in weeks" :key="week.id" :value="week.id">{{ weekOptionText(week) }}</option>
-                        <option value="0">新增一周</option>
-                      </select>
-                    </div>
-                  </div>
-                  <div class="form-stack admin-form-grid">
-                    <div class="admin-paired-fields">
-                      <label class="admin-field"><span class="admin-field-label">开始时间</span><input type="date" :value="weekDraft.start || ''" @change="updateWeekDraftField('start', $event.target.value)" /></label>
-                      <label class="admin-field"><span class="admin-field-label">结束时间</span><input type="date" :value="weekDraft.end || ''" @change="updateWeekDraftField('end', $event.target.value)" /></label>
-                    </div>
-                    <div class="admin-checkbox-row">
-                      <label class="admin-toggle"><input type="checkbox" :checked="enabledFlag(weekDraft.weekly_checkin, false)" @change="updateWeekDraftField('weekly_checkin', $event.target.checked)" /><span>整周签到</span></label>
-                      <label class="admin-toggle"><input type="checkbox" :checked="enabledFlag(weekDraft.book_enabled)" @change="updateWeekDraftField('book_enabled', $event.target.checked)" /><span>书籍</span></label>
-                      <label class="admin-toggle"><input type="checkbox" :checked="enabledFlag(weekDraft.video_enabled)" @change="updateWeekDraftField('video_enabled', $event.target.checked)" /><span>音视频</span></label>
-                      <label class="admin-toggle"><input type="checkbox" :checked="enabledFlag(weekDraft.verse_enabled)" @change="updateWeekDraftField('verse_enabled', $event.target.checked)" /><span>背经</span></label>
-                      <label class="admin-toggle"><input type="checkbox" :checked="enabledFlag(weekDraft.outline_enabled)" @change="updateWeekDraftField('outline_enabled', $event.target.checked)" /><span>提纲</span></label>
-                    </div>
-                    <label v-if="enabledFlag(weekDraft.weekly_checkin, false)" class="admin-field"><span class="admin-field-label">周任务标题</span><input :value="weekDraft.title || ''" @change="updateWeekDraftField('title', $event.target.value)" /></label>
-                    <Transition name="admin-task-section">
-                      <div v-if="enabledFlag(weekDraft.book_enabled)" class="admin-binding-list">
-                        <div class="admin-field-label">读物挂载文件与页码</div>
-                        <div v-for="(item, index) in weekDraft.readings || []" :key="`reading-${index}`" class="admin-binding-row reading-binding-row">
-                          <select :value="weekBindingSelectionValue(item, readingOptions)" @change="applyBindingSelection('readings', index, $event.target.value)">
-                            <option value="">不挂载文件</option>
-                            <option v-for="option in readingOptions" :key="librarySelectionValue(option)" :value="librarySelectionValue(option)">{{ optionText(option) }}</option>
-                          </select>
-                          <div class="admin-page-range">
-                            <label class="admin-compact-field">
-                              <span>开始页</span>
-                              <input type="number" min="1" inputmode="numeric" :value="item.page_start || ''" @change="updateWeekBinding('readings', index, 'page_start', $event.target.value)" />
-                            </label>
-                            <label class="admin-compact-field">
-                              <span>结束页</span>
-                              <input type="number" min="1" inputmode="numeric" :value="item.page_end || ''" @change="updateWeekBinding('readings', index, 'page_end', $event.target.value)" />
-                            </label>
-                          </div>
-                          <button class="ghost" type="button" @click="removeWeekBinding('readings', index)">删除</button>
-                        </div>
-                        <button class="secondary" type="button" @click="addWeekBinding('readings')">新增读物</button>
-                      </div>
-                    </Transition>
-                    <Transition name="admin-task-section">
-                      <div v-if="enabledFlag(weekDraft.video_enabled)" class="admin-binding-list">
-                        <div class="admin-field-label">音视频文件</div>
-                        <div v-for="(item, index) in weekDraft.videos || []" :key="`video-${index}`" class="admin-binding-row video-binding-row">
-                          <select :value="weekBindingSelectionValue(item, videoOptions)" @change="applyBindingSelection('videos', index, $event.target.value)">
-                            <option value="">不挂载文件</option>
-                            <option v-for="option in videoOptions" :key="librarySelectionValue(option)" :value="librarySelectionValue(option)">{{ optionText(option) }}</option>
-                          </select>
-                          <button class="ghost" type="button" @click="removeWeekBinding('videos', index)">删除</button>
-                        </div>
-                      </div>
-                    </Transition>
-                    <Transition name="admin-task-section">
-                      <div v-if="enabledFlag(weekDraft.verse_enabled)" class="admin-task-section-fields">
-                        <label class="admin-field"><span class="admin-field-label">默写经文</span><input :value="weekDraft.verse_ref || ''" placeholder="例如：罗马书 8:1-5" @change="updateWeekDraftField('verse_ref', $event.target.value)" /></label>
-                        <label class="admin-field"><span class="admin-field-label">默写原文</span><textarea rows="4" :value="weekDraft.recite_text || ''" @change="updateWeekDraftField('recite_text', $event.target.value)"></textarea></label>
-                      </div>
-                    </Transition>
-                    <Transition name="admin-task-section">
-                      <div v-if="enabledFlag(weekDraft.outline_enabled)" class="admin-binding-list">
-                        <div class="admin-field-label">提纲背诵图片</div>
-                        <div class="admin-binding-row">
-                          <input :value="weekDraft.outline?.title || ''" placeholder="提纲图片标题" @change="updateWeekDraftField('outline', { ...(weekDraft.outline || {}), title: $event.target.value })" />
-                          <select :value="librarySelectionValue(weekDraft.outline)" @change="applyOutlineSelection($event.target.value)">
-                            <option value="">无提纲图片</option>
-                            <option v-for="item in outlineOptions" :key="librarySelectionValue(item)" :value="librarySelectionValue(item)">{{ optionText(item) }}</option>
-                          </select>
-                        </div>
-                      </div>
-                    </Transition>
-                    <div class="form-actions">
-                      <button :disabled="!canEditStudyWeeks" type="button" @click="saveWeekDraft">保存当前周</button>
-                      <button class="secondary" :disabled="!canEditStudyWeeks" type="button" @click="restoreWeekDraftDefaults">恢复默认周任务</button>
-                      <button class="danger" :disabled="!canEditStudyWeeks" type="button" @click="deleteWeekDraft">删除当前周</button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            <section v-else-if="adminSection === 'library'">
-              <div class="grid">
-                <div class="card">
-                  <h2>上传本组资源</h2>
-                  <p class="muted">上传后会自动刷新列表，随后即可在“周任务”里选择挂载。</p>
-                  <div class="form-stack admin-form-grid">
-                    <label class="admin-field">
-                      <span class="admin-field-label">上传到</span>
-                      <select v-model="uploadCategory">
-                        <option v-for="category in RESOURCE_UPLOAD_CATEGORIES" :key="category.key" :value="category.key">{{ category.label }}</option>
-                      </select>
-                    </label>
-                    <label class="admin-field"><span class="admin-field-label">选择文件</span><input ref="uploadInput" type="file" /></label>
-                    <div class="form-actions">
-                      <button :disabled="!canEditLearning" type="button" @click="uploadSelectedFile">上传到资源库</button>
-                      <button class="secondary" type="button" @click="loadAdminData(true)">刷新文件列表</button>
-                    </div>
-                  </div>
-                </div>
-                <ResourceGovernance />
-              </div>
-            </section>
-
-            <section v-else-if="adminSection === 'data'">
-              <div class="section-title"><h2>数据导出导入</h2></div>
-              <div class="grid cols-2 admin-grid">
-                <div class="card">
-                  <h2>数据导出</h2>
-                  <div class="action-grid">
-                    <button type="button" @click="runAdminExport('/admin/exports/checkins-detail', 'checkins-detail.csv', '打卡明细 CSV 已开始下载')">导出打卡明细 CSV</button>
-                    <button type="button" @click="runAdminExport('/admin/exports/daily-summary', 'daily-summary.csv', '每日汇总 CSV 已开始下载')">导出每日汇总 CSV</button>
-                    <button type="button" @click="runAdminExport('/admin/exports/study-weeks', 'study-weeks.xlsx', '门训任务 Excel 已开始下载')">导出门训任务 Excel</button>
-                    <button type="button" @click="runAdminExport('/admin/exports/feedbacks', 'feedbacks.csv', '反馈 CSV 已开始下载')">导出反馈 CSV</button>
-                    <button type="button" @click="runAdminExport('/admin/exports/local-backup', 'local-backup.json', '本地备份 JSON 已开始下载')">导出本地备份 JSON</button>
-                  </div>
-                </div>
-
-                <div class="card">
-                  <h2>数据导入</h2>
-                  <p class="muted">导入会写入当前小组。门训任务导入会覆盖当前周任务，本地备份导入会恢复当前组数据。</p>
-                  <div class="form-stack admin-form-grid">
-                    <label class="admin-field">
-                      <span class="admin-field-label">导入门训任务 Excel</span>
-                      <input ref="studyWeeksImportInput" type="file" accept=".xlsx,.xlsm,.xls" />
-                    </label>
-                    <div class="form-actions">
-                      <button :disabled="!canEditLearning" type="button" @click="runStudyWeeksImport">导入门训任务 Excel</button>
-                    </div>
-                    <label class="admin-field">
-                      <span class="admin-field-label">导入本地备份 JSON</span>
-                      <input ref="localBackupImportInput" type="file" accept=".json,application/json" />
-                    </label>
-                    <div class="form-actions">
-                      <button class="danger" :disabled="!canEditLearning" type="button" @click="runLocalBackupImport">导入本地备份 JSON</button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </section>
+                <button class="primary app-resource-stack-card__open" type="button" @click="openAsset(asset)">打开资料</button>
+              </article>
+            </template>
+          </StackedWheel>
+          <div v-else class="panel app-resource-empty">
+            <Book :size="48" class="app-resource-empty__icon" />
+            <h3>暂无相关学习资料</h3>
+            <p class="muted small">请尝试更改搜索关键字或分类筛选条件。</p>
           </div>
         </section>
-      </div>
 
-      <div class="mobile-tabs">
-        <button v-for="item in navItems" :key="item[0]" :class="{ active: tab === item[0] }" type="button" @click="setTab(item[0])">{{ item[1] }}</button>
-        <button class="mobile-tab-logout" type="button" aria-label="退出登录" title="退出登录" @click="logout">
-          <LogOut :size="15" />
-          <span>退出</span>
-        </button>
-      </div>
-    </main>
-  </div>
+        <!-- Admin Console -->
+        <AdminConsole v-else-if="tab === 'admin'" />
+      </main>
 
-  <div v-if="calendar" class="modal-backdrop" @click="$event.target.className === 'modal-backdrop' && closeCalendar()">
-    <div class="calendar-modal">
-      <div class="calendar-head">
-        <div>
-          <div class="eyebrow">学习日历</div>
-          <h2>{{ calendar.member?.member_name || calendar.member?.display_name }}</h2>
-          <p class="muted">{{ calendar.month }} 打卡月历</p>
-        </div>
-        <button class="ghost" type="button" @click="closeCalendar">关闭</button>
-      </div>
-      <div class="calendar-switcher">
-        <button class="secondary" type="button" @click="openCalendarMonth(calendar.member, shiftMonth(calendar.month, -1))">‹ 上月</button>
-        <strong>{{ calendar.month }}</strong>
-        <button class="secondary" type="button" @click="openCalendarMonth(calendar.member, shiftMonth(calendar.month, 1))">下月 ›</button>
-      </div>
-      <div class="calendar-weekdays"><span>日</span><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span></div>
-      <div class="calendar-grid">
-        <button
-          v-for="(day, index) in calendarDays(calendar.month)"
-          :key="index"
-          class="calendar-day"
-          :class="{ 'empty-day': !day, 'has-record': day && calendarItemsByDate(calendar.items).get(`${calendar.month}-${String(day).padStart(2, '0')}`)?.length }"
-          type="button"
-          :disabled="!day"
-          @click="selectCalendarDate(day)"
-        >
-          <template v-if="day">
-            <b>{{ day }}</b>
-            <small>{{ calendarItemsByDate(calendar.items).get(`${calendar.month}-${String(day).padStart(2, '0')}`)?.length || 0 }}项</small>
-          </template>
-        </button>
-      </div>
+      <AppMobileNav
+        :tab="tab"
+        :more-open="showMobileMoreMenu"
+        @navigate="setTab"
+        @more="showMobileMoreMenu = true"
+      />
     </div>
   </div>
 
-  <div v-if="toast" class="toast">{{ toast }}</div>
+  <!-- Mobile More Menu Dialog -->
+  <Transition name="cd-fade">
+    <div
+      v-if="showMobileMoreMenu"
+      class="cd-dialog-backdrop"
+      @click.self="showMobileMoreMenu = false"
+    >
+      <section v-dialog-focus="() => { showMobileMoreMenu = false; }" class="cd-dialog app-more-dialog" aria-label="账户与更多功能">
+        <header class="cd-dialog-head">
+          <div class="inline app-dialog-account">
+            <div class="avatar">{{ (user?.display_name || user?.username || '?').slice(0, 1) }}</div>
+            <div>
+              <h2 class="app-dialog-account__name">{{ user?.display_name || user?.username }}</h2>
+              <span class="small muted">{{ roleLabel(user || {}) || '组员' }} · {{ activeGroup?.name || '未选小组' }}</span>
+            </div>
+          </div>
+          <button class="cd-dialog-close" type="button" aria-label="关闭更多菜单" @click="showMobileMoreMenu = false">
+            <X :size="20" />
+          </button>
+        </header>
+        <div class="cd-dialog-body app-more-dialog__body">
+          <button v-if="currentGroupID && defaultGroupID !== currentGroupID" class="quiet app-more-dialog__action" type="button" @click="setDefaultGroupAction(currentGroupID)">
+            将当前小组设为默认
+          </button>
+          <button
+            v-if="groups.length > 1"
+            class="quiet app-more-dialog__action"
+            type="button"
+            @click="showGroupPicker = true; showMobileMoreMenu = false;"
+          >
+            <Users :size="18" class="app-more-dialog__icon" />
+            <span>切换小组 (当前: {{ activeGroup?.name }})</span>
+          </button>
+
+          <button
+            v-if="canAdmin"
+            class="quiet app-more-dialog__action"
+            type="button"
+            @click="setTab('admin'); showMobileMoreMenu = false;"
+          >
+            <Settings :size="18" class="app-more-dialog__icon" />
+            <span>管理工作台</span>
+          </button>
+
+          <button
+            class="quiet app-more-dialog__action"
+            type="button"
+            @click="downloadManager.openPanel(); showMobileMoreMenu = false;"
+          >
+            <Download :size="18" class="app-more-dialog__icon" />
+            <span>下载中心</span>
+            <span v-if="downloadManager.unfinishedCount" class="pill app-more-dialog__count">
+              {{ downloadManager.unfinishedCount }}
+            </span>
+          </button>
+
+          <button
+            class="danger app-more-dialog__action app-more-dialog__danger"
+            type="button"
+            @click="logout(); showMobileMoreMenu = false;"
+          >
+            <LogOut :size="18" />
+            <span>退出登录</span>
+          </button>
+        </div>
+        <footer class="cd-dialog-foot">
+          <button class="quiet app-dialog-full-button" type="button" @click="showMobileMoreMenu = false">
+            关闭
+          </button>
+        </footer>
+      </section>
+    </div>
+  </Transition>
+
+  <DateCalendarDialog
+    :open="Boolean(calendar)"
+    :month="calendar?.month || ''"
+    :selected-date="calendar?.selectedDate || ''"
+    :max-date="calendarMaxDate"
+    :counts="calendarCounts"
+    :title="`${calendar?.member?.member_name || calendar?.member?.display_name || '成员'} · 打卡月历`"
+    @month-change="calendar && openCalendarMonth(calendar.member, $event)"
+    @select="selectCalendarDate"
+    @close="closeCalendar"
+  />
 </template>

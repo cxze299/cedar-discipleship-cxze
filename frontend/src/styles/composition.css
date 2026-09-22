@@ -1,0 +1,84 @@
+/* Shared page composition. Stacked selectors and their card geometry are owned
+   by their components and intentionally excluded from these layout rules. */
+.cedar-app-shell .content {
+  --cd-page-gutter: 32px;
+  padding-inline: var(--cd-page-gutter);
+}
+.content .pagehead {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 16px;
+  margin: 0 0 24px;
+  text-align: center;
+}
+.content .pagehead h1 { font-size: 26px; line-height: 1.4; }
+.content .pagehead p { margin-top: 6px; font-size: 13px; line-height: 1.6; }
+.content .pagehead > .date-navigator { align-self: center; width: 360px; max-width: 100%; }
+.content .pagehead .date-navigator__label { flex: 1; }
+.content .sectiontitle {
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+.content .sectiontitle > div { width: 100%; text-align: center; }
+.content .sectiontitle h2 { font-size: 18px; }
+.content .sectiontitle > .pill { align-self: center; }
+.content .section-title {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+  gap: 12px;
+  text-align: center;
+}
+.content .section-title > :where(h2, h3) { width: 100%; text-align: center; }
+.content .adminform { width: 100%; max-width: none; }
+.content .admin-tabs { margin-bottom: 24px; padding: 4px; gap: 4px; }
+.content .admin-tabs button { flex: 1 1 120px; }
+.content .admin-grid { gap: 20px; }
+.content .form-actions { justify-content: flex-start; gap: 8px; }
+.content .app-resource-toolbar { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px; margin-bottom: 20px; }
+.content .app-resource-search { grid-column: 1 / -1; width: 100%; max-width: none; margin-bottom: 6px; }
+.content .app-resource-toolbar > button { width: 100%; min-height: 44px; padding-inline: 8px; white-space: normal; }
+.content .metricgrid { gap: 12px; }
+.content .metric { border-top-width: 1px; text-align: center; }
+.content .metric > .muted { font-size: 13px; }
+.content .metric b { margin: 8px 0 6px; font-size: 28px; }
+.content .stats-center-head { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.content .stats-center-head > :first-child { text-align: center; }
+.content .stats-controls { display: flex; align-items: center; justify-content: flex-start; }
+.content .export-row { justify-content: flex-start; }
+.content .resource-governance-head { flex-direction: column; align-items: center; gap: 12px; text-align: center; }
+.content .resource-governance-head > div:first-child { width: 100%; }
+.content .resource-governance-actions { flex-wrap: wrap; gap: 8px; }
+.content .resource-governance-actions { justify-content: center; }
+.content .resource-governance-tabs { margin-inline: 0; }
+.content .ministry-header { flex-direction: column; align-items: center; gap: 12px; text-align: center; }
+.content .ministry-header-actions { justify-content: center; }
+.content .chart-head__title,
+.content .table-heading { display: block; width: 100%; text-align: center; }
+.viewer-markdown, .viewer-markdown :where(code, pre), .brand-serif { font-family: var(--cd-font-sans); }
+
+@media (min-width: 768px) and (max-width: 1199px) {
+  .cedar-app-shell .content { --cd-page-gutter: 24px; }
+}
+@media (max-width: 767px) {
+  .cedar-app-shell .content { --cd-page-gutter: 16px; padding-top: 24px; }
+  .content .pagehead { gap: 16px; margin-bottom: 20px; }
+  .content .pagehead h1 { font-size: 24px; }
+  .content .pagehead > .date-navigator { width: 100%; }
+  .content .app-resource-toolbar { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .content .admin-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .content .admin-grid { gap: 16px; }
+  .content .sectiontitle { gap: 8px; }
+  .content .metricgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .content .metric { padding: 16px; }
+  .content .stats-controls { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .content .resource-governance-head { flex-direction: column; }
+  .content .resource-governance-actions { width: 100%; }
+  .content .resource-governance-actions > button { flex: 1; }
+  .content .form-actions { display: flex; flex-wrap: wrap; }
+  .content .form-actions > button { flex: 1 1 140px; min-height: 44px; }
+}

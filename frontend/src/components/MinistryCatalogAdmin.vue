@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { Plus, Save, Trash2 } from '@lucide/vue';
+import { confirmDialog } from '../ui/dialog';
 import { useAppStateStore } from '../stores/appState';
 import {
   api,
@@ -74,7 +75,13 @@ async function updateGroup(group) {
 }
 
 async function deleteGroup(group) {
-  if (!window.confirm(`确认删除“${group.name}”？该组将停止显示，历史成员、分享和考勤记录会保留。`)) return;
+  const confirmed = await confirmDialog({
+    title: '确认删除小组',
+    message: `确认删除“${group.name}”？该组将停止显示，历史成员、分享和考勤记录会保留。`,
+    tone: 'danger',
+    confirmLabel: '确认删除',
+  });
+  if (!confirmed) return;
   await mutate(async () => {
     await api(`/ministry-groups/${group.id}`, { method: 'DELETE' });
     showToast('专项小组已删除');
@@ -156,6 +163,7 @@ async function mutate(action) {
               class="secondary icon-button"
               type="button"
               title="保存名称"
+              :aria-label="`保存${group.name}名称`"
               :disabled="saving || !String(drafts[group.id] || '').trim()"
               @click="updateGroup(group)"
             >
@@ -165,6 +173,7 @@ async function mutate(action) {
               class="danger icon-button"
               type="button"
               title="删除专项小组"
+              :aria-label="`删除专项小组${group.name}`"
               :disabled="saving"
               @click="deleteGroup(group)"
             >
@@ -177,3 +186,22 @@ async function mutate(action) {
     </div>
   </section>
 </template>
+
+<style scoped>
+section { min-width: 0; }
+.admin-ministry-catalog { overflow: hidden; }
+.admin-ministry-catalog-head { gap: 16px; }
+.ministry-catalog-create input,
+.ministry-catalog-row input { min-width: 0; }
+.ministry-catalog-create button,
+.ministry-catalog-row button { min-height: 44px; }
+.ministry-catalog-row .icon-button { min-width: 44px; }
+.empty { padding: 32px 20px; text-align: center; }
+@media (max-width: 767px) {
+  .admin-ministry-catalog-head { align-items: flex-start; flex-direction: column; }
+  .admin-ministry-catalog-head .inline-actions { width: 100%; justify-content: space-between; }
+  .ministry-catalog-create { grid-template-columns: 1fr; }
+  .ministry-catalog-row { grid-template-columns: auto minmax(0, 1fr); }
+  .ministry-catalog-row .inline-actions { grid-column: 2; justify-content: flex-end; }
+}
+</style>

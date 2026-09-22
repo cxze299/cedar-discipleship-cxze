@@ -1,30 +1,30 @@
 <script setup>
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
-import { Download, ExternalLink, RotateCcw, X } from '@lucide/vue';
+import { RotateCcw, X } from '@lucide/vue';
 import { useContentViewerStore } from '../stores/contentViewer';
-import { useDownloadManagerStore } from '../stores/downloadManager';
-import { downloadErrorMessage } from '../runtime/downloads';
 import {
   closeViewer,
   extractPdfPageRange,
   openContentTarget,
-  openCurrentViewerInNewPage,
   openViewerItemInNewWindow,
   sameViewerItem,
   toast,
 } from '../legacy-app';
 import { videoMediaErrorMessage } from '../runtime/content';
+import AppOverlay from './ui/AppOverlay.vue';
 
 const PdfViewer = defineAsyncComponent(() => import('./PdfViewer.vue'));
 const viewerStore = useContentViewerStore();
-const downloadManager = useDownloadManagerStore();
 const { viewer } = storeToRefs(viewerStore);
 
 const readerPreferenceKey = 'agp_reader_preferences_v1';
 const readerPreferences = loadReaderPreferences();
 const readerFontSize = ref(readerPreferences.fontSize);
 const readerLineHeight = ref(readerPreferences.lineHeight);
+const readerSettingsOpen = ref(false);
+const readerMain = ref(null);
+const relatedMenu = ref(null);
 const videoElement = ref(null);
 const videoSource = ref('');
 const videoLoadState = ref('idle');
@@ -79,6 +79,11 @@ watch(
   () => [viewer.value?.type, viewer.value?.url],
   ([type, url]) => {
     resetVideoLoading();
+    readerSettingsOpen.value = false;
+    nextTick(() => {
+      if (readerMain.value) readerMain.value.scrollTop = 0;
+      if (relatedMenu.value) relatedMenu.value.open = false;
+    });
     if (type !== 'video' || !url) return;
     videoLoadState.value = 'loading';
     nextTick(() => {
@@ -111,10 +116,6 @@ function loadReaderPreferences() {
   } catch {
     return { fontSize: 19, lineHeight: 1.9 };
   }
-}
-
-function closeOnBackdrop(event) {
-  if (event.target.className === 'modal-backdrop') closeViewer();
 }
 
 function resetVideoLoading() {
@@ -251,93 +252,27 @@ function openAdjacentItem(item) {
   openItem(item);
 }
 
-function openCurrentInNewPage() {
-  if (!viewer.value) return;
-  openCurrentViewerInNewPage(viewer.value);
-}
-
-function downloadCurrent() {
-  const current = viewer.value;
-  if (!current?.downloadURL) return;
-  try {
-    downloadManager.enqueue([{
-      title: current.title,
-      original_name: current.originalName || '',
-      url: current.downloadURL,
-      type: current.type,
-      source: current.downloadSource || 'learning',
-    }]);
-    toast('已加入下载队列');
-  } catch (error) {
-    toast(`加入下载失败：${downloadErrorMessage(error.message)}`);
-  }
-}
 </script>
 
 <template>
-  <div v-if="viewer" class="modal-backdrop" @click="closeOnBackdrop">
-    <div class="viewer-modal" :class="{ 'viewer-modal-pdf': viewer.type === 'pdf' }">
-      <div class="viewer-head">
+  <AppOverlay
+    :open="Boolean(viewer)"
+    variant="viewer"
+    title-id="content-viewer-title"
+    :panel-class="['viewer-modal', { 'viewer-modal-pdf': viewer?.type === 'pdf' }]"
+    header-class="viewer-head"
+    :body-class="[
+      'viewer-body',
+      {
+        'viewer-body-split': hasRelatedSidebar,
+        'viewer-body-video': isMediaViewer,
+      },
+    ]"
+    @close="closeViewer"
+  >
+    <template #header>
         <div class="viewer-head-copy">
-          <h2 :title="viewer.title">{{ viewer.title }}</h2>
-        </div>
-        <div class="viewer-actions">
-          <div v-if="viewer.type === 'markdown'" class="reader-controls">
-            <label>
-              <span>字号 {{ readerFontSize }}</span>
-              <input v-model.number="readerFontSize" type="range" min="16" max="24" step="1" />
-            </label>
-            <label>
-              <span>行距 {{ readerLineHeight.toFixed(1) }}</span>
-              <input v-model.number="readerLineHeight" type="range" min="1.6" max="2.2" step="0.1" />
-            </label>
-          </div>
-          <button
-            v-if="activeSectionItems.length"
-            class="secondary"
-            type="button"
-            :disabled="!previousItem"
-            @click="openAdjacentItem(previousItem)"
-          >
-            上一篇
-          </button>
-          <button
-            v-if="activeSectionItems.length"
-            class="secondary"
-            type="button"
-            :disabled="!nextItem"
-            @click="openAdjacentItem(nextItem)"
-          >
-            下一篇
-          </button>
-          <a
-            v-if="viewer.externalURL && viewer.type !== 'pdf'"
-            class="secondary viewer-open-link"
-            :href="viewer.externalURL"
-            target="_blank"
-            rel="noopener"
-          >
-            新窗口打开
-          </a>
-          <button
-            v-if="viewer.type === 'pdf'"
-            class="secondary icon-text-button viewer-new-page-button"
-            type="button"
-            title="在新窗口打开当前书籍"
-            aria-label="在新窗口打开当前书籍"
-            @click="openCurrentInNewPage"
-          >
-            <ExternalLink :size="17" aria-hidden="true" />
-            新窗口
-          </button>
-          <button
-            v-if="viewer.downloadURL"
-            class="secondary icon-text-button"
-            type="button"
-            @click="downloadCurrent"
-          >
-            <Download :size="16" />下载
-          </button>
+          <h2 id="content-viewer-title" :title="viewer?.title">{{ viewer?.title }}</h2>
         </div>
         <button
           class="ghost icon-button viewer-close-button"
@@ -348,16 +283,29 @@ function downloadCurrent() {
         >
           <X :size="20" aria-hidden="true" />
         </button>
-      </div>
+    </template>
 
-      <div
-        class="viewer-body"
-        :class="{
-          'viewer-body-split': hasRelatedSidebar,
-          'viewer-body-video': isMediaViewer,
-        }"
-      >
-          <aside v-if="hasRelatedSidebar" class="viewer-sidebar">
+        <details v-if="hasRelatedSidebar" ref="relatedMenu" class="viewer-related-mobile">
+          <summary>学习目录 <span v-if="activeSection">{{ activeIndex + 1 }} / {{ activeSectionItems.length }} · 展开</span><span v-else>展开</span></summary>
+          <div class="viewer-related-mobile__list">
+            <template v-for="section in relatedSections" :key="section.key || section.label">
+              <div class="viewer-related-mobile__title">{{ section.label }}</div>
+              <button
+                v-for="item in section.items"
+                :key="item.id || item.url || item.title"
+                class="viewer-related-mobile__item"
+                :class="{ active: sameViewerItem(item, viewer) }"
+                type="button"
+                :disabled="sameViewerItem(item, viewer)"
+                @click="openItem(item)"
+              >
+                <span>{{ item.title }}</span><small>{{ sameViewerItem(item, viewer) ? '当前阅读' : section.actionLabel }}</small>
+              </button>
+            </template>
+          </div>
+        </details>
+
+          <aside v-if="hasRelatedSidebar" class="viewer-sidebar viewer-sidebar-desktop">
           <div
             v-for="section in relatedSections"
             :key="section.key || section.label"
@@ -394,18 +342,38 @@ function downloadCurrent() {
         </aside>
 
         <div
+          ref="readerMain"
           class="viewer-main"
           :class="{
             'viewer-main-video': isMediaViewer,
             'viewer-main-pdf': viewer.type === 'pdf',
           }"
         >
-          <div v-if="activeSection" class="viewer-main-toolbar">
-            <div class="viewer-main-context">
+          <div v-if="activeSection || viewer.type === 'markdown'" class="viewer-main-toolbar">
+            <div v-if="activeSection" class="viewer-main-context">
               <span class="pill">{{ activeSection.label }}</span>
               <span class="muted">第 {{ activeIndex + 1 }} / {{ activeSectionItems.length }} 份</span>
             </div>
-            <div class="viewer-main-pager">
+            <button
+              v-if="viewer.type === 'markdown'"
+              class="quiet reader-settings-toggle"
+              type="button"
+              :aria-expanded="readerSettingsOpen"
+              @click="readerSettingsOpen = !readerSettingsOpen"
+            >
+              {{ readerSettingsOpen ? '收起设置' : '字号与行距' }}
+            </button>
+            <div v-if="viewer.type === 'markdown'" class="reader-controls" :class="{ expanded: readerSettingsOpen }" aria-label="阅读显示设置">
+              <label>
+                <span>字号 {{ readerFontSize }}</span>
+                <input v-model.number="readerFontSize" type="range" min="16" max="24" step="1" />
+              </label>
+              <label>
+                <span>行距 {{ readerLineHeight.toFixed(1) }}</span>
+                <input v-model.number="readerLineHeight" type="range" min="1.6" max="2.2" step="0.1" />
+              </label>
+            </div>
+            <div v-if="activeSection" class="viewer-main-pager">
               <button class="ghost" type="button" :disabled="!previousItem" @click="openAdjacentItem(previousItem)">上一篇</button>
               <button class="ghost" type="button" :disabled="!nextItem" @click="openAdjacentItem(nextItem)">下一篇</button>
             </div>
@@ -486,7 +454,73 @@ function downloadCurrent() {
             :title="viewer.title"
           ></iframe>
         </div>
-      </div>
-    </div>
-  </div>
+  </AppOverlay>
 </template>
+
+<style scoped>
+:global(.viewer-modal .viewer-head) { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; align-items: center; gap: 10px; }
+.viewer-head-copy { grid-column: 2; grid-row: 1; min-width: 0; text-align: center; }
+:global(.viewer-modal .viewer-close-button) { grid-column: 3; grid-row: 1; justify-self: end; }
+:global(.viewer-modal) {
+  display: flex;
+  width: min(1180px, calc(100vw - 32px));
+  height: min(920px, 90dvh);
+  max-height: 90dvh;
+}
+:global(.viewer-modal .viewer-body) {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  padding: 14px;
+}
+:global(.viewer-modal .viewer-body.viewer-body-split) {
+  grid-template-columns: minmax(230px, 280px) minmax(0, 1fr);
+  align-items: stretch;
+}
+.viewer-main { min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.viewer-main-pdf { display: flex; overflow: hidden; }
+.viewer-main-pdf > :deep(*) { flex: 1; min-width: 0; min-height: 0; }
+.viewer-sidebar { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.viewer-related-mobile { display: none; }
+.reader-settings-toggle { display: inline-flex; min-height: 44px; }
+.reader-controls { display: none; }
+.reader-controls.expanded { display: grid; width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.viewer-main-toolbar { display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 12px; padding: 12px 16px; }
+.viewer-main-context { min-width: 0; }
+.viewer-main-pager { margin-left: auto; }
+.viewer-main-pager button { min-height: 44px; }
+.viewer-open-link { display: inline-flex; align-items: center; gap: 6px; }
+.viewer-markdown { max-width: 760px; margin-inline: auto; width: 100%; }
+
+@media (max-width: 900px) {
+  :global(.viewer-modal .viewer-body.viewer-body-split) { display: flex; flex-direction: column; }
+  .viewer-sidebar-desktop { display: none; }
+  .viewer-related-mobile { display: block; flex: 0 0 auto; border: 1px solid var(--cd-border); border-radius: 10px; background: var(--cd-surface); }
+  .viewer-related-mobile summary { display: flex; min-height: 44px; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; color: var(--cd-primary); font-size: 13px; font-weight: 700; cursor: pointer; }
+  .viewer-related-mobile[open] summary { border-bottom: 1px solid var(--cd-border); }
+  .viewer-related-mobile__list { display: grid; max-height: 210px; gap: 6px; overflow-y: auto; padding: 0 8px 8px; }
+  .viewer-related-mobile__title { padding: 6px 4px 2px; color: var(--cd-muted); font-size: 11px; font-weight: 700; }
+  .viewer-related-mobile__item { display: grid; min-height: 44px; justify-items: start; padding: 8px 10px; border-color: transparent; background: var(--cd-surface-subtle); text-align: left; }
+  .viewer-related-mobile__item span { overflow-wrap: anywhere; }
+  .viewer-related-mobile__item small { color: var(--cd-muted); }
+  .viewer-related-mobile__item.active { background: var(--cd-primary-soft); color: var(--cd-primary); }
+  .viewer-main { flex: 1 1 auto; }
+}
+
+@media (max-width: 767px) {
+  :global(.viewer-modal) { width: 100%; height: 100dvh; max-height: 100dvh; border: 0; border-radius: 0; }
+  :global(.viewer-modal .viewer-head) { display: grid; flex: 0 0 auto; grid-template-columns: 44px minmax(0, 1fr) 44px; gap: 10px; }
+  .viewer-head-copy { grid-column: 2; grid-row: 1; align-self: center; }
+  :global(.viewer-modal .viewer-close-button) { grid-column: 3; grid-row: 1; }
+  :global(.viewer-modal .viewer-head h2) { display: -webkit-box; overflow: hidden; text-overflow: unset; white-space: normal; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  :global(.viewer-modal .viewer-body),
+  :global(.viewer-modal .viewer-body.viewer-body-split) { min-height: 0; padding: 8px; overflow: hidden; }
+  .viewer-main-toolbar { position: static; padding: 10px 12px; gap: 8px; }
+  .viewer-main-context { flex: 1 1 100%; }
+  .reader-settings-toggle { display: inline-flex; width: auto; min-height: 44px; }
+  .reader-controls { display: none; }
+  .reader-controls.expanded { display: grid; order: 3; grid-template-columns: 1fr; gap: 12px; }
+  .viewer-main-pager { display: flex; gap: 4px; }
+  .viewer-markdown { min-height: auto; padding: 24px 18px calc(48px + env(safe-area-inset-bottom)); }
+}
+</style>

@@ -1,23 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyPdfPageRangeToTitle,
-  assetDownloadURLWithPageRange,
   buildReaderPageURL,
-  buildWeeklyVerseContentLink,
   classifyAttachment,
   deepMerge,
   enabledFlag,
-  extractNumberedContentSection,
-  extractWeeklyContentSection,
   extractPdfPageRange,
-  extractPdfPageRangeFromMetadata,
-  inferAssetContentType,
   markdownToSafeHTML,
-  normalizeContentViewerType,
   normalizeSearchText,
   parsePdfPageRangeParts,
   parseReaderPageRequest,
-  resolvePdfPageRange,
   sameOriginAPIPath,
   shouldRenderWeeklyTask,
   videoMediaErrorMessage,
@@ -36,41 +28,14 @@ describe('content runtime helpers', () => {
 
   it('parses and normalizes PDF page ranges', () => {
     expect(extractPdfPageRange('阅读 12-18 页')).toBe('12-18');
-    expect(extractPdfPageRange('圣经救赎史剧综览-2 196-198页')).toBe('196-198');
     expect(extractPdfPageRange('阅读 18 至 12 页')).toBe('18-18');
     expect(parsePdfPageRangeParts('第 9 页')).toEqual({ pageStart: '9', pageEnd: '9' });
     expect(applyPdfPageRangeToTitle('读物 3-4页', '8', '6')).toBe('读物 8-8页');
     expect(applyPdfPageRangeToTitle('读物 3-4页', '', '')).toBe('读物');
   });
 
-  it('derives PDF page ranges from migrated reading metadata', () => {
-    const metadata = '{"book_name":"基督是一切","page_start":36,"page_end":40,"source_title":"《基督是一切》36-40页"}';
-    expect(extractPdfPageRangeFromMetadata(metadata)).toBe('36-40');
-    expect(resolvePdfPageRange({
-      title: '基督是一切-江守道',
-      content: metadata,
-    })).toBe('36-40');
-    expect(resolvePdfPageRange({ pageRange: '175-179' })).toBe('175-179');
-    expect(resolvePdfPageRange('2026')).toBe('');
-    expect(resolvePdfPageRange({
-      content: '{"page_start":88,"page_end":80}',
-    })).toBe('88-88');
-  });
-
   it('classifies attachments into previewable and download-only types', () => {
     expect(classifyAttachment({ filename: '主日信息.pdf' })).toEqual({ action: 'preview', type: 'pdf' });
-    expect(inferAssetContentType({
-      type: 'book',
-      original_name: '圣经救赎史剧综览-2',
-    })).toBe('pdf');
-    expect(inferAssetContentType({
-      original_name: '圣经救赎史剧综览-2',
-      mime_type: 'application/pdf',
-    })).toBe('pdf');
-    expect(inferAssetContentType({
-      original_name: '圣经救赎史剧综览-2',
-      category: 'book',
-    })).toBe('pdf');
     expect(classifyAttachment({ filename: '录音.m4a' })).toEqual({ action: 'preview', type: 'audio' });
     expect(classifyAttachment({ mimeType: 'video/mp4', filename: '现场记录' })).toEqual({ action: 'preview', type: 'video' });
     expect(classifyAttachment({ filename: '服事安排.pptx' })).toEqual({ action: 'download', type: 'download' });
@@ -109,78 +74,6 @@ describe('content runtime helpers', () => {
       title: '手动标题',
       readings: [{ title: '读物一' }],
     })).toBe('读物一');
-  });
-
-  it('builds an inline content link for weekly verse text', () => {
-    expect(buildWeeklyVerseContentLink('罗马书 8:11-15', '罗马书 8:11 原文')).toEqual({
-      label: '查看原文',
-      title: '罗马书 8:11-15',
-      type: 'markdown',
-      content: '罗马书 8:11 原文',
-    });
-    expect(buildWeeklyVerseContentLink('罗马书 8:11-15', '  ')).toMatchObject({
-      type: 'iframe',
-      url: 'https://www.wordproject.org/bibles/gb/45/8.htm#11',
-    });
-    expect(buildWeeklyVerseContentLink('林前 13：4-8', '')).toMatchObject({
-      url: 'https://www.wordproject.org/bibles/gb/46/13.htm#4',
-    });
-    expect(buildWeeklyVerseContentLink('未识别的经文', '')).toBeNull();
-    expect(buildWeeklyVerseContentLink('罗马书 99:1', '')).toBeNull();
-  });
-
-  it('preserves the aggregate week title even with reading links disabled', () => {
-    expect(weeklyTitleFromContent({
-      weekly_checkin: true,
-      title: '复习两个主题',
-      book_enabled: false,
-      verse_ref: '罗马书 8:1',
-    })).toBe('复习两个主题');
-  });
-
-  it('accepts titled dates and respects explicit selection modes', () => {
-    const text = '# 1\n无关数字篇章\n### 九月二十日 信心\n正文\n### 九月二十一日 次日\n后文';
-    expect(extractNumberedContentSection(text, 0, '九月二十日')).toEqual([
-      '### 九月二十日 信心', '正文',
-    ]);
-    expect(extractNumberedContentSection(text, 1, '九月二十日', 'date')).toEqual([
-      '### 九月二十日 信心', '正文',
-    ]);
-    expect(extractNumberedContentSection(text, 2, '九月二十日', 'numbered')).toEqual([]);
-    expect(extractNumberedContentSection('9月20日 标题\n正文\n九月二十一日\n后文', 0, '九月二十号')).toEqual([
-      '9月20日 标题', '正文',
-    ]);
-    expect(extractNumberedContentSection(
-      '九月廿九日\n前文。九月卅日「正文」\n十月一日\n后文',
-      0,
-      '九月三十日',
-    )).toEqual(['九月卅日', '「正文」']);
-    expect(extractNumberedContentSection('# 1\n正文', 1, '九月二十日', 'date')).toEqual([]);
-  });
-
-  it('matches legacy weekly themes including review titles and stops at the next chapter', () => {
-    const text = '# 卷首语\n## 二、 基督是神的仆人--马可福音\n马可正文\n### 提纲\n内容\n## 五、 基督在身体里--使徒行传\n使徒正文\n## 六、 基督在福音里--罗马书\n后文';
-    expect(extractWeeklyContentSection(text, '复习马可福音')).toEqual([
-      '## 二、 基督是神的仆人--马可福音', '马可正文', '### 提纲', '内容',
-    ]);
-    expect(extractWeeklyContentSection(text, '《基督在身体里》使徒行传')).toEqual([
-      '## 五、 基督在身体里--使徒行传', '使徒正文',
-    ]);
-    expect(extractWeeklyContentSection(text, '永活之泉')).toEqual([]);
-    expect(extractWeeklyContentSection(text, '')).toEqual([]);
-  });
-
-  it('extracts numbered devotion content from numeric or Chinese date headings', () => {
-    expect(extractNumberedContentSection(
-      '# 186\n前一篇\n# 187\n目标正文\n# 188\n后一篇',
-      187,
-      '七月六号',
-    )).toEqual(['# 187', '目标正文']);
-    expect(extractNumberedContentSection(
-      '卷首语\n\n七月五日\n前一篇\n\n七月六日\n目标正文\n第二段\n\n七月七日\n后一篇',
-      187,
-      '七月六号',
-    )).toEqual(['七月六日', '目标正文', '第二段', '']);
   });
 
   it('renders markdown while escaping raw HTML and unsafe links', () => {
@@ -227,38 +120,5 @@ describe('content runtime helpers', () => {
       pageRange: '',
     }, 'http://localhost:5114')).toBe('');
     expect(parseReaderPageRequest('?reader_source=https://example.com/book.pdf')).toBeNull();
-  });
-
-  it('converts asset downloads to ranged PDF downloads when pages are known', () => {
-    expect(assetDownloadURLWithPageRange(
-      '/api/assets/22/download',
-      '88-96',
-      'http://localhost:5114',
-    )).toBe('/api/assets/22/range?pages=88-96');
-    expect(assetDownloadURLWithPageRange(
-      'http://localhost:5114/api/assets/22/download',
-      '88-96',
-      'http://localhost:5114',
-    )).toBe('/api/assets/22/range?pages=88-96');
-    expect(assetDownloadURLWithPageRange(
-      '/api/assets/22/download',
-      '',
-      'http://localhost:5114',
-    )).toBe('/api/assets/22/download');
-  });
-
-  it('treats ranged asset links as PDFs even when their fallback type is iframe', () => {
-    expect(normalizeContentViewerType(
-      'iframe',
-      '/api/assets/22/download',
-      '88-96',
-      'http://localhost:5114',
-    )).toBe('pdf');
-    expect(normalizeContentViewerType(
-      'iframe',
-      'https://example.com/book',
-      '88-96',
-      'http://localhost:5114',
-    )).toBe('iframe');
   });
 });

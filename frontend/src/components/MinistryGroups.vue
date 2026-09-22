@@ -27,6 +27,7 @@ import {
 } from '@lucide/vue';
 import { useAppStateStore } from '../stores/appState';
 import { useDownloadManagerStore } from '../stores/downloadManager';
+import { confirmDialog } from '../ui/dialog';
 import { api, fetchWithAuth, openContentTarget, toast as showToast } from '../legacy-app';
 import { classifyAttachment, markdownToSafeHTML } from '../runtime/content';
 import { downloadErrorMessage } from '../runtime/downloads';
@@ -46,7 +47,6 @@ const loading = ref(false);
 const detailLoading = ref(false);
 const saving = ref(false);
 const showNotifications = ref(false);
-const showAvailableGroups = ref(false);
 const showShareComposer = ref(false);
 const showProgressComposer = ref(false);
 const expandedFeedItems = ref(new Set());
@@ -65,13 +65,36 @@ const workspaceLoadedAt = ref(0);
 const detailCache = new Map();
 let workspaceLoadPromise = null;
 let workspaceWarmTimer = 0;
+let detailRequestID = 0;
+let wheelRAF = 0;
+let wheelTimer = 0;
+let wheelLastY = 0;
+let wheelLastTime = 0;
+let wheelVelocity = 0;
 
 const workspaceCacheTTL = 60_000;
+const wheelPosition = ref(0);
+const wheelDragging = ref(false);
+const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
 
 const visible = computed(() => authenticated.value && currentGroupID.value > 0 && tab.value === 'groups');
 const joinedGroups = computed(() => groups.value.filter((group) => group.joined));
-const availableGroups = computed(() => groups.value.filter((group) => !group.joined));
-const showAvailableGroupList = computed(() => !joinedGroups.value.length || showAvailableGroups.value);
+const selectedGroupIndex = computed(() => {
+  const index = groups.value.findIndex((group) => Number(group.id) === Number(selectedGroupID.value));
+  return index >= 0 ? index : 0;
+});
+const wheelCards = computed(() => {
+  const total = groups.value.length;
+  if (!total) return [];
+  const base = Math.floor(wheelPosition.value);
+  const progress = wheelPosition.value - base;
+  return Array.from({ length: Math.min(total, 6) }, (_, slot) => ({
+    group: groups.value[mod(base + slot, total)],
+    slot,
+    style: wheelCardStyle(slot, progress),
+  }));
+});
+const wheelSelectedIndex = computed(() => groups.value.length ? mod(Math.round(wheelPosition.value), groups.value.length) : 0);
 const selectedRequests = computed(() => requests.value.filter((request) => Number(request.group_id) === Number(selectedGroupID.value)));
 const unreadCount = computed(() => notifications.value.filter((item) => !item.is_read).length);
 const canContribute = computed(() => Boolean(detail.value?.group?.joined || detail.value?.group?.can_manage));
@@ -112,7 +135,17 @@ watch(showRecycleBin, (isVisible) => {
 
 onBeforeUnmount(() => {
   window.clearTimeout(workspaceWarmTimer);
+  window.clearTimeout(wheelTimer);
+  window.cancelAnimationFrame(wheelRAF);
 });
+
+watch(
+  [() => groups.value.length, selectedGroupID],
+  () => {
+    if (wheelDragging.value || wheelRAF) return;
+    wheelPosition.value = selectedGroupIndex.value;
+  },
+);
 
 async function ensureWorkspace(preferredGroupID = selectedGroupID.value, options = {}) {
   const groupID = Number(currentGroupID.value || 0);
@@ -152,7 +185,6 @@ async function loadWorkspace(preferredGroupID = selectedGroupID.value, options =
     groups.value = groupResult.groups || [];
     notifications.value = notificationResult.notifications || [];
     requests.value = requestResult.requests || [];
-    showAvailableGroups.value = !joinedGroups.value.length;
     const selectedStillExists = groups.value.some((group) => Number(group.id) === Number(preferredGroupID));
     const nextID = selectedStillExists
       ? Number(preferredGroupID)
@@ -167,26 +199,30 @@ async function loadWorkspace(preferredGroupID = selectedGroupID.value, options =
 }
 
 async function selectGroup(groupID, options = {}) {
-  selectedGroupID.value = Number(groupID);
+  const nextGroupID = Number(groupID);
+  const requestID = ++detailRequestID;
+  selectedGroupID.value = nextGroupID;
   if (!options.preserveView) {
     activeView.value = 'members';
     expandedFeedItems.value = new Set();
     selectedAttachmentKeys.value = new Set();
   }
-  const cached = detailCache.get(Number(groupID));
+  const cached = detailCache.get(nextGroupID);
   if (cached && (options.preferCache || Date.now() - Number(cached.loadedAt || 0) < workspaceCacheTTL)) {
     detail.value = cached.detail;
   }
-  detailLoading.value = !options.background && !detail.value;
+  detailLoading.value = !options.background;
   try {
-    const nextDetail = await api(`/ministry-groups/${groupID}`);
+    const nextDetail = await api(`/ministry-groups/${nextGroupID}`);
+    if (requestID !== detailRequestID || Number(selectedGroupID.value) !== nextGroupID) return;
     detail.value = nextDetail;
-    detailCache.set(Number(groupID), { detail: nextDetail, loadedAt: Date.now() });
+    detailCache.set(nextGroupID, { detail: nextDetail, loadedAt: Date.now() });
   } catch (error) {
+    if (requestID !== detailRequestID || Number(selectedGroupID.value) !== nextGroupID) return;
     if (!detail.value) detail.value = null;
     if (!options.background) showToast(error.message);
   } finally {
-    detailLoading.value = false;
+    if (requestID === detailRequestID) detailLoading.value = false;
   }
 }
 
@@ -209,7 +245,14 @@ async function requestJoin(group) {
 
 async function leaveGroup() {
   const group = detail.value?.group;
-  if (!group || !window.confirm(`确认退出${group.name}？组长需要先转交身份后才能退出。`)) return;
+  if (!group) return;
+  const confirmed = await confirmDialog({
+    title: '退出小组',
+    message: `确认退出${group.name}？组长需要先转交身份后才能退出。`,
+    tone: 'danger',
+    confirmLabel: '确认退出',
+  });
+  if (!confirmed) return;
   await runMutation(async () => {
     await api(`/ministry-groups/${group.id}/leave`, { method: 'POST' });
     showToast(`已退出${group.name}`);
@@ -362,7 +405,14 @@ async function setSharePinned(share, pinned) {
 
 async function deleteShare(share) {
   const group = detail.value?.group;
-  if (!group || !window.confirm(`确认删除分享“${share.title}”？`)) return;
+  if (!group) return;
+  const confirmed = await confirmDialog({
+    title: '删除分享',
+    message: `确认删除分享“${share.title}”？`,
+    tone: 'danger',
+    confirmLabel: '确认删除',
+  });
+  if (!confirmed) return;
   await runMutation(async () => {
     await api(`/ministry-groups/${group.id}/shares/${share.id}`, { method: 'DELETE' });
     if (Number(shareID.value) === Number(share.id)) resetShareForm();
@@ -374,7 +424,14 @@ async function deleteShare(share) {
 
 async function deleteProgress(item) {
   const group = detail.value?.group;
-  if (!group || !window.confirm('确认删除这条进展？')) return;
+  if (!group) return;
+  const confirmed = await confirmDialog({
+    title: '删除进展',
+    message: '确认删除这条进展？',
+    tone: 'danger',
+    confirmLabel: '确认删除',
+  });
+  if (!confirmed) return;
   await runMutation(async () => {
     await api(`/ministry-groups/${group.id}/progress/${item.id}`, { method: 'DELETE' });
     showToast('进展已删除');
@@ -387,7 +444,13 @@ async function restoreContent(kind, item) {
   const group = detail.value?.group;
   if (!group) return;
   const label = kind === 'share' ? '分享' : '进展';
-  if (!window.confirm(`确认恢复这条${label}？`)) return;
+  const confirmed = await confirmDialog({
+    title: `恢复${label}`,
+    message: `确认恢复这条${label}？`,
+    tone: 'default',
+    confirmLabel: '确认恢复',
+  });
+  if (!confirmed) return;
   await runMutation(async () => {
     const path = kind === 'share'
       ? `/ministry-groups/${group.id}/shares/${item.id}/restore`
@@ -561,8 +624,141 @@ function groupRole(group) {
   return '';
 }
 
-function toggleAvailableGroups() {
-  showAvailableGroups.value = !showAvailableGroups.value;
+function mod(value, divisor) {
+  return ((value % divisor) + divisor) % divisor;
+}
+
+function wheelCardStyle(slot, progress) {
+  if (slot === 0) {
+    const angle = -progress * 88;
+    const opacity = 1 - Math.pow(Math.max(0, (progress - 0.34) / 0.66), 1.45);
+    return {
+      transform: `translate3d(-50%, calc(-50% + ${reducedMotion ? 0 : progress * -2}px), 0) rotateX(${reducedMotion ? angle * 0.18 : angle}deg)`,
+      opacity: Math.max(0, opacity),
+      filter: `blur(${progress * 0.35}px)`,
+      zIndex: 100,
+    };
+  }
+  const depth = slot - progress;
+  return {
+    transform: `translate3d(-50%, calc(-50% + ${depth * 5}px), ${-depth * 18}px) scale(${1 - depth * 0.014})`,
+    opacity: Math.max(0.42, 1 - depth * 0.11),
+    filter: `brightness(${Math.max(0.58, 1 - depth * 0.075)})`,
+    zIndex: 100 - slot,
+  };
+}
+
+function stopWheelMotion() {
+  window.cancelAnimationFrame(wheelRAF);
+  window.clearTimeout(wheelTimer);
+  wheelRAF = 0;
+}
+
+function normalizeWheelPosition() {
+  const total = groups.value.length;
+  if (total && Math.abs(wheelPosition.value) > 10000) {
+    wheelPosition.value = mod(Math.round(wheelPosition.value), total);
+  }
+}
+
+function commitWheelSelection() {
+  const group = groups.value[wheelSelectedIndex.value];
+  if (group && Number(group.id) !== Number(selectedGroupID.value)) selectGroup(group.id);
+}
+
+function snapWheel() {
+  stopWheelMotion();
+  const from = wheelPosition.value;
+  const to = Math.round(from);
+  if (reducedMotion) {
+    wheelPosition.value = to;
+    normalizeWheelPosition();
+    commitWheelSelection();
+    return;
+  }
+  const startedAt = performance.now();
+  const duration = 260;
+  const frame = (now) => {
+    const progress = Math.min((now - startedAt) / duration, 1);
+    const eased = 1 - Math.pow(1 - progress, 4);
+    wheelPosition.value = from + (to - from) * eased;
+    if (progress < 1) {
+      wheelRAF = window.requestAnimationFrame(frame);
+      return;
+    }
+    wheelRAF = 0;
+    wheelPosition.value = to;
+    normalizeWheelPosition();
+    commitWheelSelection();
+  };
+  wheelRAF = window.requestAnimationFrame(frame);
+}
+
+function continueWheelInertia() {
+  stopWheelMotion();
+  if (reducedMotion) {
+    snapWheel();
+    return;
+  }
+  let previous = performance.now();
+  const frame = (now) => {
+    const elapsed = Math.min(32, now - previous);
+    previous = now;
+    wheelPosition.value += wheelVelocity * elapsed;
+    wheelVelocity *= Math.pow(0.91, elapsed / 16);
+    if (Math.abs(wheelVelocity) > 0.00007) {
+      wheelRAF = window.requestAnimationFrame(frame);
+      return;
+    }
+    wheelRAF = 0;
+    snapWheel();
+  };
+  wheelRAF = window.requestAnimationFrame(frame);
+}
+
+function startWheelDrag(event) {
+  if (groups.value.length < 2 || event.target.closest('button')) return;
+  stopWheelMotion();
+  wheelDragging.value = true;
+  wheelLastY = event.clientY;
+  wheelLastTime = performance.now();
+  wheelVelocity = 0;
+  event.currentTarget.setPointerCapture(event.pointerId);
+}
+
+function moveWheelDrag(event) {
+  if (!wheelDragging.value) return;
+  const now = performance.now();
+  const delta = -(event.clientY - wheelLastY) / 145;
+  const elapsed = Math.max(1, now - wheelLastTime);
+  wheelPosition.value += delta;
+  wheelVelocity = delta / elapsed;
+  wheelLastY = event.clientY;
+  wheelLastTime = now;
+}
+
+function endWheelDrag() {
+  if (!wheelDragging.value) return;
+  wheelDragging.value = false;
+  continueWheelInertia();
+}
+
+function scrollWheel(event) {
+  if (groups.value.length < 2) return;
+  event.preventDefault();
+  stopWheelMotion();
+  const delta = Math.max(-90, Math.min(90, event.deltaY));
+  wheelPosition.value += delta * 0.0035;
+  wheelVelocity = 0;
+  wheelTimer = window.setTimeout(snapWheel, 90);
+}
+
+function keyWheel(event) {
+  if (!['ArrowUp', 'ArrowDown'].includes(event.key) || groups.value.length < 2) return;
+  event.preventDefault();
+  stopWheelMotion();
+  wheelPosition.value += event.key === 'ArrowDown' ? 1 : -1;
+  snapWheel();
 }
 
 function shareStatusLabel(status) {
@@ -635,7 +831,7 @@ function localDateTimeValue() {
 </script>
 
 <template>
-  <Teleport v-if="visible" to="#vue-ministry-groups">
+  <Teleport v-if="visible" defer to="#vue-ministry-groups">
     <div class="ministry-page">
       <header class="ministry-header">
         <div>
@@ -683,66 +879,66 @@ function localDateTimeValue() {
 
       <div v-else class="ministry-layout">
         <aside class="ministry-directory">
-          <div class="ministry-directory-section">
-            <div class="ministry-directory-label">我的小组</div>
-            <button
-              v-for="group in joinedGroups"
-              :key="group.id"
-              class="ministry-group-row"
-              :class="{ active: selectedGroupID === group.id }"
-              type="button"
-              @click="selectGroup(group.id)"
-            >
-              <span class="ministry-group-symbol">{{ group.name.slice(0, 1) }}</span>
-              <span class="ministry-group-row-copy">
-                <b>{{ group.name }}</b>
-                <small>{{ groupRole(group) }} · {{ group.member_count }} 人</small>
-              </span>
-              <ChevronRight :size="17" />
-            </button>
-            <div v-if="!joinedGroups.length" class="ministry-directory-empty">尚未加入专项小组</div>
+          <div class="ministry-stack-heading">
+            <span class="ministry-directory-label">专项小组</span>
+            <span v-if="groups.length" class="ministry-stack-count">{{ String(wheelSelectedIndex + 1).padStart(2, '0') }} / {{ String(groups.length).padStart(2, '0') }}</span>
           </div>
 
-          <div class="ministry-directory-section">
-            <div class="ministry-directory-label ministry-directory-label-toggle">
-              <span>全部小组</span>
-              <button
-                v-if="joinedGroups.length"
-                class="ghost ministry-directory-toggle"
-                type="button"
-                @click="toggleAvailableGroups"
+          <div v-if="groups.length" class="ministry-stack-selector">
+            <div
+              class="ministry-stack-stage"
+              :class="{ dragging: wheelDragging }"
+              tabindex="0"
+              role="listbox"
+              aria-label="上下滑动选择专项小组"
+              @pointerdown="startWheelDrag"
+              @pointermove="moveWheelDrag"
+              @pointerup="endWheelDrag"
+              @pointercancel="endWheelDrag"
+              @lostpointercapture="endWheelDrag"
+              @wheel="scrollWheel"
+              @keydown="keyWheel"
+            >
+              <article
+                v-for="item in wheelCards"
+                :key="item.slot"
+                class="ministry-stack-card"
+                :class="{
+                  current: item.slot === 0,
+                  joined: item.group.joined,
+                  available: !item.group.joined,
+                }"
+                :style="item.style"
+                role="option"
+                :aria-selected="item.slot === 0"
+                :aria-hidden="item.slot !== 0"
               >
-                {{ showAvailableGroups ? '收起' : `展开 ${availableGroups.length}` }}
-              </button>
-            </div>
-            <template v-if="showAvailableGroupList">
-              <div
-                v-for="group in availableGroups"
-                :key="group.id"
-                class="ministry-group-row ministry-group-row-available"
-                :class="{ active: selectedGroupID === group.id }"
-              >
-                <button type="button" class="ministry-group-open" @click="selectGroup(group.id)">
-                  <span class="ministry-group-symbol quiet">{{ group.name.slice(0, 1) }}</span>
-                  <span class="ministry-group-row-copy">
-                    <b>{{ group.name }}</b>
-                    <small>{{ group.member_count }} 人</small>
+                <div class="ministry-stack-card-head">
+                  <span class="ministry-group-symbol" :class="{ quiet: !item.group.joined }">
+                    {{ item.group.name.slice(0, 2) }}
                   </span>
-                </button>
+                  <span class="ministry-stack-status">{{ item.group.joined ? groupRole(item.group) : '未加入' }}</span>
+                </div>
+                <div class="ministry-stack-copy">
+                  <b>{{ item.group.name }}</b>
+                  <small>{{ item.group.member_count }} 人 · {{ item.group.joined ? groupRole(item.group) : '可申请加入' }}</small>
+                </div>
                 <button
+                  v-if="item.slot === 0 && !item.group.joined"
                   class="secondary ministry-join-button"
                   type="button"
-                  :disabled="saving || group.request_status === 'pending'"
-                  @click="requestJoin(group)"
+                  :disabled="saving || item.group.request_status === 'pending'"
+                  @click="requestJoin(item.group)"
                 >
-                  <UserPlus v-if="group.request_status !== 'pending'" :size="15" />
+                  <UserPlus v-if="item.group.request_status !== 'pending'" :size="15" />
                   <Check v-else :size="15" />
-                  {{ group.request_status === 'pending' ? '待审批' : '加入' }}
+                  {{ item.group.request_status === 'pending' ? '待审批' : '加入小组' }}
                 </button>
-              </div>
-            </template>
-            <div v-else class="ministry-directory-empty">已隐藏未加入的小组</div>
+              </article>
+            </div>
+
           </div>
+          <div v-else class="ministry-directory-empty">暂无专项小组</div>
         </aside>
 
         <main class="ministry-workspace">
@@ -751,7 +947,7 @@ function localDateTimeValue() {
           <template v-else>
             <header class="ministry-group-header">
               <div class="ministry-group-title">
-                <span class="ministry-group-symbol large">{{ detail.group.name.slice(0, 1) }}</span>
+                <span class="ministry-group-symbol large">{{ detail.group.name.slice(0, 2) }}</span>
                 <div>
                   <div class="ministry-title-line">
                     <h2>{{ detail.group.name }}</h2>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { numberedSectionForDate, resolveEffectiveSchedule, scriptureChaptersForDate } from './dailySchedule';
+import { numberedSectionForDate, resolveEffectiveSchedule } from './dailySchedule';
 
 describe('resolveEffectiveSchedule', () => {
   const devotion = {
@@ -55,27 +55,5 @@ describe('resolveEffectiveSchedule', () => {
 
     expect(resolveEffectiveSchedule(scripture, '2026-09-06', ['start_date']).book).toBe('路加福音');
     expect(resolveEffectiveSchedule(scripture, '2026-09-07', ['start_date']).book).toBe('约翰福音');
-  });
-
-  it('returns multiple chapters across books and stops after the sequence', () => {
-    const scripture = {
-      start_date: '2026-05-11',
-      start_chapter: 2,
-      chapters_per_day: 2,
-      books: [
-        { book: '甲', book_id: '1', chapters: 3 },
-        { book: '乙', book_id: '2', chapters: 2 },
-      ],
-    };
-    expect(scriptureChaptersForDate(scripture, '2026-05-10')).toEqual([
-      { bookName: '甲', bookId: '1', chapter: 2 },
-      { bookName: '甲', bookId: '1', chapter: 3 },
-    ]);
-    expect(scriptureChaptersForDate(scripture, '2026-05-12')).toEqual([
-      { bookName: '乙', bookId: '2', chapter: 1 },
-      { bookName: '乙', bookId: '2', chapter: 2 },
-    ]);
-    expect(scriptureChaptersForDate(scripture, '2026-05-13')).toEqual([]);
-    expect(scriptureChaptersForDate({ ...scripture, type: 'checkin' }, '2026-05-11')).toEqual([]);
   });
 });

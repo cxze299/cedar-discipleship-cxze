@@ -191,3 +191,20 @@ onBeforeUnmount(async () => {
     </div>
   </div>
 </template>
+
+<style scoped>
+.pdf-viewer { display: grid; grid-template-rows: auto minmax(0, 1fr); min-width: 0; min-height: 0; height: 100%; }
+.pdf-viewer-toolbar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border-bottom: 1px solid var(--cd-border); background: rgb(255 255 255 / 96%); }
+.pdf-viewer-page-count { color: var(--cd-muted); font-size: 12px; }
+.pdf-viewer-zoom { display: flex; align-items: center; gap: 8px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.pdf-viewer-stage { min-width: 0; min-height: 0; overflow: auto; padding: 12px; overscroll-behavior: contain; background: var(--cd-surface-subtle); }
+.pdf-viewer-pages { display: grid; gap: 14px; min-width: min-content; justify-items: center; }
+.pdf-viewer canvas { display: block; max-width: none; background: #fff; box-shadow: 0 4px 18px rgb(20 35 27 / 12%); }
+.pdf-viewer-status, .pdf-viewer-error { padding: 32px 16px; text-align: center; }
+.pdf-viewer-error { display: grid; place-items: center; gap: 12px; }
+@media (max-width: 767px) {
+  .pdf-viewer-toolbar { padding: 8px 10px; }
+  .pdf-viewer-stage { padding: 8px; }
+  .pdf-viewer-pages { gap: 10px; }
+}
+</style>
