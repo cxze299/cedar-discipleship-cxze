@@ -1423,10 +1423,10 @@ function currentTaskOptions() {
       contentLinks: outlineLink ? [outlineLink] : [],
     });
   }
-  const weeklyTasks = tasks.filter((task) => task.type.startsWith('weekly_'));
   const dailyTasks = tasks.filter((task) => task.type.startsWith('daily_'));
+  const weeklyTasks = tasks.filter((task) => task.type.startsWith('weekly_'));
   const otherTasks = tasks.filter((task) => !task.type.startsWith('weekly_') && !task.type.startsWith('daily_'));
-  return mergeTodayHubTasks([...weeklyTasks, ...dailyTasks, ...otherTasks]);
+  return mergeTodayHubTasks([...dailyTasks, ...weeklyTasks, ...otherTasks]);
 }
 
 function mergeTodayHubTasks(tasks) {
