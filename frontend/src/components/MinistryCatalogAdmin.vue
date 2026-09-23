@@ -24,21 +24,26 @@ const showRecycleBin = computed(() => learningConfig.value?.ministry?.show_recyc
 
 watch(currentGroupID, loadGroups, { immediate: true });
 
+let loadRequest = 0;
 async function loadGroups() {
+  const request = ++loadRequest;
   if (!currentGroupID.value) {
     groups.value = [];
+    app.ministryGroupCount = 0;
     drafts.value = {};
     return;
   }
   loading.value = true;
   try {
     const result = await api('/ministry-groups');
+    if (request !== loadRequest) return;
     groups.value = result.groups || [];
+    app.ministryGroupCount = groups.value.length;
     drafts.value = Object.fromEntries(groups.value.map((group) => [group.id, group.name]));
   } catch (error) {
-    showToast(error.message);
+    if (request === loadRequest) showToast(error.message);
   } finally {
-    loading.value = false;
+    if (request === loadRequest) loading.value = false;
   }
 }
 

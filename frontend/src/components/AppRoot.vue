@@ -89,6 +89,7 @@ const {
   adminSection,
   navItems,
   groups,
+  ministryGroupCount,
   currentGroupID,
   defaultGroupID,
   showGroupPicker,
@@ -131,6 +132,18 @@ const notificationSaving = ref(false);
 const resourceRefreshing = ref(false);
 
 const activeGroup = computed(() => groups.value.find((item) => Number(item.id) === Number(currentGroupID.value)));
+let ministryGroupRequest = 0;
+watch([authenticated, currentGroupID], async ([isAuthenticated, groupID]) => {
+  const request = ++ministryGroupRequest;
+  app.ministryGroupCount = 0;
+  if (!isAuthenticated || !groupID) return;
+  try {
+    const result = await api('/ministry-groups');
+    if (request === ministryGroupRequest) app.ministryGroupCount = (result.groups || []).length;
+  } catch {
+    // Leave the entry hidden until the current group's catalog can be loaded.
+  }
+}, { immediate: true });
 const canManageRoles = computed(() => Boolean(user.value?.is_super_admin || user.value?.roles?.some((role) => ['group_admin', 'group_leader'].includes(role))));
 const canManageMinistryCatalog = computed(() => Boolean(user.value?.is_super_admin || user.value?.roles?.includes('group_admin')));
 const settings = computed(() => learningConfig.value || {});
@@ -792,6 +805,8 @@ async function refreshResources() {
       <AppMobileNav
         :tab="tab"
         :more-open="showMobileMoreMenu"
+        :show-groups="ministryGroupCount > 0"
+        :entry-setting="settings.ministry?.show_entry"
         @navigate="setTab"
         @more="showMobileMoreMenu = true"
       />
