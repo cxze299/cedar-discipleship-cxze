@@ -1,4 +1,9 @@
-import { dayOffsetFrom } from './date';
+import {
+  dayOffsetFrom,
+  formatLocalDate,
+  parseLocalDate,
+  toChineseMonthDay,
+} from './date';
 
 export type DailyScheduleConfig = Record<string, unknown> & {
   schedule_history?: unknown;
@@ -9,6 +14,7 @@ export type DailyDevotionPlan = {
   title: string;
   path: string;
   type: string;
+  section: string;
   page_start: string;
   page_end: string;
 };
@@ -27,15 +33,17 @@ export function dailyDevotionPlans(config: DailyScheduleConfig): DailyDevotionPl
     if (!validScheduleDate(date)) continue;
     const pageStart = positiveIntegerString(raw.page_start);
     const requestedEnd = positiveIntegerString(raw.page_end);
-    const pageEnd = pageStart
-      ? String(Math.max(Number(pageStart), Number(requestedEnd || pageStart)))
+    const pageEnd = pageStart && requestedEnd
+      ? String(Math.max(Number(pageStart), Number(requestedEnd)))
       : '';
+    const section = positiveIntegerString(raw.section);
     const type = String(raw.type || '').trim().toLowerCase();
     plans.set(date, {
       date,
       title: String(raw.title || '').trim(),
       path: String(raw.path || '').trim(),
       type: type === 'pdf' || type === 'markdown' ? type : '',
+      section,
       page_start: pageStart,
       page_end: pageEnd,
     });
@@ -70,6 +78,52 @@ export function removeDailyDevotionPlan(
     ...config,
     plans: dailyDevotionPlans(config).filter((plan) => plan.date !== date),
   };
+}
+
+export function nextDailyDevotionPlan(
+  config: DailyScheduleConfig,
+  contentType: string,
+  fromDate = '',
+): DailyDevotionPlan {
+  const plans = dailyDevotionPlans(config);
+  const previous = plans.find((plan) => plan.date === fromDate) || plans.at(-1) || null;
+  const baseDate = validScheduleDate(fromDate)
+    ? fromDate
+    : (previous?.date || formatLocalDate(new Date()));
+  const date = shiftScheduleDate(baseDate, previous || validScheduleDate(fromDate) ? 1 : 0);
+  const type = contentType === 'pdf' ? 'pdf' : 'markdown';
+  const plan = emptyDailyDevotionPlan(date, type);
+  if (type === 'pdf') {
+    const previousEnd = Number(previous?.page_end || previous?.page_start || 0);
+    const page = previousEnd > 0
+      ? previousEnd
+      : (pdfPageForDate(config, date) || 1);
+    plan.page_start = String(page);
+    return plan;
+  }
+  const previousSection = Number(previous?.section || 0);
+  plan.section = String(previousSection > 0
+    ? previousSection + 1
+    : numberedSectionForDate(config, date));
+  return plan;
+}
+
+function emptyDailyDevotionPlan(date: string, type: string): DailyDevotionPlan {
+  return {
+    date,
+    title: toChineseMonthDay(date),
+    path: '',
+    type,
+    section: '',
+    page_start: '',
+    page_end: '',
+  };
+}
+
+function shiftScheduleDate(value: string, days: number): string {
+  const date = parseLocalDate(value);
+  date.setDate(date.getDate() + days);
+  return formatLocalDate(date);
 }
 
 function validScheduleDate(value: string): boolean {

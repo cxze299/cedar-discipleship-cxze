@@ -4,6 +4,7 @@ import {
   dailyDevotionPlanForDate,
   dailyDevotionPlanMode,
   dailyDevotionPlans,
+  nextDailyDevotionPlan,
   numberedSectionForDate,
   pdfPageForDate,
   removeDailyDevotionPlan,
@@ -135,12 +136,14 @@ describe('daily devotion custom plans', () => {
         { date: 'not-a-date', title: '无效' },
         { date: '2026-09-22', title: '第一天' },
         { date: '2026-09-23', title: '更新后', page_start: 12, page_end: 14 },
+        { date: '2026-09-24', title: '仅起始页', page_start: 15 },
       ],
     });
 
     expect(plans).toEqual([
-      { date: '2026-09-22', title: '第一天', path: '', type: '', page_start: '', page_end: '' },
-      { date: '2026-09-23', title: '更新后', path: '', type: '', page_start: '12', page_end: '14' },
+      { date: '2026-09-22', title: '第一天', path: '', type: '', section: '', page_start: '', page_end: '' },
+      { date: '2026-09-23', title: '更新后', path: '', type: '', section: '', page_start: '12', page_end: '14' },
+      { date: '2026-09-24', title: '仅起始页', path: '', type: '', section: '', page_start: '15', page_end: '' },
     ]);
   });
 
@@ -173,4 +176,40 @@ describe('daily devotion custom plans', () => {
     expect(removed.plans).toHaveLength(1);
     expect(removed.plans[0].date).toBe('2026-09-23');
   });
+
+  it('creates the next day with a date title and advances markdown content', () => {
+    const plan = nextDailyDevotionPlan({
+      numbered_start_date: '2026-09-20',
+      numbered_start: 10,
+      plans: [
+        { date: '2026-09-22', title: '自定义标题', section: 12 },
+      ],
+    }, 'markdown', '2026-09-22');
+
+    expect(plan).toEqual({
+      date: '2026-09-23',
+      title: '九月二十三号',
+      path: '',
+      type: 'markdown',
+      section: '13',
+      page_start: '',
+      page_end: '',
+    });
+  });
+
+  it('creates the next PDF day after the previous page range', () => {
+    const plan = nextDailyDevotionPlan({
+      plans: [
+        { date: '2026-09-22', title: '第一天', page_start: 20, page_end: 22 },
+      ],
+    }, 'pdf', '2026-09-22');
+
+    expect(plan).toMatchObject({
+      date: '2026-09-23',
+      title: '九月二十三号',
+      page_start: '22',
+      page_end: '',
+    });
+  });
+
 });

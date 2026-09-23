@@ -23,10 +23,13 @@ import {
   extractMarkdownSectionForDate,
   extractNumberedMarkdownSection,
   extractPdfPageRange,
+  inferDailyDevotionContentType,
   isPlainObject,
   normalizePageField,
   normalizeSearchText,
   parsePdfPageRangeParts,
+  pdfViewerSinglePage,
+  resolvePdfPageRange,
   sameOriginAPIPath,
   shouldRenderWeeklyTask,
   weeklyTitleFromContent,
@@ -48,10 +51,12 @@ import {
   buildTaskCompletionMatrix,
 } from './runtime/checkins';
 import {
+  dailyDevotionPlanForDate,
+  dailyDevotionPlanMode,
   numberedSectionForDate,
   resolveEffectiveSchedule,
 } from './runtime/dailySchedule';
-import { saveWeekWithConfirmation } from './runtime/weekProtection';
+import { nextReadingStartPage, saveWeekWithConfirmation } from './runtime/weekProtection';
 
 export { enabledFlag, extractPdfPageRange };
 
@@ -878,24 +883,24 @@ function assetDownloadURL(asset) {
   return asset?.url || '';
 }
 
-function buildMountedSeriesLinks(title) {
+function buildMountedSeriesLinks(title, assets = state.assets) {
   const baseTitle = String(title || '').trim().replace(/^\[B311\]/i, '');
   if (!baseTitle) return [];
-  return state.assets
-    .filter((item) => ['mentor', 'book', 'passage', 'handout'].includes(classifyViewerResource(item)))
+  return assets
+    .filter((item) => ['passage', 'handout'].includes(classifyViewerResource(item)))
     .filter((item) => matchViewerResourceToTitle(item, baseTitle))
     .map((item) => viewerResourceLink(item, baseTitle))
     .filter((item) => item.url);
 }
 
-function buildMediaViewerSections(target) {
+export function buildMediaViewerSections(target, assets = state.assets) {
   const currentMedia = viewerResourceLink({
     title: target.title || '本周音视频',
     url: target.sourceURL || target.url,
     type: target.type || 'video',
   }, target.title || '本周音视频');
-  const mountedCompanions = buildMountedSeriesLinks(target.title);
-  const related = state.assets
+  const mountedCompanions = buildMountedSeriesLinks(target.title, assets);
+  const related = assets
     .filter((asset, index, arr) => asset?.id && arr.findIndex((other) => other?.id === asset.id) === index)
     .filter((asset) => matchViewerResourceToTitle(asset, target.title))
     .map((asset) => viewerResourceLink(asset, target.title))
@@ -910,8 +915,6 @@ function buildMediaViewerSections(target) {
     return arr.findIndex((other) => dedupeKey(other) === dedupeKey(item)) === index;
   });
   const sections = [
-    { key: 'mentor', label: 'Mentor 导读', actionLabel: '查看' },
-    { key: 'book', label: resourceCategoryLabel('book'), actionLabel: '查看' },
     { key: 'passage', label: resourceCategoryLabel('passage'), actionLabel: '查看' },
     { key: 'handout', label: resourceCategoryLabel('handout'), actionLabel: '查看' },
     { key: 'video', label: resourceCategoryLabel('video'), actionLabel: '观看' },
@@ -1096,6 +1099,9 @@ export async function openContentTarget(target) {
         revokeURL: objectURL,
         externalURL: target.hideExternalLink ? '' : objectURL,
         pageRange,
+        dailyPage: target.taskType === 'daily_devotion' && blobType === 'pdf'
+          ? pdfViewerSinglePage(target.taskType, pageRange, sourceAPIPath, window.location.origin)
+          : 0,
         relatedSections: target.relatedSections || (isMediaResourceType(blobType) ? buildMediaViewerSections({ ...target, sourceURL, url: viewerURL, type: blobType, title }) : []),
       };
       syncViewerStore();
@@ -1137,6 +1143,9 @@ export async function openContentTarget(target) {
     originalName,
     externalURL: target.hideExternalLink ? '' : sourceURL,
     pageRange,
+    dailyPage: target.taskType === 'daily_devotion' && type === 'pdf'
+      ? pdfViewerSinglePage(target.taskType, pageRange, sourceURL, window.location.origin)
+      : 0,
     relatedSections: target.relatedSections || (isMediaResourceType(type) ? buildMediaViewerSections({ ...target, sourceURL, url: viewerURL, type, title }) : []),
   };
   syncViewerStore();
@@ -1587,8 +1596,45 @@ function getDailyDevotionSectionNumber(date = state.selectedDate) {
   return numberedSectionForDate(taskSectionsConfig().daily?.devotion || {}, date);
 }
 
+function configuredAssetForURL(value) {
+  const source = sameOriginAPIPath(value, window.location.origin) || String(value || '').trim();
+  const assetMatch = source.match(/^\/api\/assets\/(\d+)\/download$/);
+  if (assetMatch) {
+    return state.assets.find((item) => Number(item?.id) === Number(assetMatch[1])) || null;
+  }
+  return state.assets.find((item) => {
+    const itemURL = sameOriginAPIPath(item?.url, window.location.origin) || String(item?.url || '').trim();
+    return itemURL && itemURL === source;
+  }) || null;
+}
+
 function getDailyDevotionPlan(date = state.selectedDate) {
   const daily = taskSectionsConfig().daily || {};
+  const devotion = daily.devotion || {};
+  if (devotion.enabled === false) return null;
+  const customPlan = dailyDevotionPlanForDate(devotion, date);
+  if (dailyDevotionPlanMode(devotion) === 'custom') {
+    if (!customPlan) return null;
+    const title = customPlan.title || toChineseMonthDay(date);
+    const path = customPlan.path || devotion.custom_path || devotion.path || daily.path || '';
+    const type = path
+      ? inferDailyDevotionContentType({ ...customPlan, path }, configuredAssetForURL(path))
+      : customPlan.type;
+    return {
+      label: title,
+      title,
+      date,
+      url: path,
+      type,
+      ...(type === 'markdown' && customPlan.section ? {
+        section: customPlan.section,
+        sectionTitle: title,
+        selectionMode: 'numbered',
+      } : {}),
+      ...(type === 'pdf' ? { pageRange: resolvePdfPageRange(customPlan) } : {}),
+    };
+  }
+
   const cfg = dailyDevotionConfig(date);
   if (cfg.enabled === false) return null;
   const title = toChineseMonthDay(date);
@@ -1895,10 +1941,9 @@ function nextWeekReadings(previousWeek) {
   if (!readings.length) return [emptyWeekBinding('readings')];
   return readings.map((item) => {
     const normalized = normalizeReadingDraftItem(item);
-    const previousEnd = Number(normalized.page_end || 0);
     return {
       ...normalized,
-      page_start: previousEnd > 0 ? String(previousEnd + 1) : '',
+      page_start: nextReadingStartPage(normalized.page_end),
       page_end: '',
     };
   });
