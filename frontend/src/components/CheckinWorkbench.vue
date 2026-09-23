@@ -455,6 +455,10 @@ async function exportStatsChart() {
 .stats-section { margin-top: 32px; }
 .stats-head, .stats-filter { margin-bottom: 20px; }
 .section-heading { font-size: 18px; }
+@media (min-width: 900px) {
+  .tasks { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tasks .task:first-child:last-child { grid-column: 1 / -1; }
+}
 @media (max-width: 1199px) {
   .grid { grid-template-columns: 1fr; }
 }

@@ -91,6 +91,10 @@ const sortedPeriodRows = computed(() => [...periodRows.value].sort((left, right)
   }
   return direction === 'asc' ? comparison : -comparison;
 }));
+const memberCardHeight = computed(() => {
+  const taskCount = Math.max(1, ...members.value.map((member) => member.taskStates?.length || 0));
+  return Math.min(420, Math.max(210, 112 + taskCount * 48));
+});
 const periodTotals = computed(() => {
   const totals = Object.fromEntries(legend.map((part) => [part.key, 0]));
   for (const row of periodRows.value) {
@@ -381,7 +385,7 @@ async function exportRankingChart() {
           :items="members"
           :item-key="(member) => member.user_id"
           aria-label="成员打卡明细"
-          :card-height="280"
+          :card-height="memberCardHeight"
         >
           <template #default="{ item: member }">
             <div class="member-stack-card">
@@ -609,6 +613,8 @@ async function exportRankingChart() {
 .page-header { margin-bottom: 24px; }
 .metric__suffix { font-size: 16px; }
 .daily-detail { margin-bottom: 24px; }
+.daily-detail, .daily-table { min-width: 0; }
+.daily-table table { width: max-content; min-width: 100%; }
 .sectiontitle { margin-bottom: 16px; }
 .section-heading { font-size: 18px; }
 .responsive-table { max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; }

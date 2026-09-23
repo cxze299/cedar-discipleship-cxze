@@ -1039,6 +1039,9 @@ async function runLocalBackupImport() {
 .member-conflict-details dt { color: var(--cd-muted); }
 .member-conflict-details dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
 .member-conflict-warning { color: var(--cd-danger); }
+.admin-learning-stack { display: flex; flex-direction: column; align-items: stretch; }
+.admin-learning-stack > .week-planner-card { order: -1; }
+.week-planner-card { min-width: 0; }
 @media (max-width: 767px) {
   .admin-pagehead { align-items: flex-start; flex-wrap: wrap; gap: 12px; }
   .admin-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-inline: 0; padding: 6px; }
