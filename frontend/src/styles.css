@@ -755,7 +755,8 @@ input:focus, select:focus, textarea:focus {
   gap: 12px;
   min-width: 0;
 }
-.member-main b { letter-spacing: -0.025em; }
+.member-main > div:last-child { min-width: 0; }
+.member-main b { display: block; overflow: hidden; letter-spacing: -0.025em; text-overflow: ellipsis; white-space: nowrap; }
 .member-main .muted { font-size: 13px; margin-top: 2px; }
 .member-actions {
   display: flex;
