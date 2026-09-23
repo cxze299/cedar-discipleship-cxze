@@ -631,7 +631,8 @@ async function exportRankingChart() {
 .progress-panel { margin-bottom: 32px; }
 .progress-label { font-weight: 500; }
 .progress-count { text-align: right; }
-.stats-center { margin-top: 16px; }
+.stats-center { min-width: 0; max-width: 100%; margin-top: 16px; overflow: hidden; }
+.stats-center > * { min-width: 0; max-width: 100%; }
 .stats-center-head { flex-wrap: wrap; gap: 16px; margin-bottom: 24px; text-align: left; }
 .stats-center-head > .inline { min-width: 0; max-width: 100%; }
 .stats-center__eyebrow { margin-bottom: 6px; }
@@ -644,7 +645,10 @@ async function exportRankingChart() {
 .view-toggle { gap: 4px; padding: 2px; }
 .compact-control, .filter-chip { min-height: 36px; padding: 4px 12px; font-size: 12px; }
 .filter-chip { border: 1px solid var(--cd-border); }
-.filter-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.filter-list { display: flex; min-width: 0; max-width: 100%; flex-wrap: wrap; gap: 6px; }
+.chart-head { min-width: 0; max-width: 100%; }
+.chart-head > .filter-list { overflow-x: auto; }
+.stats-center :deep(.ranking-chart-scroll) { box-sizing: border-box; width: 100%; max-width: 100%; }
 .export-row { display: flex; justify-content: flex-end; margin-bottom: 16px; }
 .chart-head { margin-bottom: 16px; }
 .chart-head__title { font-size: 15px; }
