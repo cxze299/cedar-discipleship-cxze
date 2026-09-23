@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { ChevronRight, Plus, Trash2 } from '@lucide/vue';
 import { alertDialog, promptDialog } from '../ui/dialog';
@@ -78,6 +78,10 @@ const groupName = ref('');
 const groupEditName = ref('');
 const groupPassword = ref('');
 const memberName = ref('');
+const memberUsername = ref('');
+const memberUsernameInput = ref(null);
+const memberConflict = ref(null);
+const memberSaving = ref(false);
 const uploadCategory = ref('markdown');
 const uploadInput = ref(null);
 const studyWeeksImportInput = ref(null);
@@ -100,6 +104,22 @@ function navigateTabs(event) {
 const canManageMinistryCatalog = computed(() => Boolean(user.value?.is_super_admin || user.value?.roles?.includes('group_admin')));
 const canManageRoles = computed(() => Boolean(user.value?.is_super_admin || user.value?.roles?.some((role) => ['group_admin', 'group_leader'].includes(role))));
 const activeGroup = computed(() => groups.value.find((item) => Number(item.id) === Number(currentGroupID.value)));
+const conflictAlreadyInGroup = computed(() => members.value.some(
+  (member) => Number(member.user_id) === Number(memberConflict.value?.id),
+));
+const conflictCanBeAdded = computed(() => Boolean(
+  memberConflict.value &&
+  !conflictAlreadyInGroup.value &&
+  (memberConflict.value.status === undefined || Number(memberConflict.value.status) === 1),
+));
+const conflictJoinedGroupNames = computed(() => {
+  const joinedGroups = Array.isArray(memberConflict.value?.study_groups)
+    ? memberConflict.value.study_groups : [];
+  const names = joinedGroups
+    .map((group) => String(group?.name || group?.code || '').trim())
+    .filter(Boolean);
+  return names.length ? names.join('、') : '尚未加入小组';
+});
 const settings = computed(() => learningConfig.value || {});
 const daily = computed(() => settings.value.task_sections?.daily || {});
 const devotion = computed(() => daily.value.devotion || {});
@@ -205,17 +225,69 @@ async function deleteCurrentGroup() {
 }
 
 async function createMember() {
+  const displayName = memberName.value.trim();
+  const username = memberUsername.value.trim();
+  if (!displayName || !username) {
+    showToast('请输入成员姓名和账号');
+    return;
+  }
+  memberSaving.value = true;
+  memberConflict.value = null;
   try {
     await api('/admin/members', {
       method: 'POST',
-      body: JSON.stringify({ create_user: true, display_name: memberName.value }),
+      body: JSON.stringify({ create_user: true, display_name: displayName, username }),
     });
     memberName.value = '';
+    memberUsername.value = '';
     showToast('成员已创建，初始密码为本组当前默认密码');
     await reloadApp();
   } catch (error) {
-    showToast(error.message);
+    if (error.code === 'username_exists' && error.payload?.existing_user) {
+      memberConflict.value = error.payload.existing_user;
+      return;
+    }
+    showToast(memberSaveErrorMessage(error.message));
+  } finally {
+    memberSaving.value = false;
   }
+}
+
+async function confirmExistingMember() {
+  const existing = memberConflict.value;
+  if (!existing?.id || !conflictCanBeAdded.value) return;
+  memberSaving.value = true;
+  try {
+    await api('/admin/members', {
+      method: 'POST',
+      body: JSON.stringify({ create_user: false, user_id: existing.id, display_name: existing.display_name }),
+    });
+    memberName.value = '';
+    memberUsername.value = '';
+    memberConflict.value = null;
+    showToast('已有账号已加入本组');
+    await reloadApp();
+  } catch (error) {
+    showToast(memberSaveErrorMessage(error.message));
+  } finally {
+    memberSaving.value = false;
+  }
+}
+
+function editMemberUsername() {
+  memberConflict.value = null;
+  nextTick(() => memberUsernameInput.value?.focus());
+}
+
+function memberSaveErrorMessage(message) {
+  return {
+    username_display_name_required: '请输入成员姓名和账号',
+    username_exists: '该账号已存在',
+    user_id_required: '未找到需要添加的账号',
+    group_default_password_missing: '请先设置本组默认密码',
+    user_create_failed: '成员账号创建失败',
+    member_add_failed: '成员加入小组失败',
+  }[message] || message;
 }
 
 const bibleBooks = [
@@ -588,8 +660,9 @@ async function runLocalBackupImport() {
         <div v-if="currentGroupID && canManageRoles" class="card">
           <h2>添加人员</h2>
           <div class="form-stack">
-            <input v-model.trim="memberName" placeholder="成员姓名" @keyup.enter="createMember" />
-            <div class="form-actions"><button type="button" @click="createMember">创建本组成员</button></div>
+            <input v-model.trim="memberName" aria-label="成员姓名" placeholder="成员姓名" @keyup.enter="createMember" />
+            <input ref="memberUsernameInput" v-model.trim="memberUsername" aria-label="成员账号" autocapitalize="none" autocomplete="off" spellcheck="false" placeholder="成员账号" @keyup.enter="createMember" />
+            <div class="form-actions"><button :disabled="memberSaving" type="button" @click="createMember">{{ memberSaving ? '正在创建' : '创建本组成员' }}</button></div>
           </div>
         </div>
       </div>
@@ -910,6 +983,31 @@ async function runLocalBackupImport() {
                 </div>
               </div>
             </section>
+    <div v-if="memberConflict" class="cd-dialog-backdrop" @click.self="editMemberUsername">
+      <section class="cd-dialog" role="dialog" aria-modal="true" aria-labelledby="member-conflict-title" @keydown.esc="editMemberUsername">
+        <header class="cd-dialog-head">
+          <h2 id="member-conflict-title">确认成员身份</h2>
+          <button class="cd-dialog-close" type="button" aria-label="关闭" @click="editMemberUsername">×</button>
+        </header>
+        <div class="cd-dialog-body">
+          <p>该账号已经属于以下人员。确认后将使用已有账号加入当前小组，不会创建重复账号。</p>
+          <dl class="member-conflict-details">
+            <dt>姓名</dt><dd>{{ memberConflict.display_name }}</dd>
+            <dt>账号</dt><dd>{{ memberConflict.username }}</dd>
+            <dt>状态</dt><dd>{{ Number(memberConflict.status) === 1 ? '正常' : '已停用' }}</dd>
+            <dt>已加入小组</dt><dd>{{ conflictJoinedGroupNames }}</dd>
+          </dl>
+          <p v-if="conflictAlreadyInGroup" class="member-conflict-warning">该成员已经在当前小组中。</p>
+          <p v-else-if="Number(memberConflict.status) !== 1" class="member-conflict-warning">该账号已停用，不能加入小组。</p>
+        </div>
+        <footer class="cd-dialog-foot">
+          <button class="secondary" type="button" @click="editMemberUsername">修改账号</button>
+          <button :disabled="!conflictCanBeAdded || memberSaving" type="button" @click="confirmExistingMember">
+            {{ memberSaving ? '正在添加' : conflictAlreadyInGroup ? '已在本组' : '确认添加' }}
+          </button>
+        </footer>
+      </section>
+    </div>
   </div>
 </template>
 
@@ -934,6 +1032,10 @@ async function runLocalBackupImport() {
 .admin-members-section { min-width: 0; }
 .admin-member-list-title { margin-top: 0; }
 .admin-group-actions { justify-content: flex-start; }
+.member-conflict-details { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 14px; margin: 16px 0; }
+.member-conflict-details dt { color: var(--cd-muted); }
+.member-conflict-details dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.member-conflict-warning { color: var(--cd-danger); }
 @media (max-width: 767px) {
   .admin-pagehead { align-items: flex-start; flex-wrap: wrap; gap: 12px; }
   .admin-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-inline: 0; padding: 6px; }

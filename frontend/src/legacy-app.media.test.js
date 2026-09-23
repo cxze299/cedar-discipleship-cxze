@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildMediaViewerSections } from './legacy-app';
+import { api, buildMediaViewerSections } from './legacy-app';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -30,5 +30,22 @@ describe('video learning related resources', () => {
       'https://example.com/lesson.mp4',
       '/api/assets/5/download',
     ]);
+  });
+});
+
+describe('API error details', () => {
+  it('preserves an existing account for the member conflict flow', async () => {
+    vi.stubGlobal('document', { cookie: '' });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({ error: 'username_exists', existing_user: { id: 7, username: 'member7' } }),
+    }));
+
+    await expect(api('/admin/members', { method: 'POST', body: '{}' })).rejects.toMatchObject({
+      code: 'username_exists',
+      status: 409,
+      payload: { existing_user: { id: 7, username: 'member7' } },
+    });
   });
 });

@@ -315,6 +315,7 @@ export async function api(path, options = {}) {
     const error = new Error(data.error || `HTTP ${res.status}`);
     error.code = data.error || '';
     error.status = res.status;
+    error.payload = data;
     throw error;
   }
   return data;
