@@ -3554,7 +3554,8 @@ button.ministry-join-button {
     width: 100%;
     max-width: 100%;
     min-width: 0;
-    overflow-x: hidden;
+    /* Clip sideways overflow without creating nested vertical scroll containers. */
+    overflow-x: clip;
   }
 
   input,

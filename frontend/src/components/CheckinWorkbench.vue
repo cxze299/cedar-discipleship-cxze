@@ -301,7 +301,7 @@ async function exportStatsChart() {
                   <h3 class="task-name" :title="task.title">{{ task.title }}</h3>
                 </div>
                 <span class="task-status" :class="taskIsCompleted(task) ? 'completed' : 'pending'">
-                  <Check v-if="taskIsCompleted(task)" :size="13" />{{ taskIsCompleted(task) ? '已完成' : '待完成' }}
+                  <Check v-if="taskIsCompleted(task)" :size="13" />{{ taskIsCompleted(task) ? '已打卡' : '未打卡' }}
                 </span>
               </header>
 
@@ -430,15 +430,15 @@ async function exportStatsChart() {
 .sectiontitle { margin-bottom: 12px; }
 .tasks { display: grid; gap: 12px; padding: 0; border: 0; background: transparent; box-shadow: none; }
 .task { display: grid; gap: 16px; padding: 20px; border: 1px solid var(--cd-border); border-radius: var(--cd-radius-card); background: var(--cd-surface); box-shadow: none; }
-.task.is-completed { border-color: #8eb9a0; background: linear-gradient(180deg, #f8fcf9, #eef7f1); }
-.task.is-pending { border-color: #d8b36a; background: linear-gradient(180deg, #fffdf7, #fff8e8); }
+.task.is-completed { border-color: #70a68b; border-inline-start: 4px solid #216647; background: #edf7f0; }
+.task.is-pending { border-color: #d8b36a; border-inline-start: 4px solid #b4770c; background: #fffdf7; }
 .task__header { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; align-items: center; gap: 12px; }
 .task__heading { min-width: 0; }
 .task__body { min-width: 0; }
 .tasktype { min-width: 0; color: var(--cd-muted); font-size: 12px; }
-.task-status { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 4px; padding: 4px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; }
-.task-status.completed { background: var(--cd-primary-soft); color: var(--cd-primary); }
-.task-status.pending { border: 1px solid #e3c276; background: #fff1c9; color: #8a5600; }
+.task-status { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 4px; padding: 4px 8px; border: 1px solid transparent; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.task-status.completed { border-color: #216647; background: #216647; color: #fff; }
+.task-status.pending { border-color: #bd891f; background: #fff1c9; color: #754500; }
 .task-name { font-size: 16px; line-height: 1.6; overflow-wrap: anywhere; }
 .actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: center; gap: 10px; padding-top: 14px; border-top: 1px solid var(--cd-border); }
 .actions button:only-child { grid-column: 1 / -1; }
