@@ -362,10 +362,10 @@ async function exportRankingChart() {
                     :title="memberTaskTitle(member, item)"
                     @click="toggleCheckin(item.taskForMember, member)"
                   >
-                    {{ item.done ? '✓ 已打卡' : '打卡' }}
+                    {{ item.done ? '✓ 已打卡' : '去打卡' }}
                   </button>
-                  <span v-else-if="item.done" class="check">✓ 已打卡</span>
-                  <span v-else class="muted small">— 待完成</span>
+                  <span v-else-if="item.done" class="check status-done">✓ 已打卡</span>
+                  <span v-else class="status-pending">未打卡</span>
                 </td>
                 <td>
                   <b class="numeric">
@@ -392,7 +392,7 @@ async function exportRankingChart() {
               <div class="member-stack-tasks">
                 <div v-for="state in member.taskStates" :key="state.title">
                   <span>{{ state.title }}</span>
-                  <button v-if="member.isSelf" :class="[state.done ? 'taskdone' : 'quiet', state.done ? 'is-done' : 'is-pending']" type="button" @click="toggleCheckin(state.taskForMember, member)">{{ state.done ? '✓ 已打卡' : '打卡' }}</button>
+                  <button v-if="member.isSelf" :class="[state.done ? 'taskdone' : 'quiet', state.done ? 'is-done' : 'is-pending']" type="button" @click="toggleCheckin(state.taskForMember, member)">{{ state.done ? '✓ 已打卡' : '去打卡' }}</button>
                   <strong v-else :class="state.done ? 'check status-done' : 'status-pending'">{{ state.done ? '✓ 已打卡' : '未打卡' }}</strong>
                 </div>
               </div>
@@ -616,11 +616,11 @@ async function exportRankingChart() {
 .member-cell { gap: 10px; }
 .member-avatar { width: 44px; height: 44px; border: 0; font-size: 12px; cursor: pointer; }
 .daily-checkin { min-height: 44px; padding: 4px 12px; font-size: 12px; }
-.daily-checkin.is-pending, .member-stack-tasks button.is-pending { border-color: #d5a946; background: #fff4d5; color: #805000; font-weight: 700; }
-.daily-checkin.is-done, .member-stack-tasks button.is-done { border-color: #7caf91; background: #e6f4ea; color: #1f6a42; font-weight: 700; }
-.status-pending, .status-done { padding: 4px 7px; border-radius: 999px; font-size: 11px; white-space: nowrap; }
-.status-pending { border: 1px solid #dfbd70; background: #fff1c9; color: #855300; }
-.status-done { border: 1px solid #90bba0; background: #e6f4ea; color: #1f6a42; }
+.daily-checkin.is-pending, .member-stack-tasks button.is-pending { border: 1px solid #bd891f; background: #fff1c9; color: #754500; font-weight: 700; white-space: nowrap; }
+.daily-checkin.is-done, .member-stack-tasks button.is-done { border: 1px solid #216647; background: #216647; color: #fff; font-weight: 700; white-space: nowrap; }
+.status-pending, .status-done { display: inline-flex; align-items: center; padding: 4px 7px; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.status-pending { border: 1px solid #bd891f; background: #fff1c9; color: #754500; }
+.status-done { border: 1px solid #216647; background: #216647; color: #fff; }
 .numeric, .progress-count { font-variant-numeric: tabular-nums; }
 .progress-panel { margin-bottom: 32px; }
 .progress-label { font-weight: 500; }
