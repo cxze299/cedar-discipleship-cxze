@@ -15,6 +15,61 @@ export function shouldRenderWeeklyTask(enabled: unknown, tasks: unknown): boolea
   return enabledFlag(enabled) && Array.isArray(tasks) && tasks.length > 0;
 }
 
+export function hasPDFSignature(data: Uint8Array): boolean {
+  const header = new TextDecoder('ascii').decode(data.subarray(0, Math.min(data.length, 1024)));
+  return /%PDF-\d\.\d/.test(header);
+}
+
+export function buildWeeklyVerseContentLink(verseRef: unknown, reciteText: unknown) {
+  const content = String(reciteText || '').trim();
+  const title = String(verseRef || '').trim() || '本周背经';
+  if (content) return { label: '查看原文', title, type: 'markdown' as const, content };
+  const target = bibleReferenceTarget(verseRef);
+  return target ? { label: '查看原文', title, type: 'iframe' as const, url: target } : null;
+}
+
+const bibleBookReferences: Array<[string, string, number, string[]]> = [
+  ['创世记', '1', 50, ['创']], ['出埃及记', '2', 40, ['出']], ['利未记', '3', 27, ['利']],
+  ['民数记', '4', 36, ['民']], ['申命记', '5', 34, ['申']], ['约书亚记', '6', 24, ['书']],
+  ['士师记', '7', 21, ['士']], ['路得记', '8', 4, ['得']], ['撒母耳记上', '9', 31, ['撒上']],
+  ['撒母耳记下', '10', 24, ['撒下']], ['列王纪上', '11', 22, ['王上']], ['列王纪下', '12', 25, ['王下']],
+  ['历代志上', '13', 29, ['代上']], ['历代志下', '14', 36, ['代下']], ['以斯拉记', '15', 10, ['拉']],
+  ['尼希米记', '16', 13, ['尼']], ['以斯帖记', '17', 10, ['斯']], ['约伯记', '18', 42, ['伯']],
+  ['诗篇', '19', 150, ['诗']], ['箴言', '20', 31, ['箴']], ['传道书', '21', 12, ['传']],
+  ['雅歌', '22', 8, ['歌']], ['以赛亚书', '23', 66, ['赛']], ['耶利米书', '24', 52, ['耶']],
+  ['耶利米哀歌', '25', 5, ['哀']], ['以西结书', '26', 48, ['结']], ['但以理书', '27', 12, ['但']],
+  ['何西阿书', '28', 14, ['何']], ['约珥书', '29', 3, ['珥']], ['阿摩司书', '30', 9, ['摩']],
+  ['俄巴底亚书', '31', 1, ['俄']], ['约拿书', '32', 4, ['拿']], ['弥迦书', '33', 7, ['弥']],
+  ['那鸿书', '34', 3, ['鸿']], ['哈巴谷书', '35', 3, ['哈']], ['西番雅书', '36', 3, ['番']],
+  ['哈该书', '37', 2, ['该']], ['撒迦利亚书', '38', 14, ['亚']], ['玛拉基书', '39', 4, ['玛']],
+  ['马太福音', '40', 28, ['太']], ['马可福音', '41', 16, ['可']], ['路加福音', '42', 24, ['路']],
+  ['约翰福音', '43', 21, ['约']], ['使徒行传', '44', 28, ['徒']], ['罗马书', '45', 16, ['罗']],
+  ['哥林多前书', '46', 16, ['林前']], ['哥林多后书', '47', 13, ['林后']], ['加拉太书', '48', 6, ['加']],
+  ['以弗所书', '49', 6, ['弗']], ['腓立比书', '50', 4, ['腓']], ['歌罗西书', '51', 4, ['西']],
+  ['帖撒罗尼迦前书', '52', 5, ['帖前']], ['帖撒罗尼迦后书', '53', 3, ['帖后']],
+  ['提摩太前书', '54', 6, ['提前']], ['提摩太后书', '55', 4, ['提后']], ['提多书', '56', 3, ['多']],
+  ['腓利门书', '57', 1, ['门']], ['希伯来书', '58', 13, ['来']], ['雅各书', '59', 5, ['雅']],
+  ['彼得前书', '60', 5, ['彼前']], ['彼得后书', '61', 3, ['彼后']], ['约翰一书', '62', 5, ['约壹', '约一']],
+  ['约翰二书', '63', 1, ['约贰', '约二']], ['约翰三书', '64', 1, ['约叁', '约三']],
+  ['犹大书', '65', 1, ['犹']], ['启示录', '66', 22, ['启']],
+];
+
+function bibleReferenceTarget(value: unknown): string {
+  const source = String(value || '').trim().replaceAll('：', ':').replace(/\s+/g, '');
+  for (const [name, id, chapters, aliases] of bibleBookReferences) {
+    for (const label of [name, ...aliases].sort((left, right) => right.length - left.length)) {
+      if (!source.startsWith(label)) continue;
+      const match = source.slice(label.length).match(/^(\d{1,3}):(\d{1,3})/);
+      if (!match) continue;
+      const chapter = Number(match[1]);
+      const verse = Number(match[2]);
+      if (chapter < 1 || chapter > chapters || verse < 1) return '';
+      return `https://www.wordproject.org/bibles/gb/${id}/${chapter}.htm#${verse}`;
+    }
+  }
+  return '';
+}
+
 export function sameOriginAPIPath(value: unknown, origin = ''): string {
   const source = String(value || '').trim();
   if (source.startsWith('/api/')) return source;

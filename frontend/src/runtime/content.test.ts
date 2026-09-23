@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   applyPdfPageRangeToTitle,
   assetDownloadURLWithPageRange,
+  buildWeeklyVerseContentLink,
   buildReaderPageURL,
   classifyAttachment,
   deepMerge,
@@ -9,6 +10,7 @@ import {
   extractMarkdownSectionForDate,
   extractNumberedMarkdownSection,
   extractPdfPageRange,
+  hasPDFSignature,
   markdownToSafeHTML,
   normalizeContentViewerType,
   normalizeSearchText,
@@ -22,6 +24,22 @@ import {
 } from './content';
 
 describe('content runtime helpers', () => {
+  it('recognizes PDF bytes even when the resource name or MIME type is wrong', () => {
+    expect(hasPDFSignature(new TextEncoder().encode('%PDF-1.7\n...'))).toBe(true);
+    expect(hasPDFSignature(new TextEncoder().encode('plain markdown text'))).toBe(false);
+  });
+
+  it('opens configured recitation text or resolves a Bible reference when the text is empty', () => {
+    expect(buildWeeklyVerseContentLink('罗马书 8:11-15', '罗马书 8:11 原文')).toEqual({
+      label: '查看原文', title: '罗马书 8:11-15', type: 'markdown', content: '罗马书 8:11 原文',
+    });
+    expect(buildWeeklyVerseContentLink('林前 13：4-8', '')).toMatchObject({
+      type: 'iframe', url: 'https://www.wordproject.org/bibles/gb/46/13.htm#4',
+    });
+    expect(buildWeeklyVerseContentLink('未识别的经文', '')).toBeNull();
+    expect(buildWeeklyVerseContentLink('彼得后书 4:1', '')).toBeNull();
+  });
+
   it('normalizes persisted boolean flags', () => {
     expect(enabledFlag('off')).toBe(false);
     expect(enabledFlag('yes')).toBe(true);

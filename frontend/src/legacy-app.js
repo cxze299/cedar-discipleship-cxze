@@ -17,12 +17,14 @@ import {
 } from './runtime/date';
 import {
   applyPdfPageRangeToTitle,
+  buildWeeklyVerseContentLink,
   buildReaderPageURL,
   deepMerge,
   enabledFlag,
   extractMarkdownSectionForDate,
   extractNumberedMarkdownSection,
   extractPdfPageRange,
+  hasPDFSignature,
   inferDailyDevotionContentType,
   isPlainObject,
   normalizePageField,
@@ -34,6 +36,7 @@ import {
   shouldRenderWeeklyTask,
   weeklyTitleFromContent,
 } from './runtime/content';
+import { scriptureChaptersForDate } from './runtime/dailySchedule';
 import {
   authHeaders as sessionAuthHeaders,
   clearAccessToken,
@@ -122,7 +125,10 @@ function canAdminAccess() {
 }
 
 function visibleNavItems() {
-  return navItems.filter(([id]) => id !== 'admin' || canAdminAccess());
+  const showMinistryEntry = currentLearningSettings().ministry?.show_entry !== false;
+  return navItems.filter(([id]) => (
+    (id !== 'admin' || canAdminAccess()) && (id !== 'groups' || showMinistryEntry)
+  ));
 }
 
 function appSnapshot() {
@@ -781,7 +787,7 @@ export async function openTaskContent(task, link = null) {
     ...baseTarget,
     hideExternalLink: ['weekly_book', 'weekly_video'].includes(task.type),
   } : null;
-  if (!target?.url) {
+  if (!target?.url && !target?.content) {
     toast('暂无内容链接');
     return;
   }
@@ -1013,14 +1019,39 @@ export function closeViewer() {
 }
 
 export async function openContentTarget(target) {
+  const title = target.title || target.label || '阅读内容';
+  const inlineContent = String(target.content || '').trim();
+  if (inlineContent) {
+    closeViewer();
+    state.viewer = {
+      type: 'markdown', title,
+      html: markdownToHTML(inlineContent.split('\n')),
+      sourceURL: '', downloadURL: '', downloadSource: 'learning',
+      originalName: '', externalURL: '', relatedSections: target.relatedSections || [],
+    };
+    syncViewerStore();
+    render();
+    return;
+  }
   const sourceURL = resolveContentSourceURL(target);
   const sourceAPIPath = sameOriginAPIPath(sourceURL, window.location.origin);
   const downloadURL = target.downloadURL || target.url;
   const type = String(target.type || inferResourceType(target.url)).toLowerCase();
-  const title = target.title || target.label || '阅读内容';
   const originalName = target.original_name || target.filename || '';
   const downloadSource = target.downloadSource || 'learning';
   const pageRange = target.pageRange || extractPdfPageRange(title);
+  if (type === 'markdown' && target.contentText) {
+    closeViewer();
+    state.viewer = {
+      type: 'markdown', title,
+      html: markdownToHTML(String(target.contentText).split('\n')),
+      sourceURL: '', downloadURL: '', downloadSource,
+      originalName, externalURL: '', relatedSections: [],
+    };
+    syncViewerStore();
+    render();
+    return;
+  }
   const videoAssetMatch = type === 'video'
     ? String(sourceAPIPath || '').match(/^\/api\/assets\/(\d+)\/download$/)
     : null;
@@ -1065,8 +1096,11 @@ export async function openContentTarget(target) {
   if (sourceAPIPath) {
     const res = await fetchWithAuth(sourceAPIPath);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    if (type === 'markdown') {
-      const text = await res.text();
+    const blob = await res.blob();
+    const pdfHeader = hasPDFSignature(new Uint8Array(await blob.slice(0, 1024).arrayBuffer()));
+    const blobType = pdfHeader ? 'pdf' : inferResourceTypeFromMime(blob.type, type);
+    if (blobType === 'markdown') {
+      const text = await blob.text();
       const lines = target.date
         ? extractMarkdownSectionForDate(text, target.date, target.section)
         : (target.section ? extractNumberedMarkdownSection(text, target.section) : text.split('\n'));
@@ -1083,8 +1117,6 @@ export async function openContentTarget(target) {
       };
       syncViewerStore();
     } else {
-      const blob = await res.blob();
-      const blobType = inferResourceTypeFromMime(blob.type, type);
       const objectURL = URL.createObjectURL(blob);
       const pdfData = blobType === 'pdf' ? new Uint8Array(await blob.arrayBuffer()) : null;
       const viewerURL = buildViewerURL(objectURL, blobType, pageRange, sourceAPIPath);
@@ -1260,26 +1292,69 @@ function currentTaskOptions() {
   const serverTasks = state.bootstrap?.current_tasks || [];
   const bookTasks = serverTasks.filter((task) => task.task_type === 'weekly_book');
   const videoTasks = serverTasks.filter((task) => task.task_type === 'weekly_video');
+  const shareTasks = serverTasks.filter((task) => task.task_type === 'share');
+  const weeklyCheckinTask = serverTasks.find((task) => task.task_type === 'weekly_checkin');
   const verseTask = serverTasks.find((task) => task.task_type === 'weekly_verse');
   const outlineTask = serverTasks.find((task) => task.task_type === 'weekly_outline');
-  const dailyLinks = [getDailyDevotionPlan(), getDailyScripturePlan()].filter(Boolean);
+  const devotionLink = getDailyDevotionPlan();
+  const scriptureLinks = getDailyScripturePlans();
+  const dailyLinks = [devotionLink, ...scriptureLinks].filter((item) => item?.url || item?.content);
   const dailyLabel = dailyTaskLabel();
+  const dailyConfig = taskSectionsConfig().daily || {};
+  const separateDailyCheckins = dailyConfig.checkin_mode === 'separate';
+  const customDevotion = dailyDevotionPlanMode(dailyConfig.devotion || {}) === 'custom';
   const videoLinks = currentWeeklyVideoLinks(videoTasks, configPlan);
   const tasks = [];
-  if (dailyLinks.length) {
+  if (separateDailyCheckins) {
+    if (dailyConfig.devotion?.enabled !== false && (!customDevotion || devotionLink)) {
+      const title = devotionLink?.title || dailyConfig.devotion?.title || '每日灵修';
+      tasks.push({
+        type: 'daily_devotion', title, icon: '灵修', part: '', detail: title,
+        summary: devotionLink?.label || title, contentURL: devotionLink?.url || '',
+        contentLinks: devotionLink?.url || devotionLink?.content ? [devotionLink] : [],
+      });
+    }
+    if (dailyConfig.scripture?.enabled !== false) {
+      const title = dailyConfig.scripture?.label || '每日读经';
+      tasks.push({
+        type: 'daily_scripture', title, icon: '读经', part: '', detail: title,
+        summary: scriptureLinks.map((item) => item.label).join(' / '),
+        contentURL: scriptureLinks[0]?.url || '', contentLinks: scriptureLinks,
+      });
+    }
+  } else if (dailyLinks.length || (customDevotion && devotionLink)) {
+    const combinedDailyTitle = customDevotion && devotionLink?.title ? devotionLink.title : dailyLabel;
     tasks.push({
       type: 'daily_devotion',
-      title: dailyLabel,
+      title: combinedDailyTitle,
       icon: '灵修',
       part: '',
-      detail: dailyLabel,
+      detail: combinedDailyTitle,
       summary: dailyLinks.map((item) => item.label).join(' / ') || '完成今日灵修打卡',
       contentURL: dailyLinks[0]?.url || findAssetURL('每日') || '',
       contentLinks: dailyLinks,
     });
   }
-  if (shouldRenderWeeklyTask(week.book_enabled, bookTasks)) {
-    for (const book of buildWeeklyBookEntries(bookTasks, week.title, configPlan)) {
+  const weeklyBookEntries = buildWeeklyBookEntries(bookTasks, week.title, configPlan);
+  if (weeklyCheckinTask?.id && enabledFlag(weeklyCheckinTask.enabled, true)) {
+    const shareLinks = shareTasks.map((task) => firstTaskAssetLink(task, task.title) || (
+      isPlayableContentURL(task.content)
+        ? { label: task.title || '资料', title: task.title || '资料', url: task.content, type: inferResourceType(task.content) }
+        : null
+    )).filter(Boolean);
+    const contentLinks = [
+      ...weeklyBookEntries.flatMap((book) => book.contentLinks || []),
+      ...shareLinks,
+    ];
+    const title = weeklyCheckinTask.title || week.title || '周任务';
+    tasks.push({
+      type: 'weekly_checkin', taskID: Number(weeklyCheckinTask.id), weekID: Number(week.id || 0),
+      title, icon: '周课', part: '', detail: title, summary: '本周任务',
+      contentURL: contentLinks[0]?.url || '', contentLinks,
+    });
+  }
+  else if (shouldRenderWeeklyTask(week.book_enabled, bookTasks)) {
+    for (const book of weeklyBookEntries) {
       tasks.push({
         type: 'weekly_book',
         taskID: book.taskID || 0,
@@ -1310,17 +1385,19 @@ function currentTaskOptions() {
     });
   }
   if (enabledFlag(week.verse_enabled) && verseTask?.id) {
+    const verseTitle = week.verse_ref || verseTask?.title || '本周背经';
+    const verseLink = buildWeeklyVerseContentLink(verseTitle, verseTask.content || week.recite_text);
     tasks.push({
       type: 'weekly_verse',
       taskID: Number(verseTask?.id || 0),
       weekID: Number(week.id || 0),
-      title: week.verse_ref || verseTask?.title || '本周背经',
+      title: verseTitle,
       icon: '背经',
       part: '',
-      detail: week.verse_ref || verseTask?.title || '本周背经',
+      detail: verseTitle,
       summary: '背经与默想',
       contentURL: '',
-      contentLinks: [],
+      contentLinks: verseLink ? [verseLink] : [],
     });
   }
   if (enabledFlag(week.outline_enabled) && outlineTask?.id) {
@@ -1677,33 +1754,31 @@ function resolveDailyScriptureChapter(cfg, dayOffset) {
   return null;
 }
 
-function getDailyScripturePlan(date = state.selectedDate) {
+function getDailyScripturePlans(date = state.selectedDate) {
   const cfg = resolveEffectiveSchedule(
     taskSectionsConfig().daily?.scripture || {},
     date,
     ['start_date'],
   );
-  if (cfg.enabled === false) return null;
+  if (cfg.enabled === false) return [];
   const startDate = cfg.start_date || todayString();
   const dayOffset = dayOffsetFrom(startDate, date);
-  const resolved = resolveDailyScriptureChapter(cfg, dayOffset);
-  if (!resolved && cfg.hide_after_end !== false) return null;
-  const bookName = resolved?.bookName || cfg.book || '马可福音';
-  const bookId = resolved?.bookId || cfg.book_id || '41';
-  const chapter = resolved?.chapter || Math.max(1, Number(cfg.start_chapter || 1) + Math.max(0, dayOffset));
+  let chapters = scriptureChaptersForDate(cfg, date);
+  if (!chapters.length && cfg.hide_after_end === false && dayOffset >= 0) {
+    const fallback = resolveDailyScriptureChapter(cfg, dayOffset);
+    if (fallback) chapters = [fallback];
+  }
   const template = cfg.url_template || 'https://www.wordproject.org/bibles/gb/{book_id}/{chapter}.htm';
-  return {
-    label: `${bookName} ${numberToChinese(chapter)}章`,
-    title: `${bookName} ${numberToChinese(chapter)}章`,
-    url: template
-      .replaceAll('{book_id}', encodeURIComponent(bookId))
-      .replaceAll('{book}', encodeURIComponent(bookName))
-      .replaceAll('{chapter}', encodeURIComponent(String(chapter))),
+  return chapters.map((chapter) => ({
+    ...chapter,
+    label: `${chapter.bookName} ${numberToChinese(chapter.chapter)}章`,
+    title: `${chapter.bookName} ${numberToChinese(chapter.chapter)}章`,
+    url: template.replaceAll('{book_id}', encodeURIComponent(chapter.bookId))
+      .replaceAll('{book}', encodeURIComponent(chapter.bookName))
+      .replaceAll('{chapter}', encodeURIComponent(String(chapter.chapter))),
     type: cfg.type || 'iframe',
-    bookName,
-    bookId,
-    chapter,
-  };
+    taskType: 'daily_scripture',
+  }));
 }
 
 function checkinMatchesTask(item, task) {
@@ -1715,7 +1790,7 @@ function checkinMatchesTask(item, task) {
     const recordDetail = String(item.detail || '');
     return Boolean(part) && (recordPart === part || recordDetail === part);
   }
-  if (task.type === 'weekly_video' || task.type === 'weekly_verse' || task.type === 'weekly_outline') {
+  if (task.type === 'weekly_video' || task.type === 'weekly_verse' || task.type === 'weekly_outline' || task.type === 'weekly_checkin') {
     if (task.taskID && Number(item.task_id || 0) === Number(task.taskID)) return true;
     if (task.weekID && Number(item.week_id || 0) === Number(task.weekID)) return true;
     return item.logical_date === state.selectedDate;
