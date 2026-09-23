@@ -36,7 +36,7 @@ import {
   shouldRenderWeeklyTask,
   weeklyTitleFromContent,
 } from './runtime/content';
-import { scriptureChaptersForDate } from './runtime/dailySchedule';
+import { pdfPageForDate, scriptureChaptersForDate } from './runtime/dailySchedule';
 import {
   authHeaders as sessionAuthHeaders,
   clearAccessToken,
@@ -223,6 +223,7 @@ function dashboardSnapshot() {
       task,
       icon: task.icon,
       title: task.title,
+      shortLabel: Array.from(String(task.icon || task.title || '')).slice(0, 2).join(''),
       count,
       total: state.members.length,
       percent: Math.round((count / Math.max(1, state.members.length)) * 100),
@@ -242,7 +243,7 @@ function dashboardSnapshot() {
         return {
           task,
           icon: task.icon,
-          shortLabel: String(task.icon || task.title || '').slice(0, 2),
+          shortLabel: Array.from(String(task.icon || task.title || '')).slice(0, 2).join(''),
           title: task.title,
           done,
           taskForMember: isSelf
@@ -785,6 +786,7 @@ export async function openTaskContent(task, link = null) {
   const baseTarget = link || (task.contentLinks || [])[0] || (task.contentURL ? { url: task.contentURL, title: task.title } : null);
   const target = baseTarget ? {
     ...baseTarget,
+    taskType: task.type,
     hideExternalLink: ['weekly_book', 'weekly_video'].includes(task.type),
   } : null;
   if (!target?.url && !target?.content) {
@@ -1421,7 +1423,10 @@ function currentTaskOptions() {
       contentLinks: outlineLink ? [outlineLink] : [],
     });
   }
-  return mergeTodayHubTasks(tasks);
+  const weeklyTasks = tasks.filter((task) => task.type.startsWith('weekly_'));
+  const dailyTasks = tasks.filter((task) => task.type.startsWith('daily_'));
+  const otherTasks = tasks.filter((task) => !task.type.startsWith('weekly_') && !task.type.startsWith('daily_'));
+  return mergeTodayHubTasks([...weeklyTasks, ...dailyTasks, ...otherTasks]);
 }
 
 function mergeTodayHubTasks(tasks) {
@@ -1675,7 +1680,8 @@ function getDailyDevotionSectionNumber(date = state.selectedDate) {
 }
 
 function configuredAssetForURL(value) {
-  const source = sameOriginAPIPath(value, window.location.origin) || String(value || '').trim();
+  const origin = typeof window === 'undefined' ? '' : window.location.origin;
+  const source = sameOriginAPIPath(value, origin) || String(value || '').trim();
   const assetMatch = source.match(/^\/api\/assets\/(\d+)\/download$/);
   if (assetMatch) {
     return state.assets.find((item) => Number(item?.id) === Number(assetMatch[1])) || null;
@@ -1718,10 +1724,9 @@ function getDailyDevotionPlan(date = state.selectedDate) {
   const title = toChineseMonthDay(date);
   const section = getDailyDevotionSectionNumber(date);
   const path = cfg.path || daily.path || '';
-  const configuredType = String(cfg.type || '').trim().toLowerCase();
-  const type = /\.(?:md|markdown)(?:[?#]|$)/i.test(path)
-    ? 'markdown'
-    : (configuredType || inferResourceType(path, 'markdown'));
+  const type = inferDailyDevotionContentType({ ...cfg, path }, configuredAssetForURL(path));
+  const page = type === 'pdf' ? pdfPageForDate(devotion, date) : null;
+  if (type === 'pdf' && page === null) return null;
   return {
     label: title,
     title,
@@ -1729,6 +1734,7 @@ function getDailyDevotionPlan(date = state.selectedDate) {
     url: path,
     type,
     section,
+    ...(page !== null ? { pageRange: `${page}-${page}` } : {}),
   };
 }
 

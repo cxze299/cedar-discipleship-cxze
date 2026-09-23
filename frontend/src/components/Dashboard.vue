@@ -334,7 +334,7 @@ async function exportRankingChart() {
             <thead>
               <tr>
                 <th>成员</th>
-                <th v-for="card in progressCards" :key="card.title">{{ card.title }}</th>
+                <th v-for="card in progressCards" :key="card.title" :title="card.title">{{ card.shortLabel }}</th>
                 <th>今日完成</th>
               </tr>
             </thead>
@@ -391,7 +391,7 @@ async function exportRankingChart() {
               </header>
               <div class="member-stack-tasks">
                 <div v-for="state in member.taskStates" :key="state.title">
-                  <span>{{ state.title }}</span>
+                  <span :title="state.title">{{ state.shortLabel }}</span>
                   <button v-if="member.isSelf" :class="[state.done ? 'taskdone' : 'quiet', state.done ? 'is-done' : 'is-pending']" type="button" @click="toggleCheckin(state.taskForMember, member)">{{ state.done ? '✓ 已打卡' : '去打卡' }}</button>
                   <strong v-else :class="state.done ? 'check status-done' : 'status-pending'">{{ state.done ? '✓ 已打卡' : '未打卡' }}</strong>
                 </div>
@@ -415,7 +415,7 @@ async function exportRankingChart() {
             :key="`${card.task.type}:${card.task.part || ''}:${card.title}`"
             class="barrow"
           >
-            <span class="progress-label">{{ card.title }}</span>
+            <span class="progress-label" :title="card.title">{{ card.shortLabel }}</span>
             <div class="bar">
               <i :style="{ width: `${card.percent}%` }"></i>
             </div>

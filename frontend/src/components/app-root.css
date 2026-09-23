@@ -200,9 +200,15 @@
 }
 
 .app-resource-card__meta {
+  position: relative;
+  z-index: 1;
   gap: 6px;
   margin-bottom: 4px;
 }
+
+.app-resource-select { display: inline-flex; min-height: 32px; align-items: center; gap: 6px; color: var(--cd-muted); font-size: 12px; cursor: pointer; }
+.app-resource-select input { width: 16px; height: 16px; accent-color: var(--cd-primary); }
+.app-resource-select-all { flex: 0 0 auto; padding-inline: 8px; }
 
 .app-resource-card__pill {
   padding: 2px 7px;
@@ -255,6 +261,9 @@
   white-space: nowrap;
 }
 
+.app-resource-card__actions { position: relative; z-index: 1; display: flex; align-items: center; gap: 8px; }
+.app-resource-card__download { min-height: 36px; padding: 4px 9px; font-size: 12px; }
+
 .app-resource-empty {
   padding: 64px 20px;
   text-align: center;
@@ -297,7 +306,8 @@
 .app-resource-grid--mobile { display: none; }
 .app-resource-stack-card { grid-template-columns: 42px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; height: 100%; padding: 16px; }
 .app-resource-stack-card .tile { grid-row: 1; }
-.app-resource-stack-card__open { grid-column: 1 / -1; width: 100%; min-height: 42px; }
+.app-resource-stack-card__actions { display: flex; grid-column: 1 / -1; gap: 8px; }
+.app-resource-stack-card__actions button { display: inline-flex; flex: 1 1 0; align-items: center; justify-content: center; gap: 6px; min-width: 0; min-height: 42px; }
 
 @media (max-width: 767px) {
   .cedar-app-shell,
@@ -334,11 +344,13 @@
   .app-resource-toolbar { align-items: stretch; gap: 6px; margin-bottom: 14px; }
   .app-resource-search { flex-basis: 100%; max-width: none; }
   .app-resource-toolbar > button { flex: 0 0 auto; min-height: 40px; padding-inline: 12px; }
+  .app-resource-select-all { align-self: center; }
   .cd-resource-grid.app-resource-grid--desktop { display: none; }
   .app-resource-grid--mobile { display: block; }
   .cd-resource-card { grid-template-columns: 40px minmax(0, 1fr) auto; padding: 16px; }
   .app-resource-card__title button { grid-column: auto; min-height: 0; }
-  .app-resource-card__cta { grid-column: 3; }
+  .app-resource-card__actions { grid-column: 3; }
+  .app-resource-card__download { grid-column: auto !important; }
 
   .cd-dialog-backdrop { padding: 12px; }
   .app-more-dialog,

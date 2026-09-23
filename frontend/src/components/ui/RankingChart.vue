@@ -10,28 +10,40 @@ defineProps({
 </script>
 
 <template>
-  <div v-if="items.length" class="ranking-chart" role="img" aria-label="成员完成数柱状图">
-    <div v-for="item in items" :key="getKey(item)" class="ranking-chart__item">
-      <small class="ranking-chart__total">{{ getTotal(item) }}</small>
-      <div class="ranking-chart__track">
-        <span class="ranking-chart__bar" :style="{ height: `${getHeight(item)}%` }"></span>
+  <div v-if="items.length" class="ranking-chart-scroll" role="region" aria-label="成员完成数柱状图，可横向滚动" tabindex="0">
+    <div class="ranking-chart" role="list">
+      <div v-for="item in items" :key="getKey(item)" class="ranking-chart__item" role="listitem">
+        <small class="ranking-chart__total">{{ getTotal(item) }}</small>
+        <div class="ranking-chart__track">
+          <span class="ranking-chart__bar" :style="{ height: `${getHeight(item)}%` }"></span>
+        </div>
+        <span class="ranking-chart__label">{{ getLabel(item) }}</span>
       </div>
-      <span class="ranking-chart__label">{{ getLabel(item) }}</span>
     </div>
   </div>
   <p v-else class="ranking-chart__empty muted small">{{ emptyLabel }}</p>
 </template>
 
 <style scoped>
+.ranking-chart-scroll {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y;
+  scrollbar-gutter: stable;
+}
+.ranking-chart-scroll:focus-visible { outline: 2px solid var(--cd-focus-ring); outline-offset: 2px; }
 .ranking-chart {
   display: flex;
+  width: max-content;
+  min-width: 100%;
   align-items: flex-end;
   gap: 12px;
   min-height: 180px;
   padding: 8px 2px 12px;
-  overflow-x: auto;
-  overscroll-behavior-inline: contain;
-  scrollbar-gutter: stable;
 }
 .ranking-chart__item {
   display: flex;

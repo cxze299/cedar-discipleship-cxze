@@ -477,6 +477,10 @@ function enqueueResources(items) {
   }
 }
 
+function downloadResource(asset) {
+  enqueueResources([asset]);
+}
+
 function downloadSelectedResources() {
   const selected = resources.value.filter(resourceSelected);
   if (!selected.length) {
@@ -700,6 +704,10 @@ async function refreshResources() {
                 class="app-resource-search__input"
               />
             </div>
+            <label class="app-resource-select app-resource-select-all">
+              <input type="checkbox" :checked="allVisibleResourcesSelected" :disabled="!filteredResources.length" @change="toggleAllResources" />
+              <span>全选</span>
+            </label>
             <button
               :class="resourceTypeFilter === '' ? 'primary' : 'quiet'"
               type="button"
@@ -741,6 +749,10 @@ async function refreshResources() {
                   <span class="pill app-resource-card__pill">
                     {{ resourceTypeLabel(asset) }}
                   </span>
+                  <label class="app-resource-select">
+                    <input type="checkbox" :checked="resourceSelected(asset)" @change="toggleResourceSelection(asset)" />
+                    <span>选择</span>
+                  </label>
                 </div>
                 <h3 class="resource-title app-resource-card__title">
                   <button type="button" :aria-label="`查看${optionText(asset)}`" @click="openAsset(asset)">
@@ -751,7 +763,12 @@ async function refreshResources() {
                   <template v-if="asset.folder">{{ asset.folder }} / </template>{{ asset.original_name }}
                 </p>
               </div>
-              <span class="app-resource-card__cta" aria-hidden="true">查看 →</span>
+              <div class="app-resource-card__actions">
+                <span class="app-resource-card__cta" aria-hidden="true">查看</span>
+                <button class="quiet app-resource-card__download" type="button" @click="downloadResource(asset)">
+                  <Download :size="15" /> 下载
+                </button>
+              </div>
             </article>
           </div>
           <StackedWheel
@@ -770,11 +787,20 @@ async function refreshResources() {
                   <FileText v-else :size="20" />
                 </div>
                 <div class="app-resource-card__copy">
-                  <span class="pill app-resource-card__pill">{{ resourceTypeLabel(asset) }}</span>
+                  <div class="inline app-resource-card__meta">
+                    <span class="pill app-resource-card__pill">{{ resourceTypeLabel(asset) }}</span>
+                    <label class="app-resource-select">
+                      <input type="checkbox" :checked="resourceSelected(asset)" @change="toggleResourceSelection(asset)" />
+                      <span>选择</span>
+                    </label>
+                  </div>
                   <h3 class="resource-title app-resource-card__title">{{ optionText(asset) }}</h3>
                   <p class="muted small app-resource-card__path"><template v-if="asset.folder">{{ asset.folder }} / </template>{{ asset.original_name }}</p>
                 </div>
-                <button class="primary app-resource-stack-card__open" type="button" @click="openAsset(asset)">打开资料</button>
+                <div class="app-resource-stack-card__actions">
+                  <button class="quiet" type="button" @click="openAsset(asset)">打开资料</button>
+                  <button class="primary" type="button" @click="downloadResource(asset)"><Download :size="16" /> 下载</button>
+                </div>
               </article>
             </template>
           </StackedWheel>
