@@ -11,6 +11,8 @@ import {
 import DateNavigator from './ui/DateNavigator.vue';
 import RankingChart from './ui/RankingChart.vue';
 import DateCalendarDialog from './ui/DateCalendarDialog.vue';
+import VerseQuiz from './VerseQuiz.vue';
+import { useAppStateStore } from '../stores/appState';
 import { useCheckinWorkbenchStore } from '../stores/checkinWorkbench';
 import {
   openTaskContent,
@@ -21,6 +23,9 @@ import {
 import { taskIsCompleted } from '../runtime/checkins';
 
 const store = useCheckinWorkbenchStore();
+const app = useAppStateStore();
+const quizTask = ref(null);
+const quizScope = computed(() => `${app.user?.id || app.user?.username || 'user'}:${app.currentGroupID || 0}`);
 const {
   visible,
   selectedDate,
@@ -328,6 +333,7 @@ async function exportStatsChart() {
               </div>
 
               <footer class="actions">
+                <button v-if="task.type === 'weekly_verse'" class="secondary" type="button" title="确认或粘贴原文后生成默写卷" @click="quizTask = task">默写</button>
                 <button
                   v-if="task.contentLinks?.length === 1"
                   class="secondary task-read-button"
@@ -371,6 +377,7 @@ async function exportStatsChart() {
         @today="chooseDate(maxDate)"
         @close="datePickerOpen = false"
       />
+      <VerseQuiz :open="Boolean(quizTask)" :task="quizTask" :scope="quizScope" :user-name="app.user?.display_name || app.user?.username || ''" :user-id="Number(app.user?.id || 0)" :members="app.members" :can-select-member="Boolean(app.user?.is_super_admin)" @close="quizTask = null" />
 
       <!-- Optional Monthly Stats Section (below tasks) -->
       <section v-if="statsVisible" class="stats-section">

@@ -364,6 +364,9 @@ func (a *app) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/checkins", a.auth(a.handleCreateCheckin))
 	mux.HandleFunc("DELETE /api/checkins/{id}", a.auth(a.handleDeleteOwnCheckin))
 	mux.HandleFunc("GET /api/checkins", a.auth(a.handleListCheckins))
+	mux.HandleFunc("GET /api/recite-attempts", a.auth(a.handleListReciteAttempts))
+	mux.HandleFunc("POST /api/recite-attempts", a.auth(a.handleCreateReciteAttempt))
+	mux.HandleFunc("GET /api/recite-leaderboard", a.auth(a.handleReciteLeaderboard))
 	mux.HandleFunc("DELETE /api/admin/checkins/{id}", a.auth(a.requireRole(roleGroupAdmin, a.handleAdminDeleteCheckin)))
 
 	mux.HandleFunc("GET /api/assets", a.auth(a.handleListAssets))
@@ -415,6 +418,8 @@ func (a *app) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/super-admin/groups/{id}/members", a.auth(a.requireSuper(a.handleSuperAddGroupMember)))
 	mux.HandleFunc("POST /api/super-admin/groups/{id}/leaders", a.auth(a.requireSuper(a.handleSuperSetLeader)))
 	mux.HandleFunc("DELETE /api/super-admin/groups/{id}/leaders/{user_id}", a.auth(a.requireSuper(a.handleSuperUnsetLeader)))
+	mux.HandleFunc("GET /api/super-admin/recite-attempts", a.auth(a.requireSuper(a.handleSuperListReciteAttempts)))
+	mux.HandleFunc("DELETE /api/super-admin/recite-attempts/{id}", a.auth(a.requireSuper(a.handleSuperDeleteReciteAttempt)))
 	mux.HandleFunc("GET /api/super-admin/bot-management", a.auth(a.requireSuper(a.handleBotManagement)))
 	mux.HandleFunc("POST /api/super-admin/bot-robots", a.auth(a.requireSuper(a.handleBotRobot)))
 	mux.HandleFunc("DELETE /api/super-admin/bot-robots/{id}", a.auth(a.requireSuper(a.handleBotRobotDelete)))

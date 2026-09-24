@@ -26,6 +26,7 @@ import {
 } from '../runtime/resources';
 import MinistryCatalogAdmin from './MinistryCatalogAdmin.vue';
 import BotManagementAdmin from './BotManagementAdmin.vue';
+import ReciteHistoryAdmin from './ReciteHistoryAdmin.vue';
 import ResourceGovernance from './ResourceGovernance.vue';
 import DateField from './ui/DateField.vue';
 import {
@@ -103,6 +104,9 @@ function navigateTabs(event) {
 
 const canManageMinistryCatalog = computed(() => Boolean(user.value?.is_super_admin || user.value?.roles?.includes('group_admin')));
 const canManageRoles = computed(() => Boolean(user.value?.is_super_admin || user.value?.roles?.some((role) => ['group_admin', 'group_leader'].includes(role))));
+watch(() => user.value?.is_super_admin, (isSuperAdmin) => {
+  if (!isSuperAdmin && adminSection.value === 'recite-history') setAdminSection('learning');
+});
 const activeGroup = computed(() => groups.value.find((item) => Number(item.id) === Number(currentGroupID.value)));
 const conflictAlreadyInGroup = computed(() => members.value.some(
   (member) => Number(member.user_id) === Number(memberConflict.value?.id),
@@ -616,6 +620,17 @@ async function runLocalBackupImport() {
       >
         机器人管理
       </button>
+      <button
+        v-if="user?.is_super_admin"
+        :class="adminSection === 'recite-history' ? 'primary' : 'quiet'"
+        type="button"
+        role="tab"
+        :aria-selected="adminSection === 'recite-history'"
+        :tabindex="adminSection === 'recite-history' ? 0 : -1"
+        @click="setAdminSection('recite-history')"
+      >
+        默写记录
+      </button>
     </div>
 
     <section v-if="adminSection === 'members'">
@@ -710,6 +725,7 @@ async function runLocalBackupImport() {
 
     <MinistryCatalogAdmin v-else-if="adminSection === 'ministry' && canManageMinistryCatalog" />
     <BotManagementAdmin v-else-if="adminSection === 'bot' && user?.is_super_admin" />
+    <ReciteHistoryAdmin v-else-if="adminSection === 'recite-history' && user?.is_super_admin" :group-id="currentGroupID" :members="members" />
 
     <section v-else-if="adminSection === 'learning'">
               <div class="grid admin-learning-stack">
