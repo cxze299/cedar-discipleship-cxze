@@ -26,6 +26,7 @@ const app = useAppStateStore();
 const { currentGroupID, resources } = storeToRefs(app);
 
 const activeView = ref('owned');
+const ownedCategoryFilter = ref('');
 const loading = ref(false);
 const refreshing = ref(false);
 const groups = ref([]);
@@ -59,6 +60,12 @@ const views = [
 const databaseResources = computed(() => resources.value.filter((item) => Number(item.id) > 0));
 const ownedResources = computed(() => databaseResources.value.filter((item) => item.asset_kind !== 'imported'));
 const importedResources = computed(() => databaseResources.value.filter((item) => item.asset_kind === 'imported'));
+const ownedCategories = computed(() => [...new Set(databaseResources.value.map((item) => normalizeResourceCategory(item.category)).filter(Boolean))].sort(resourceCategorySort));
+const visibleDatabaseResources = computed(() => ownedCategoryFilter.value
+  ? databaseResources.value.filter((item) => normalizeResourceCategory(item.category) === ownedCategoryFilter.value)
+  : databaseResources.value);
+const visibleOwnedResources = computed(() => visibleDatabaseResources.value.filter((item) => item.asset_kind !== 'imported'));
+const visibleImportedResources = computed(() => visibleDatabaseResources.value.filter((item) => item.asset_kind === 'imported'));
 const selectedAssets = computed(() => databaseResources.value.filter((item) => selectedAssetIDs.value.includes(Number(item.id))));
 const selectedOwnedAssets = computed(() => ownedResources.value.filter((item) => selectedAssetIDs.value.includes(Number(item.id))));
 const selectedSharedResources = computed(() => sharedResources.value.filter((item) => selectedSharedAssetIDs.value.includes(Number(item.asset_id))));
@@ -72,7 +79,7 @@ const visibleSharedResources = computed(() => filterSharedResources(sharedResour
   status: statusFilter.value,
 }));
 const selectedVisibleSharedResources = computed(() => visibleSharedResources.value.filter((item) => selectedSharedAssetIDs.value.includes(Number(item.asset_id))));
-const allAssetsSelected = computed(() => databaseResources.value.length > 0 && databaseResources.value.every((item) => selectedAssetIDs.value.includes(Number(item.id))));
+const allAssetsSelected = computed(() => visibleDatabaseResources.value.length > 0 && visibleDatabaseResources.value.every((item) => selectedAssetIDs.value.includes(Number(item.id))));
 const allSharedSelected = computed(() => visibleSharedResources.value.length > 0 && visibleSharedResources.value.every((item) => selectedSharedAssetIDs.value.includes(Number(item.asset_id))));
 const batchShareDisabled = computed(() => selectedOwnedAssets.value.length === 0 || batchBusy.value);
 const batchDeleteDisabled = computed(() => selectedAssets.value.length === 0 || batchBusy.value);
@@ -176,7 +183,10 @@ function setAssetSelected(assetID, checked) {
 }
 
 function setAllAssetsSelected(checked) {
-  selectedAssetIDs.value = checked ? databaseResources.value.map((item) => Number(item.id)) : [];
+  const visibleIDs = visibleDatabaseResources.value.map((item) => Number(item.id));
+  selectedAssetIDs.value = checked
+    ? [...new Set([...selectedAssetIDs.value, ...visibleIDs])]
+    : selectedAssetIDs.value.filter((id) => !visibleIDs.includes(Number(id)));
 }
 
 function setSharedSelected(assetID, checked) {
@@ -455,6 +465,7 @@ onMounted(loadGovernance);
     <header class="resource-governance-head">
       <div>
         <h2>资源库管理</h2>
+        <p class="muted small">按分类查找资源，并管理本组资源与共享导入。</p>
       </div>
       <div class="resource-governance-actions">
         <button class="ghost resource-icon-button" type="button" :disabled="refreshing || loading" title="刷新资源数据" aria-label="刷新资源数据" @click="refreshResources">
@@ -480,10 +491,18 @@ onMounted(loadGovernance);
     <div v-if="loading" class="empty">正在加载资源治理数据…</div>
 
     <template v-else-if="activeView === 'owned'">
+      <div class="resource-filter-bar">
+        <label>资源分类
+          <select v-model="ownedCategoryFilter" aria-label="筛选本组资源分类">
+            <option value="">全部分类</option>
+            <option v-for="category in ownedCategories" :key="category" :value="category">{{ categoryLabel(category) }}</option>
+          </select>
+        </label>
+      </div>
       <div class="resource-batch-toolbar">
         <label class="resource-row-check">
           <input type="checkbox" :checked="allAssetsSelected" @change="setAllAssetsSelected($event.target.checked)" />
-          <span>全选</span>
+          <span>全选当前分类</span>
         </label>
         <span class="muted">已选 {{ selectedAssets.length }} 项，自有 {{ selectedOwnedAssets.length }} 项</span>
         <div class="resource-batch-actions">
@@ -497,7 +516,7 @@ onMounted(loadGovernance);
         <table class="resource-governance-table">
           <thead><tr><th class="resource-select-column">选择</th><th>资源</th><th>类型</th><th>归属</th><th>更新时间</th><th>操作</th></tr></thead>
           <tbody>
-            <tr v-for="asset in ownedResources" :key="asset.id">
+            <tr v-for="asset in visibleOwnedResources" :key="asset.id">
               <td class="resource-select-column"><input type="checkbox" :checked="selectedAssetIDs.includes(Number(asset.id))" @change="setAssetSelected(asset.id, $event.target.checked)" /></td>
               <td><strong>{{ asset.title }}</strong><small>{{ asset.original_name }}</small></td>
               <td><span class="pill">{{ categoryLabel(asset.category) }}</span></td>
@@ -509,7 +528,7 @@ onMounted(loadGovernance);
                 </div>
               </td>
             </tr>
-            <tr v-for="asset in importedResources" :key="asset.id">
+            <tr v-for="asset in visibleImportedResources" :key="asset.id">
               <td class="resource-select-column"><input type="checkbox" :checked="selectedAssetIDs.includes(Number(asset.id))" @change="setAssetSelected(asset.id, $event.target.checked)" /></td>
               <td><strong>{{ asset.title }}</strong><small>{{ asset.original_name }}</small></td>
               <td><span class="pill">{{ categoryLabel(asset.category) }}</span></td>
@@ -523,9 +542,9 @@ onMounted(loadGovernance);
             </tr>
           </tbody>
         </table>
-        <div v-if="!databaseResources.length" class="empty">当前小组暂无资源。</div>
+        <div v-if="!visibleDatabaseResources.length" class="empty">当前分类暂无资源。</div>
       </div>
-      <StackedWheel class="mobile-resource-stack" :items="databaseResources" :item-key="(asset) => asset.id" aria-label="本组资源" :card-height="246">
+      <StackedWheel class="mobile-resource-stack" :items="visibleDatabaseResources" :item-key="(asset) => asset.id" aria-label="本组资源" :card-height="246">
         <template #default="{ item: asset }">
           <article class="resource-stack-card">
             <header><label><input type="checkbox" :checked="selectedAssetIDs.includes(Number(asset.id))" @change="setAssetSelected(asset.id, $event.target.checked)" /><span>选择</span></label><span class="pill">{{ categoryLabel(asset.category) }}</span></header>
