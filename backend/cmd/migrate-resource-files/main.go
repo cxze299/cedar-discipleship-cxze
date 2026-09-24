@@ -61,6 +61,7 @@ var legacyRootResourceFiles = []struct {
 	{Name: "weekly_task.md", Category: "markdown"},
 	{Name: "Kuangye.md", Category: "markdown"},
 	{Name: "Yonghuo.md", Category: "markdown"},
+	{Name: "twelve_baskets.md", Category: "markdown"},
 }
 
 type options struct {
