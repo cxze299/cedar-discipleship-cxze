@@ -60,7 +60,6 @@ verify_runtime_contract() {
 require_command git
 require_command go
 require_command npm
-require_command scp
 require_command split
 require_command ssh
 require_command tar
@@ -139,7 +138,8 @@ log "Transferring $(du -h "$BUNDLE" | awk '{print $1}') in $TRANSFER_JOBS parall
 ssh -p "$SSH_PORT" "$SSH_HOST" "mkdir -p '$REMOTE_STAGE/chunks'"
 upload_pids=()
 for part in "$CHUNK_DIR"/part-*; do
-  scp -q -P "$SSH_PORT" "$part" "$SSH_HOST:$REMOTE_STAGE/chunks/$(basename "$part")" &
+  ssh -o Compression=no -p "$SSH_PORT" "$SSH_HOST" \
+    "cat > '$REMOTE_STAGE/chunks/$(basename "$part")'" <"$part" &
   upload_pids+=("$!")
   if [ "${#upload_pids[@]}" -ge "$TRANSFER_JOBS" ]; then
     for pid in "${upload_pids[@]}"; do
