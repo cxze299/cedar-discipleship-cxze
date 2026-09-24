@@ -69,7 +69,7 @@ func (a *app) handleAssetPlayback(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "asset_not_found")
 		return
 	}
-	if !isVideoAsset(file) {
+	if !isPlaybackMediaAsset(file) {
 		writeError(w, http.StatusBadRequest, "asset_not_video")
 		return
 	}
@@ -115,7 +115,7 @@ func (a *app) handleStreamAsset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	file, err := a.assets.DownloadFile(r.Context(), groupID, id)
-	if err != nil || !isVideoAsset(file) {
+	if err != nil || !isPlaybackMediaAsset(file) {
 		writeError(w, http.StatusNotFound, "asset_not_found")
 		return
 	}
@@ -187,9 +187,31 @@ func isVideoAsset(file *assetdomain.DownloadFile) bool {
 	}
 }
 
+func isAudioAsset(file *assetdomain.DownloadFile) bool {
+	if file == nil {
+		return false
+	}
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(file.MimeType)), "audio/") {
+		return true
+	}
+	switch strings.ToLower(filepath.Ext(file.OriginalName)) {
+	case ".aac", ".flac", ".m4a", ".ma4", ".mp3", ".ogg", ".opus", ".wav", ".weba":
+		return true
+	default:
+		return false
+	}
+}
+
+func isPlaybackMediaAsset(file *assetdomain.DownloadFile) bool {
+	return isVideoAsset(file) || isAudioAsset(file)
+}
+
 func playbackAssetFile(file *assetdomain.DownloadFile) *assetdomain.DownloadFile {
 	if file == nil {
 		return nil
+	}
+	if !isVideoAsset(file) {
+		return file
 	}
 	playbackPath := file.AbsolutePath + assetPlaybackSuffix
 	info, err := os.Stat(playbackPath)

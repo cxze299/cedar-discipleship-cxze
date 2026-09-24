@@ -469,6 +469,104 @@ func TestAssetPlaybackReturnsOriginalFallbackURL(t *testing.T) {
 	}
 }
 
+func TestAssetPlaybackSupportsAudio(t *testing.T) {
+	t.Parallel()
+
+	sourcePath := filepath.Join(t.TempDir(), "lesson.mp3")
+	if err := os.WriteFile(sourcePath, []byte("audio"), 0o600); err != nil {
+		t.Fatalf("write source audio: %v", err)
+	}
+	service := assetdomain.NewService(
+		&downloadAssetRepo{asset: assetdomain.Asset{
+			ID:           16,
+			GroupID:      1,
+			OriginalName: "lesson.mp3",
+			StoragePath:  "team-agp-resources/objects/test/lesson.mp3",
+			MimeType:     "audio/mpeg",
+		}},
+		&downloadAssetStorage{path: sourcePath},
+		"",
+	)
+	a := &app{assets: service, secret: []byte("test-playback-secret")}
+	playbackRequest := httptest.NewRequest(http.MethodGet, "/api/assets/16/playback", nil)
+	playbackRequest.SetPathValue("id", "16")
+	playbackRequest = playbackRequest.WithContext(context.WithValue(
+		playbackRequest.Context(),
+		currentUserKey,
+		currentUser{ID: 1, CurrentGroupID: 1},
+	))
+	playbackRecorder := httptest.NewRecorder()
+
+	a.handleAssetPlayback(playbackRecorder, playbackRequest)
+
+	if playbackRecorder.Code != http.StatusOK {
+		t.Fatalf("playback status = %d, want %d", playbackRecorder.Code, http.StatusOK)
+	}
+	var response struct {
+		URL         string `json:"url"`
+		FallbackURL string `json:"fallback_url"`
+	}
+	if err := json.Unmarshal(playbackRecorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode playback response: %v", err)
+	}
+	if response.URL == "" || response.FallbackURL != "" {
+		t.Fatalf("playback response = %+v, want audio URL without fallback", response)
+	}
+
+	streamRequest := httptest.NewRequest(http.MethodGet, response.URL, nil)
+	streamRequest.SetPathValue("id", "16")
+	streamRecorder := httptest.NewRecorder()
+	a.handleStreamAsset(streamRecorder, streamRequest)
+
+	if streamRecorder.Code != http.StatusOK {
+		t.Fatalf("stream status = %d, want %d", streamRecorder.Code, http.StatusOK)
+	}
+	if got := streamRecorder.Header().Get("Content-Type"); got != "audio/mpeg" {
+		t.Fatalf("stream Content-Type = %q, want audio/mpeg", got)
+	}
+	if got := streamRecorder.Body.String(); got != "audio" {
+		t.Fatalf("stream body = %q, want audio", got)
+	}
+}
+
+func TestAssetPlaybackRejectsNonMedia(t *testing.T) {
+	t.Parallel()
+
+	sourcePath := filepath.Join(t.TempDir(), "lesson.pdf")
+	if err := os.WriteFile(sourcePath, []byte("pdf"), 0o600); err != nil {
+		t.Fatalf("write source document: %v", err)
+	}
+	service := assetdomain.NewService(
+		&downloadAssetRepo{asset: assetdomain.Asset{
+			ID:           16,
+			GroupID:      1,
+			OriginalName: "lesson.pdf",
+			StoragePath:  "team-agp-resources/objects/test/lesson.pdf",
+			MimeType:     "application/pdf",
+		}},
+		&downloadAssetStorage{path: sourcePath},
+		"",
+	)
+	a := &app{assets: service, secret: []byte("test-playback-secret")}
+	request := httptest.NewRequest(http.MethodGet, "/api/assets/16/playback", nil)
+	request.SetPathValue("id", "16")
+	request = request.WithContext(context.WithValue(
+		request.Context(),
+		currentUserKey,
+		currentUser{ID: 1, CurrentGroupID: 1},
+	))
+	recorder := httptest.NewRecorder()
+
+	a.handleAssetPlayback(recorder, request)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+	if !strings.Contains(recorder.Body.String(), "asset_not_video") {
+		t.Fatalf("body = %q, want existing asset_not_video error", recorder.Body.String())
+	}
+}
+
 func TestPlaybackAssetFilePrefersGeneratedDerivative(t *testing.T) {
 	t.Parallel()
 
