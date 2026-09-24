@@ -1894,7 +1894,7 @@ export async function loadAdminData(force = false) {
     state.learningConfig = learning.settings || state.learningConfig || {};
     state.resourceLibrary = library.sections || [];
     state.adminDataGroupID = state.user.current_group_id;
-    if (!state.weekDraft) state.weekDraft = weekDraftFromWeek(currentWeekForDraft());
+    if (!state.weekDraft) state.weekDraft = weekDraftFromWeek(currentWeekForDraft() || currentCalendarWeekRange());
   } catch (error) {
     toast(error.message);
   } finally {
@@ -2103,9 +2103,10 @@ function weekHasTaskContent(week = {}) {
 }
 
 function currentWeekForDraft() {
-  const currentWeek = currentCalendarWeekRange();
-  return (state.weeks || []).find((week) => String(week.start || '') === currentWeek.start
-    && String(week.end || '') === currentWeek.end)
+  const today = todayString();
+  return [...(state.weeks || [])]
+    .filter((week) => String(week.start || '') <= today && today <= String(week.end || ''))
+    .sort((left, right) => String(right.start || '').localeCompare(String(left.start || '')))[0]
     || null;
 }
 
@@ -2294,7 +2295,7 @@ export async function deleteWeekDraft() {
     await api(`/admin/study-weeks/${draft.id}`, { method: 'DELETE' });
     toast('当前周任务已删除');
     await loadAll();
-    state.weekDraft = weekDraftFromWeek(currentWeekForDraft());
+    state.weekDraft = weekDraftFromWeek(currentWeekForDraft() || currentCalendarWeekRange());
     render();
   } catch (error) {
     toast(error.message);

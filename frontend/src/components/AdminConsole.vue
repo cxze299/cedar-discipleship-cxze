@@ -849,13 +849,14 @@ async function runLocalBackupImport() {
                     <div class="inline-actions">
                       <select
                         class="week-picker"
-                        :title="weekDraft.id ? weekOptionText(weekDraft) : '新增一周'"
+                        :title="weekDraft.id ? weekOptionText(weekDraft) : '新建周任务'"
                         :value="weekDraft.id || 0"
                         @change="selectWeekDraft(Number($event.target.value || 0))"
                       >
                         <option v-for="week in weeks" :key="week.id" :value="week.id">{{ weekOptionText(week) }}</option>
-                        <option value="0">新增一周</option>
+                        <option v-if="!weekDraft.id" value="0">新建周任务</option>
                       </select>
+                      <button class="secondary" type="button" @click="selectWeekDraft(0)">新增一周</button>
                     </div>
                   </div>
                   <div class="form-stack admin-form-grid">
