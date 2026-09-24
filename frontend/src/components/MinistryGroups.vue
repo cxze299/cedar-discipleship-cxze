@@ -66,6 +66,7 @@ const workspaceLoadedAt = ref(0);
 const detailCache = new Map();
 let workspaceLoadPromise = null;
 let workspaceWarmTimer = 0;
+let workspaceRequestID = 0;
 let detailRequestID = 0;
 
 const workspaceCacheTTL = 60_000;
@@ -110,6 +111,26 @@ const progressAttachments = computed(() => {
 const selectedAttachments = computed(() => progressAttachments.value.filter(attachmentSelected));
 
 watch(
+  [authenticated, currentGroupID],
+  () => {
+    workspaceRequestID += 1;
+    detailRequestID += 1;
+    workspaceLoadPromise = null;
+    workspaceGroupID.value = 0;
+    workspaceLoadedAt.value = 0;
+    groups.value = [];
+    detail.value = null;
+    notifications.value = [];
+    requests.value = [];
+    selectedGroupID.value = 0;
+    detailCache.clear();
+    loading.value = false;
+    detailLoading.value = false;
+  },
+  { flush: 'sync' },
+);
+
+watch(
   [visible, currentGroupID],
   async ([isVisible]) => {
     if (!isVisible) return;
@@ -136,6 +157,8 @@ watch(showRecycleBin, (isVisible) => {
 
 onBeforeUnmount(() => {
   window.clearTimeout(workspaceWarmTimer);
+  workspaceRequestID += 1;
+  detailRequestID += 1;
 });
 
 watch(
@@ -157,16 +180,20 @@ async function ensureWorkspace(preferredGroupID = selectedGroupID.value, options
     return;
   }
   if (!workspaceLoadPromise) {
-    workspaceLoadPromise = loadWorkspace(preferredGroupID, options)
+    const promise = loadWorkspace(preferredGroupID, options)
       .finally(() => {
-        workspaceLoadPromise = null;
+        if (workspaceLoadPromise === promise) workspaceLoadPromise = null;
       });
+    workspaceLoadPromise = promise;
   }
   await workspaceLoadPromise;
 }
 
 async function loadWorkspace(preferredGroupID = selectedGroupID.value, options = {}) {
   const groupID = Number(currentGroupID.value || 0);
+  const requestID = ++workspaceRequestID;
+  const isCurrent = () => requestID === workspaceRequestID
+    && authenticated.value && groupID === Number(currentGroupID.value);
   if (workspaceGroupID.value && workspaceGroupID.value !== groupID) {
     groups.value = [];
     detail.value = null;
@@ -181,7 +208,9 @@ async function loadWorkspace(preferredGroupID = selectedGroupID.value, options =
       api('/ministry-notifications'),
       api('/ministry-requests'),
     ]);
+    if (!isCurrent()) return;
     groups.value = groupResult.groups || [];
+    if (groupID === Number(currentGroupID.value)) app.ministryGroupCount = groups.value.length;
     notifications.value = notificationResult.notifications || [];
     requests.value = requestResult.requests || [];
     const selectedStillExists = groups.value.some((group) => Number(group.id) === Number(preferredGroupID));
@@ -191,9 +220,9 @@ async function loadWorkspace(preferredGroupID = selectedGroupID.value, options =
     workspaceLoadedAt.value = Date.now();
     if (nextID) await selectGroup(nextID, { preserveView: Boolean(options.preserveView), background: Boolean(options.background), preferCache: true });
   } catch (error) {
-    if (!options.background) showToast(error.message);
+    if (isCurrent() && !options.background) showToast(error.message);
   } finally {
-    loading.value = false;
+    if (isCurrent()) loading.value = false;
   }
 }
 

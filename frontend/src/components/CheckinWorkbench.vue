@@ -11,6 +11,8 @@ import {
 import DateNavigator from './ui/DateNavigator.vue';
 import RankingChart from './ui/RankingChart.vue';
 import DateCalendarDialog from './ui/DateCalendarDialog.vue';
+import VerseQuiz from './VerseQuiz.vue';
+import { useAppStateStore } from '../stores/appState';
 import { useCheckinWorkbenchStore } from '../stores/checkinWorkbench';
 import {
   openTaskContent,
@@ -21,6 +23,9 @@ import {
 import { taskIsCompleted } from '../runtime/checkins';
 
 const store = useCheckinWorkbenchStore();
+const app = useAppStateStore();
+const quizTask = ref(null);
+const quizScope = computed(() => `${app.user?.id || app.user?.username || 'user'}:${app.currentGroupID || 0}`);
 const {
   visible,
   selectedDate,
@@ -42,6 +47,7 @@ const legend = [
   { key: 'daily_devotion', label: '灵修' },
   { key: 'weekly_book', label: '书籍' },
   { key: 'weekly_video', label: '音视频' },
+  { key: 'weekly_verse', label: '背经' },
   { key: 'weekly_outline', label: '背大纲' },
 ];
 
@@ -119,7 +125,8 @@ function taskTypeLabel(task) {
     case 'daily_scripture': return '每日读经';
     case 'weekly_checkin': return '本周任务';
     case 'weekly_book': return '本周书籍';
-    case 'weekly_video': return '本周音视频';
+    case 'weekly_video': return '本周任务';
+    case 'weekly_verse': return '背经任务';
     case 'weekly_outline': return '背诵大纲';
     default: return '学习任务';
   }
@@ -151,6 +158,7 @@ async function exportStatsChart() {
     daily_devotion: '#0a84ff',
     weekly_book: '#8b5cf6',
     weekly_video: '#19bf7a',
+    weekly_verse: '#e66a52',
     weekly_outline: '#f59e0b',
   };
   const slotWidth = chartWidth / Math.max(1, items.length);
@@ -328,6 +336,7 @@ async function exportStatsChart() {
               </div>
 
               <footer class="actions">
+                <button v-if="task.type === 'weekly_verse'" class="secondary" type="button" title="确认或粘贴原文后生成默写卷" @click="quizTask = task">默写</button>
                 <button
                   v-if="task.contentLinks?.length === 1"
                   class="secondary task-read-button"
@@ -371,6 +380,7 @@ async function exportStatsChart() {
         @today="chooseDate(maxDate)"
         @close="datePickerOpen = false"
       />
+      <VerseQuiz :open="Boolean(quizTask)" :task="quizTask" :scope="quizScope" :user-name="app.user?.display_name || app.user?.username || ''" :user-id="Number(app.user?.id || 0)" :members="app.members" :can-select-member="Boolean(app.user?.is_super_admin)" @close="quizTask = null" />
 
       <!-- Optional Monthly Stats Section (below tasks) -->
       <section v-if="statsVisible" class="stats-section">

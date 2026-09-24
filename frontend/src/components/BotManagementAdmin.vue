@@ -1,6 +1,6 @@
 <script setup>
 import { onMounted, ref } from 'vue';
-import { Bot, RefreshCw } from '@lucide/vue';
+import { Bot, Plus, RefreshCw, Trash2 } from '@lucide/vue';
 import { api, toast as showToast } from '../legacy-app';
 
 const configured = ref(false);
@@ -8,6 +8,8 @@ const robots = ref([]);
 const studyGroups = ref([]);
 const loading = ref(false);
 const savingBinding = ref('');
+const savingRobot = ref(false);
+const newRobot = ref({ id: '', name: '', token: '' });
 
 onMounted(load);
 
@@ -32,6 +34,21 @@ async function load() {
   } finally {
     loading.value = false;
   }
+}
+
+async function createRobot() {
+  const payload = { id: newRobot.value.id.trim(), name: newRobot.value.name.trim(), token: newRobot.value.token.trim() };
+  if (!payload.token) { showToast('请输入机器人 Token'); return; }
+  savingRobot.value = true;
+  try { await api('/super-admin/bot-robots', { method: 'POST', body: JSON.stringify(payload) }); newRobot.value = { id: '', name: '', token: '' }; showToast('机器人已新增'); await load(); }
+  catch (error) { showToast({ invalid_robot_config: '机器人配置无效', robot_authentication_failed: '机器人认证失败', robot_already_exists: '机器人 ID 已存在', robot_token_exists: '机器人 Token 已存在', robot_limit_exceeded: '机器人数量已达上限', bot_robot_save_failed: '机器人保存失败' }[error.message] || error.message); }
+  finally { savingRobot.value = false; }
+}
+
+async function removeRobot(robot) {
+  if (!window.confirm(`确定删除机器人“${robot.name || robot.id}”？`)) return;
+  try { await api(`/super-admin/bot-robots/${encodeURIComponent(robot.id)}`, { method: 'DELETE' }); showToast('机器人已删除'); await load(); }
+  catch (error) { showToast({ robot_not_found: '机器人不存在', robot_cannot_remove: '默认机器人不能删除', bot_robot_delete_failed: '机器人删除失败' }[error.message] || error.message); }
 }
 
 function bindingKey(robot, chat) {
@@ -98,6 +115,16 @@ async function assign(robot, chat, event) {
       </button>
     </div>
 
+    <form class="card bot-registration" @submit.prevent="createRobot">
+      <strong>新增机器人</strong>
+      <div class="bot-registration-grid">
+        <input v-model="newRobot.token" type="password" placeholder="机器人 Token" :disabled="savingRobot">
+        <input v-model="newRobot.name" placeholder="显示名称（可选）" :disabled="savingRobot">
+        <input v-model="newRobot.id" placeholder="机器人 ID（可选）" :disabled="savingRobot">
+        <button class="ok" type="submit" :disabled="savingRobot"><Plus :size="16" /> 新增</button>
+      </div>
+    </form>
+
     <div v-if="loading && !robots.length" class="empty">正在读取机器人群聊…</div>
     <div v-else-if="!configured" class="empty">机器人尚未配置</div>
     <div v-else class="bot-management">
@@ -111,6 +138,7 @@ async function assign(robot, chat, event) {
             </div>
           </div>
           <span class="bot-status" :class="`is-${robot.state || 'unknown'}`">{{ robotStatus(robot) }}</span>
+          <button v-if="robot.id !== 'default'" class="secondary icon-button" type="button" title="删除机器人" @click="removeRobot(robot)"><Trash2 :size="16" /></button>
         </header>
 
         <div v-if="!Array.isArray(robot.chats) || !robot.chats.length" class="empty bot-empty">
@@ -145,6 +173,9 @@ async function assign(robot, chat, event) {
 <style scoped>
 section { min-width: 0; }
 .bot-management-title { gap: 12px; }
+.bot-registration { display: grid; gap: 12px; padding: 16px 20px; margin-bottom: 14px; }
+.bot-registration-grid { display: grid; grid-template-columns: 1.2fr 1fr 1fr auto; gap: 10px; align-items: end; }
+.bot-registration-grid input { min-width: 0; }
 .icon-button { min-width: 44px; min-height: 44px; }
 .bot-management { display: grid; gap: 14px; }
 .bot-robot-card { overflow: hidden; padding: 0; }
@@ -162,6 +193,7 @@ section { min-width: 0; }
 .empty { padding: 32px 20px; text-align: center; }
 .bot-empty { padding-block: 24px; }
 @media (max-width: 767px) {
+  .bot-registration-grid { grid-template-columns: 1fr; }
   .bot-robot-header { align-items: flex-start; padding: 14px; }
   .bot-status { max-width: 38%; text-align: center; }
   .bot-chat-row { align-items: stretch; flex-direction: column; gap: 12px; padding: 14px; }

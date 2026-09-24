@@ -4,6 +4,7 @@ import { storeToRefs } from 'pinia';
 import { ChevronRight, Plus, Trash2 } from '@lucide/vue';
 import { alertDialog, promptDialog } from '../ui/dialog';
 import { useAppStateStore } from '../stores/appState';
+import { lazyPage } from '../ui/lazyPage';
 import { inferDailyDevotionContentType } from '../runtime/content';
 import {
   dailyDevotionPlanForDate,
@@ -24,9 +25,6 @@ import {
   isWeeklyMediaResource,
   normalizeResourceCategory,
 } from '../runtime/resources';
-import MinistryCatalogAdmin from './MinistryCatalogAdmin.vue';
-import BotManagementAdmin from './BotManagementAdmin.vue';
-import ResourceGovernance from './ResourceGovernance.vue';
 import DateField from './ui/DateField.vue';
 import {
   api,
@@ -59,6 +57,10 @@ import {
   reloadApp,
 } from '../legacy-app';
 
+const MinistryCatalogAdmin = lazyPage(() => import('./MinistryCatalogAdmin.vue'));
+const BotManagementAdmin = lazyPage(() => import('./BotManagementAdmin.vue'));
+const ReciteHistoryAdmin = lazyPage(() => import('./ReciteHistoryAdmin.vue'));
+const ResourceGovernance = lazyPage(() => import('./ResourceGovernance.vue'));
 const app = useAppStateStore();
 const {
   adminSection,
@@ -103,6 +105,9 @@ function navigateTabs(event) {
 
 const canManageMinistryCatalog = computed(() => Boolean(user.value?.is_super_admin || user.value?.roles?.includes('group_admin')));
 const canManageRoles = computed(() => Boolean(user.value?.is_super_admin || user.value?.roles?.some((role) => ['group_admin', 'group_leader'].includes(role))));
+watch(() => user.value?.is_super_admin, (isSuperAdmin) => {
+  if (!isSuperAdmin && adminSection.value === 'recite-history') setAdminSection('learning');
+});
 const activeGroup = computed(() => groups.value.find((item) => Number(item.id) === Number(currentGroupID.value)));
 const conflictAlreadyInGroup = computed(() => members.value.some(
   (member) => Number(member.user_id) === Number(memberConflict.value?.id),
@@ -616,6 +621,17 @@ async function runLocalBackupImport() {
       >
         机器人管理
       </button>
+      <button
+        v-if="user?.is_super_admin"
+        :class="adminSection === 'recite-history' ? 'primary' : 'quiet'"
+        type="button"
+        role="tab"
+        :aria-selected="adminSection === 'recite-history'"
+        :tabindex="adminSection === 'recite-history' ? 0 : -1"
+        @click="setAdminSection('recite-history')"
+      >
+        默写记录
+      </button>
     </div>
 
     <section v-if="adminSection === 'members'">
@@ -710,6 +726,7 @@ async function runLocalBackupImport() {
 
     <MinistryCatalogAdmin v-else-if="adminSection === 'ministry' && canManageMinistryCatalog" />
     <BotManagementAdmin v-else-if="adminSection === 'bot' && user?.is_super_admin" />
+    <ReciteHistoryAdmin v-else-if="adminSection === 'recite-history' && user?.is_super_admin" :group-id="currentGroupID" :members="members" />
 
     <section v-else-if="adminSection === 'learning'">
               <div class="grid admin-learning-stack">
@@ -833,13 +850,14 @@ async function runLocalBackupImport() {
                     <div class="inline-actions">
                       <select
                         class="week-picker"
-                        :title="weekDraft.id ? weekOptionText(weekDraft) : '新增一周'"
+                        :title="weekDraft.id ? weekOptionText(weekDraft) : '新建周任务'"
                         :value="weekDraft.id || 0"
                         @change="selectWeekDraft(Number($event.target.value || 0))"
                       >
                         <option v-for="week in weeks" :key="week.id" :value="week.id">{{ weekOptionText(week) }}</option>
-                        <option value="0">新增一周</option>
+                        <option v-if="!weekDraft.id" value="0">新建周任务</option>
                       </select>
+                      <button class="secondary" type="button" @click="selectWeekDraft(0)">新增一周</button>
                     </div>
                   </div>
                   <div class="form-stack admin-form-grid">
@@ -1017,10 +1035,11 @@ async function runLocalBackupImport() {
 <style scoped>
 .admin-wrapper { min-width: 0; }
 .admin-pagehead, .admin-tabs { margin-bottom: 24px; }
-.admin-tabs {
+.admin-wrapper .admin-tabs {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  width: 100%;
   max-width: 100%;
   padding-bottom: 4px;
   overflow: visible;

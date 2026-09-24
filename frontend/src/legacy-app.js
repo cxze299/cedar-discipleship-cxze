@@ -96,6 +96,10 @@ const state = {
   toast: '',
 };
 
+let sessionGeneration = 0;
+let adminRequestID = 0;
+let viewerRequestID = 0;
+
 function viewerStore() {
   return useContentViewerStore();
 }
@@ -572,6 +576,12 @@ export async function switchGroup(groupID) {
     method: 'POST',
     body: JSON.stringify({ group_id: Number(groupID) }),
   });
+  sessionGeneration += 1;
+  closeViewer();
+  state.adminLoading = false;
+  state.adminDataGroupID = 0;
+  state.resourceLibrary = null;
+  state.weekDraft = null;
   state.token = result.token;
   setAccessToken(state.token);
   await loadAll();
@@ -587,6 +597,7 @@ export async function login(username, password) {
     method: 'POST',
     body: JSON.stringify({ username, password }),
   });
+  sessionGeneration += 1;
   state.token = data.token;
   state.user = data.user;
   setAccessToken(state.token);
@@ -1014,6 +1025,7 @@ function resolveContentSourceURL(target) {
 }
 
 export function closeViewer() {
+  viewerRequestID += 1;
   if (state.viewer?.revokeURL) URL.revokeObjectURL(state.viewer.revokeURL);
   state.viewer = null;
   viewerStore().clearViewer();
@@ -1054,13 +1066,13 @@ export async function openContentTarget(target) {
     render();
     return;
   }
-  const videoAssetMatch = type === 'video'
+  const videoAssetMatch = isMediaResourceType(type)
     ? String(sourceAPIPath || '').match(/^\/api\/assets\/(\d+)\/download$/)
     : null;
   if (videoAssetMatch) {
     closeViewer();
     const pendingViewer = {
-      type: 'video',
+      type,
       title,
       url: '',
       fallbackURL: '',
@@ -1095,6 +1107,7 @@ export async function openContentTarget(target) {
     return;
   }
   closeViewer();
+  const requestID = viewerRequestID;
   if (sourceAPIPath) {
     const res = await fetchWithAuth(sourceAPIPath);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -1103,6 +1116,7 @@ export async function openContentTarget(target) {
     const blobType = pdfHeader ? 'pdf' : inferResourceTypeFromMime(blob.type, type);
     if (blobType === 'markdown') {
       const text = await blob.text();
+      if (requestID !== viewerRequestID) return;
       const lines = target.date
         ? extractMarkdownSectionForDate(text, target.date, target.section)
         : (target.section ? extractNumberedMarkdownSection(text, target.section) : text.split('\n'));
@@ -1119,8 +1133,9 @@ export async function openContentTarget(target) {
       };
       syncViewerStore();
     } else {
-      const objectURL = URL.createObjectURL(blob);
       const pdfData = blobType === 'pdf' ? new Uint8Array(await blob.arrayBuffer()) : null;
+      if (requestID !== viewerRequestID) return;
+      const objectURL = URL.createObjectURL(blob);
       const viewerURL = buildViewerURL(objectURL, blobType, pageRange, sourceAPIPath);
       state.viewer = {
         type: blobType,
@@ -1148,6 +1163,7 @@ export async function openContentTarget(target) {
     const res = await fetch(target.url, { cache: 'no-store' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const text = await res.text();
+    if (requestID !== viewerRequestID) return;
     const lines = target.date
       ? extractMarkdownSectionForDate(text, target.date, target.section)
       : (target.section ? extractNumberedMarkdownSection(text, target.section) : text.split('\n'));
@@ -1192,7 +1208,7 @@ export async function openViewerItemInNewWindow(item, popup = null) {
     const sourceURL = resolveContentSourceURL(item);
     const sourceAPIPath = sameOriginAPIPath(sourceURL, window.location.origin);
     const type = String(item.type || inferResourceType(item.url)).toLowerCase();
-    const videoAssetMatch = type === 'video'
+    const videoAssetMatch = isMediaResourceType(type)
       ? String(sourceAPIPath || '').match(/^\/api\/assets\/(\d+)\/download$/)
       : null;
     if (videoAssetMatch) {
@@ -1373,14 +1389,21 @@ function currentTaskOptions() {
   }
   if (shouldRenderWeeklyTask(week.video_enabled, videoTasks)) {
     const weeklyMediaType = videoLinks[0]?.type === 'audio' ? 'audio' : 'video';
+    const generatedWeekTitle = [
+      ...(enabledFlag(week.book_enabled) ? bookTasks.map((item) => item.title) : []),
+      enabledFlag(week.video_enabled) ? videoTasks[0]?.title : '',
+      enabledFlag(week.verse_enabled) ? week.verse_ref : '',
+    ].filter(Boolean).join('；');
+    const customWeekTitle = week.title && week.title !== generatedWeekTitle && week.title !== '周任务'
+      ? week.title : '';
     tasks.push({
       type: 'weekly_video',
       taskID: Number(videoTasks[0]?.id || 0),
       weekID: Number(week.id || 0),
-      title: videoLinks[0]?.title || videoTasks[0]?.title || (weeklyMediaType === 'audio' ? '本周音频' : '本周视频'),
+      title: customWeekTitle || videoLinks[0]?.title || videoTasks[0]?.title || (weeklyMediaType === 'audio' ? '本周音频' : '本周视频'),
       icon: weeklyMediaType === 'audio' ? '音频' : '视频',
       part: '',
-      detail: videoLinks[0]?.title || videoTasks[0]?.title || (weeklyMediaType === 'audio' ? '本周音频' : '本周视频'),
+      detail: customWeekTitle || videoLinks[0]?.title || videoTasks[0]?.title || (weeklyMediaType === 'audio' ? '本周音频' : '本周视频'),
       summary: weeklyMediaType === 'audio' ? '必听音频' : '必看视频',
       contentURL: videoLinks[0]?.url || '',
       contentLinks: videoLinks,
@@ -1393,11 +1416,14 @@ function currentTaskOptions() {
       type: 'weekly_verse',
       taskID: Number(verseTask?.id || 0),
       weekID: Number(week.id || 0),
+      weekStart: week.start_date || '',
+      weekEnd: week.end_date || '',
       title: verseTitle,
       icon: '背经',
       part: '',
       detail: verseTitle,
       summary: '背经与默想',
+      reciteText: week.recite_text || verseTask.content || '',
       contentURL: '',
       contentLinks: verseLink ? [verseLink] : [],
     });
@@ -1611,7 +1637,7 @@ function bookTaskForReading(bookTasks, reading, index) {
   return bookTasks[index] || null;
 }
 
-function currentWeeklyVideoLinks(videoTasks, configPlan = null) {
+export function currentWeeklyVideoLinks(videoTasks, configPlan = null) {
   const taskList = Array.isArray(videoTasks) ? videoTasks.filter(Boolean) : (videoTasks ? [videoTasks] : []);
   const assetLinks = taskList
     .map((task) => firstTaskAssetLink(task, task?.title || '本周视频'))
@@ -1620,7 +1646,7 @@ function currentWeeklyVideoLinks(videoTasks, configPlan = null) {
     label: item.title || '视频内容',
     title: item.title || '本周视频',
     url: item.url,
-    type: 'video',
+    type: inferResourceType(item.url, 'video'),
   })).filter((item) => isPlayableContentURL(item.url));
   const directTaskLinks = taskList
     .map((task) => {
@@ -1815,7 +1841,7 @@ function monthlyRankingItems() {
 }
 
 function normalizeActiveMemberRule(rule) {
-  const validTypes = ['daily_devotion', 'weekly_book', 'weekly_video', 'weekly_outline'];
+  const validTypes = ['daily_devotion', 'weekly_book', 'weekly_video', 'weekly_verse', 'weekly_outline'];
   const requested = new Set(Array.isArray(rule?.task_types) ? rule.task_types : ['weekly_outline']);
   const taskTypes = validTypes.filter((taskType) => requested.has(taskType));
   return {
@@ -1879,24 +1905,35 @@ export async function openMemberCalendar(member, month = state.selectedDate.slic
 }
 
 export async function loadAdminData(force = false) {
-  if (!state.user?.current_group_id) return;
-  if (!force && state.adminDataGroupID === state.user.current_group_id && state.resourceLibrary) return;
+  const groupID = state.user?.current_group_id;
+  if (!groupID) return;
+  if (!force && state.adminDataGroupID === groupID && state.resourceLibrary) return;
+  const generation = sessionGeneration;
+  const requestID = ++adminRequestID;
+  const isCurrent = () => generation === sessionGeneration
+    && requestID === adminRequestID && groupID === state.user?.current_group_id;
   state.adminLoading = true;
   render();
   try {
     const [learning, library] = await Promise.all([
-      api('/admin/learning-config').catch(() => ({ settings: state.learningConfig || {} })),
-      api('/admin/resource-library').catch(() => ({ sections: [] })),
+      api('/admin/learning-config'),
+      api('/admin/resource-library'),
     ]);
+    if (!isCurrent()) return;
     state.learningConfig = learning.settings || state.learningConfig || {};
     state.resourceLibrary = library.sections || [];
-    state.adminDataGroupID = state.user.current_group_id;
-    if (!state.weekDraft) state.weekDraft = weekDraftFromWeek(currentWeekForDraft());
+    state.adminDataGroupID = groupID;
+    if (!state.weekDraft) state.weekDraft = weekDraftFromWeek(currentWeekForDraft() || currentCalendarWeekRange());
   } catch (error) {
-    toast(error.message);
+    if (isCurrent()) {
+      state.adminDataGroupID = 0;
+      toast(error.message);
+    }
   } finally {
-    state.adminLoading = false;
-    render();
+    if (isCurrent()) {
+      state.adminLoading = false;
+      render();
+    }
   }
 }
 
@@ -2100,9 +2137,10 @@ function weekHasTaskContent(week = {}) {
 }
 
 function currentWeekForDraft() {
-  const currentWeek = currentCalendarWeekRange();
-  return (state.weeks || []).find((week) => String(week.start || '') === currentWeek.start
-    && String(week.end || '') === currentWeek.end)
+  const today = todayString();
+  return [...(state.weeks || [])]
+    .filter((week) => String(week.start || '') <= today && today <= String(week.end || ''))
+    .sort((left, right) => String(right.start || '').localeCompare(String(left.start || '')))[0]
     || null;
 }
 
@@ -2291,7 +2329,7 @@ export async function deleteWeekDraft() {
     await api(`/admin/study-weeks/${draft.id}`, { method: 'DELETE' });
     toast('当前周任务已删除');
     await loadAll();
-    state.weekDraft = weekDraftFromWeek(currentWeekForDraft());
+    state.weekDraft = weekDraftFromWeek(currentWeekForDraft() || currentCalendarWeekRange());
     render();
   } catch (error) {
     toast(error.message);
@@ -2383,6 +2421,11 @@ export async function logout(options = {}) {
     }).catch(() => {});
   }
   clearAccessToken();
+  sessionGeneration += 1;
+  closeViewer();
+  state.adminLoading = false;
+  state.adminDataGroupID = 0;
+  state.resourceLibrary = null;
   state.token = '';
   state.user = null;
   state.bootstrap = null;
@@ -2417,6 +2460,5 @@ export function disposeApp() {
     dashboardRefreshTimer = 0;
   }
   state.calendar = null;
-  state.viewer = null;
-  syncViewerStore();
+  closeViewer();
 }

@@ -1,27 +1,32 @@
 <script setup>
 import { computed } from 'vue';
-import { BarChart2, Book, Folder, MoreHorizontal, Users } from '@lucide/vue';
+import { BarChart2, Book, Folder, MoreHorizontal, Settings, Users } from '@lucide/vue';
 
-const props = defineProps({ tab: { type: String, required: true }, moreOpen: Boolean, showGroups: Boolean, entrySetting: { type: Boolean, default: undefined } });
+const props = defineProps({ tab: { type: String, required: true }, moreOpen: Boolean, canAdmin: Boolean, showGroups: Boolean, entrySetting: { type: Boolean, default: undefined } });
 defineEmits(['navigate', 'more']);
 
-const groupsVisible = computed(() => props.entrySetting === true || (props.entrySetting !== false && props.showGroups));
+const groupsVisible = computed(() => props.showGroups && props.entrySetting !== false);
 
 const items = [
   ['home', '学习', Book],
   ['dashboard', '统计', BarChart2],
   ['groups', '小组', Users],
   ['resources', '资料', Folder],
+  ['admin', '管理', Settings],
 ];
+const visibleItems = computed(() => items.filter(([id]) => (
+  (id !== 'groups' || groupsVisible.value) && (id !== 'admin' || props.canAdmin)
+)));
 </script>
 
 <template>
-  <nav class="mobilebar app-mobile-nav" :class="{ 'app-mobile-nav--no-groups': !groupsVisible }" aria-label="手机主导航">
+  <nav class="mobilebar app-mobile-nav" :style="{ '--mobile-nav-count': visibleItems.length + 1 }" aria-label="手机主导航">
     <button
-      v-for="item in items.filter((entry) => entry[0] !== 'groups' || groupsVisible)"
+      v-for="item in visibleItems"
       :key="item[0]"
       :class="{ active: tab === item[0] }"
       :aria-current="tab === item[0] ? 'page' : undefined"
+      :aria-label="item[0] === 'admin' ? '管理工作台' : item[1]"
       type="button"
       @click="$emit('navigate', item[0])"
     >

@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readComponentTheme } from './theme';
 
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
-
 describe('readComponentTheme', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('reads numeric component metrics from CSS tokens', () => {
     const values: Record<string, string> = {
       '--cd-primary': '#285c4d',

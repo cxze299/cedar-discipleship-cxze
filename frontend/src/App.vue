@@ -1,17 +1,15 @@
 <script setup>
-import { onBeforeUnmount, onMounted, ref } from 'vue';
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import AppRoot from './components/AppRoot.vue';
-import BookReaderPage from './components/BookReaderPage.vue';
 import CheckinWorkbench from './components/CheckinWorkbench.vue';
-import ContentViewer from './components/ContentViewer.vue';
-import Dashboard from './components/Dashboard.vue';
 import DownloadCenter from './components/DownloadCenter.vue';
-import MinistryGroups from './components/MinistryGroups.vue';
 import SiteDialog from './components/SiteDialog.vue';
 import AppStatus from './components/ui/AppStatus.vue';
 import AppToast from './components/ui/AppToast.vue';
 import { useAppShellStore } from './stores/appShell';
 import { useAppStateStore } from './stores/appState';
+import { useContentViewerStore } from './stores/contentViewer';
+import { lazyPage } from './ui/lazyPage';
 import { disposeApp, initializeApp } from './legacy-app';
 import { parseReaderPageRequest } from './runtime/content';
 import { readComponentTheme } from './styles/theme';
@@ -20,6 +18,24 @@ const componentTheme = readComponentTheme();
 
 const shell = useAppShellStore();
 const appState = useAppStateStore();
+const contentViewer = useContentViewerStore();
+const BookReaderPage = lazyPage(() => import('./components/BookReaderPage.vue'));
+const ContentViewer = lazyPage(() => import('./components/ContentViewer.vue'));
+const Dashboard = lazyPage(() => import('./components/Dashboard.vue'));
+const MinistryGroups = lazyPage(() => import('./components/MinistryGroups.vue'));
+const visited = ref(new Set());
+watch(
+  [() => appState.authenticated, () => appState.tab, () => contentViewer.viewer],
+  ([authenticated, tab, viewer]) => {
+    if (!authenticated) {
+      visited.value = new Set();
+      return;
+    }
+    visited.value.add(tab);
+    if (viewer) visited.value.add('viewer');
+  },
+  { immediate: true },
+);
 const readerRequest = parseReaderPageRequest(window.location.search);
 const retrying = ref(false);
 
@@ -79,9 +95,9 @@ onBeforeUnmount(() => {
       <AppRoot />
       <template v-if="appState.authenticated">
         <CheckinWorkbench />
-        <Dashboard />
-        <MinistryGroups />
-        <ContentViewer />
+        <Dashboard v-if="visited.has('dashboard')" />
+        <MinistryGroups v-if="visited.has('groups')" />
+        <ContentViewer v-if="visited.has('viewer')" />
         <DownloadCenter />
       </template>
     </template>

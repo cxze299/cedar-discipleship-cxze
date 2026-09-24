@@ -50,10 +50,10 @@
 .content .stats-center-head > :first-child { text-align: center; }
 .content .stats-controls { display: flex; align-items: center; justify-content: flex-start; }
 .content .export-row { justify-content: flex-start; }
-.content .resource-governance-head { flex-direction: column; align-items: center; gap: 12px; text-align: center; }
-.content .resource-governance-head > div:first-child { width: 100%; }
+.content .resource-governance-head { flex-direction: row; align-items: flex-start; justify-content: space-between; gap: 16px; text-align: left; }
+.content .resource-governance-head > div:first-child { min-width: 0; }
 .content .resource-governance-actions { flex-wrap: wrap; gap: 8px; }
-.content .resource-governance-actions { justify-content: center; }
+.content .resource-governance-actions { justify-content: flex-end; }
 .content .resource-governance-tabs { margin-inline: 0; }
 .content .ministry-header { flex-direction: column; align-items: center; gap: 12px; text-align: center; }
 .content .ministry-header-actions { justify-content: center; }
@@ -76,9 +76,7 @@
   .content .metricgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .content .metric { padding: 16px; }
   .content .stats-controls { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
-  .content .resource-governance-head { flex-direction: column; }
-  .content .resource-governance-actions { width: 100%; }
-  .content .resource-governance-actions > button { flex: 1; }
+  .content .resource-governance-head { flex-direction: row; align-items: flex-start; }
   .content .form-actions { display: flex; flex-wrap: wrap; }
   .content .form-actions > button { flex: 1 1 140px; min-height: 44px; }
 }

@@ -11,115 +11,67 @@ import {
   Play,
   RefreshCw,
   Search,
-  Settings,
   User,
   Users,
   X,
 } from '@lucide/vue';
-import { alertDialog, confirmDialog, promptDialog } from '../ui/dialog';
+import { lazyPage } from '../ui/lazyPage';
 import { vDialogFocus } from '../ui/dialogFocus';
 import { useAppStateStore } from '../stores/appState';
 import { useDownloadManagerStore } from '../stores/downloadManager';
 import { downloadErrorMessage } from '../runtime/downloads';
 import { filterSharedResources } from '../runtime/resourceGovernance';
 import {
-  RESOURCE_UPLOAD_CATEGORIES,
-  isWeeklyMediaResource,
   normalizeResourceCategory,
   resourceCategoryGroupKey,
   resourceCategoryGroups,
   resourceCategoryLabel,
   resourceCategorySort,
 } from '../runtime/resources';
-import BotManagementAdmin from './BotManagementAdmin.vue';
-import MinistryCatalogAdmin from './MinistryCatalogAdmin.vue';
-import AdminConsole from './AdminConsole.vue';
 import AppMobileNav from './ui/AppMobileNav.vue';
 import AppSidebar from './ui/AppSidebar.vue';
 import DateCalendarDialog from './ui/DateCalendarDialog.vue';
 import GroupSwitcher from './ui/GroupSwitcher.vue';
 import StackedWheel from './ui/StackedWheel.vue';
-import ResourceGovernance from './ResourceGovernance.vue';
 import './app-root.css';
 import {
-  addWeekBinding,
   api,
-  applyBindingSelection,
-  applyOutlineSelection,
   closeCalendar,
-  deleteWeekDraft,
-  downloadAdminExport,
-  enabledFlag,
-  importLocalBackupJSON,
-  importStudyWeeksExcel,
-  librarySelectionValue,
-  loadAdminData,
   login,
   logout,
   openCalendarMonth,
   previewLibraryItem,
   reloadApp,
-  removeMember,
-  removeWeekBinding,
-  restoreWeekDraftDefaults,
-  saveLearningConfig,
-  saveWeekDraft,
-  selectWeekDraft,
-  setAdminSection,
   setDefaultGroupAction,
-  setMemberAdmin,
   setSelectedDate,
   setTab,
   switchGroup,
   toast as showToast,
-  updateGroupPassword,
-  updateLearningValue,
-  updateWeekBinding,
-  updateWeekDraftField,
-  uploadLibraryFile,
-  weekBindingSelectionValue,
 } from '../legacy-app';
 
+const AdminConsole = lazyPage(() => import('./AdminConsole.vue'));
 const app = useAppStateStore();
 const downloadManager = useDownloadManagerStore();
 const {
   authenticated,
   user,
   tab,
-  adminSection,
   navItems,
   groups,
   ministryGroupCount,
   currentGroupID,
   defaultGroupID,
   showGroupPicker,
-  toast,
   resources,
-  members,
   canAdmin,
-  canEditLearning,
-  canEditStudyWeeks,
-  adminLoading,
   learningConfig,
-  weekDraft,
-  weeks,
-  resourceLibrary,
   calendar,
 } = storeToRefs(app);
 
 const loginUsername = ref('');
 const loginPassword = ref('');
-const groupPassword = ref('');
-const memberName = ref('');
-const groupName = ref('');
-const groupEditName = ref('');
-const uploadCategory = ref('markdown');
-const uploadInput = ref(null);
-const studyWeeksImportInput = ref(null);
-const localBackupImportInput = ref(null);
 const selectedResourceKeys = ref(new Set());
 const collapsedResourceSections = ref(new Set());
-const collapsedAdminResourceSections = ref(new Set());
 const resourceSearchQuery = ref('');
 const resourceTypeFilter = ref('');
 const resourceDateFilter = ref('');
@@ -128,7 +80,6 @@ const calendarMaxDate = (() => {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 })();
-const notificationSaving = ref(false);
 const resourceRefreshing = ref(false);
 
 const activeGroup = computed(() => groups.value.find((item) => Number(item.id) === Number(currentGroupID.value)));
@@ -144,45 +95,7 @@ watch([authenticated, currentGroupID], async ([isAuthenticated, groupID]) => {
     // Leave the entry hidden until the current group's catalog can be loaded.
   }
 }, { immediate: true });
-const canManageRoles = computed(() => Boolean(user.value?.is_super_admin || user.value?.roles?.some((role) => ['group_admin', 'group_leader'].includes(role))));
-const canManageMinistryCatalog = computed(() => Boolean(user.value?.is_super_admin || user.value?.roles?.includes('group_admin')));
 const settings = computed(() => learningConfig.value || {});
-const daily = computed(() => settings.value.task_sections?.daily || {});
-const devotion = computed(() => daily.value.devotion || {});
-const scripture = computed(() => daily.value.scripture || {});
-const checkinNotifications = computed(() => settings.value.checkin_notifications || {});
-const bibleBooks = [
-  ['创世记', 50], ['出埃及记', 40], ['利未记', 27], ['民数记', 36], ['申命记', 34],
-  ['约书亚记', 24], ['士师记', 21], ['路得记', 4], ['撒母耳记上', 31], ['撒母耳记下', 24],
-  ['列王纪上', 22], ['列王纪下', 25], ['历代志上', 29], ['历代志下', 36], ['以斯拉记', 10],
-  ['尼希米记', 13], ['以斯帖记', 10], ['约伯记', 42], ['诗篇', 150], ['箴言', 31],
-  ['传道书', 12], ['雅歌', 8], ['以赛亚书', 66], ['耶利米书', 52], ['耶利米哀歌', 5],
-  ['以西结书', 48], ['但以理书', 12], ['何西阿书', 14], ['约珥书', 3], ['阿摩司书', 9],
-  ['俄巴底亚书', 1], ['约拿书', 4], ['弥迦书', 7], ['那鸿书', 3], ['哈巴谷书', 3],
-  ['西番雅书', 3], ['哈该书', 2], ['撒迦利亚书', 14], ['玛拉基书', 4], ['马太福音', 28],
-  ['马可福音', 16], ['路加福音', 24], ['约翰福音', 21], ['使徒行传', 28], ['罗马书', 16],
-  ['哥林多前书', 16], ['哥林多后书', 13], ['加拉太书', 6], ['以弗所书', 6], ['腓立比书', 4],
-  ['歌罗西书', 4], ['帖撒罗尼迦前书', 5], ['帖撒罗尼迦后书', 3], ['提摩太前书', 6], ['提摩太后书', 4],
-  ['提多书', 3], ['腓利门书', 1], ['希伯来书', 13], ['雅各书', 5], ['彼得前书', 5],
-  ['彼得后书', 3], ['约翰一书', 5], ['约翰二书', 1], ['约翰三书', 1], ['犹大书', 1], ['启示录', 22],
-].map(([book, chapters], index) => ({ book, book_id: String(index + 1), chapters }));
-const scriptureBookOptions = computed(() => bibleBooks);
-const libraryItems = computed(() => resourceLibrary.value.flatMap((section) => section.items || []));
-const markdownFileOptions = computed(() => {
-  const seen = new Set();
-  return libraryItems.value.filter((item) => {
-    if (item.type !== 'markdown' || !item.url || seen.has(item.url)) return false;
-    seen.add(item.url);
-    return true;
-  });
-});
-const readingOptions = computed(() => libraryItems.value.filter((item) => (
-  ['book', 'passage', 'markdown'].includes(normalizeResourceCategory(item.category))
-)));
-const videoOptions = computed(() => libraryItems.value.filter(isWeeklyMediaResource));
-const outlineOptions = computed(() => libraryItems.value.filter((item) => (
-  item.type === 'image' || item.type === 'outline' || item.category === 'outline'
-)));
 const resourceTypeOptions = computed(() => [...new Set(resources.value
   .map((item) => normalizeResourceCategory(item.category))
   .filter(Boolean))].sort(resourceCategorySort));
@@ -217,29 +130,20 @@ const groupedResources = computed(() => {
   return buckets.filter((bucket) => bucket.items.length);
 });
 
-watch(activeGroup, (group) => {
-  groupEditName.value = group?.name || '';
-}, { immediate: true });
-
 const isLoggingIn = ref(false);
 const loginError = ref('');
 const showMobileMoreMenu = ref(false);
-
-function selectAdmin(section) {
-  setAdminSection(section);
-}
 
 function resourceSectionKey(section) {
   return String(section.key || section.label);
 }
 
-function resourceSectionCollapsed(section, admin = false) {
-  const collapsed = admin ? collapsedAdminResourceSections.value : collapsedResourceSections.value;
-  return collapsed.has(resourceSectionKey(section));
+function resourceSectionCollapsed(section) {
+  return collapsedResourceSections.value.has(resourceSectionKey(section));
 }
 
-function toggleResourceSection(section, admin = false) {
-  const state = admin ? collapsedAdminResourceSections : collapsedResourceSections;
+function toggleResourceSection(section) {
+  const state = collapsedResourceSections;
   const next = new Set(state.value);
   const key = resourceSectionKey(section);
   if (next.has(key)) next.delete(key);
@@ -262,165 +166,8 @@ async function submitLogin() {
   }
 }
 
-async function createGroup() {
-  try {
-    const result = await api('/super-admin/groups', {
-      method: 'POST',
-      body: JSON.stringify({ name: groupName.value }),
-    });
-    await alertDialog({
-      title: '小组已创建',
-      message: `小组创建成功，默认密码为：${result.default_password}`,
-      tone: 'success',
-    });
-    await switchGroup(result.id);
-  } catch (error) {
-    showToast(groupSaveErrorMessage(error.message));
-  }
-}
-
-async function updateCurrentGroup() {
-  if (!currentGroupID.value) return;
-  try {
-    await api(`/super-admin/groups/${currentGroupID.value}`, {
-      method: 'PUT',
-      body: JSON.stringify({ name: groupEditName.value }),
-    });
-    showToast('小组信息已更新');
-    await reloadApp();
-  } catch (error) {
-    showToast(groupSaveErrorMessage(error.message));
-  }
-}
-
-async function deleteCurrentGroup() {
-  const group = activeGroup.value;
-  if (!group?.id) return;
-  const input = await promptDialog({
-    title: '确认删除小组',
-    message: `删除小组会清除「${group.name}」的成员、打卡、学习任务、专项小组和本组自有资源文件。请输入小组名称确认。`,
-    placeholder: group.name,
-    tone: 'danger',
-    confirmLabel: '删除小组',
-  });
-  if (!input) return;
-  if (input !== group.name) {
-    showToast('小组名称不匹配，已取消删除');
-    return;
-  }
-  try {
-    await api(`/super-admin/groups/${group.id}`, { method: 'DELETE' });
-    showToast('小组已删除');
-    await reloadApp();
-  } catch (error) {
-    showToast(groupSaveErrorMessage(error.message));
-  }
-}
-
-function groupSaveErrorMessage(message) {
-  return {
-    group_name_required: '小组名称不能为空',
-    group_name_exists: '小组名称已存在',
-    group_not_found: '小组不存在',
-    group_delete_failed: '小组删除失败',
-    group_resource_delete_failed: '小组资源文件删除失败',
-  }[message] || message;
-}
-
-async function createMember() {
-  try {
-    await api('/admin/members', {
-      method: 'POST',
-      body: JSON.stringify({ create_user: true, display_name: memberName.value }),
-    });
-    memberName.value = '';
-    showToast('成员已创建，初始密码为本组当前默认密码');
-    await reloadApp();
-  } catch (error) {
-    showToast(error.message);
-  }
-}
-
-function updateLearning(path, value) {
-  updateLearningValue(path, value);
-}
-
-async function setCheckinNotification(key, enabled) {
-  const previous = checkinNotifications.value[key] !== false;
-  notificationSaving.value = true;
-  updateLearning(['checkin_notifications', key], enabled);
-  const saved = await saveLearningConfig('通知设置已保存');
-  if (!saved) updateLearning(['checkin_notifications', key], previous);
-  notificationSaving.value = false;
-}
-
-function updateScriptureBook(bookID) {
-  const selected = scriptureBookOptions.value.find((item) => String(item.book_id) === String(bookID));
-  if (!selected) return;
-  const startIndex = bibleBooks.findIndex((item) => item.book_id === selected.book_id);
-  updateLearning(['task_sections', 'daily', 'scripture'], {
-    ...scripture.value,
-    book: selected.book || scripture.value.book || '',
-    book_id: selected.book_id || scripture.value.book_id || '',
-    max_chapters: Number(selected.chapters || scripture.value.max_chapters || 1),
-    sequence: bibleBooks.slice(startIndex),
-  });
-}
-
 function optionText(item) {
   return item.title || item.original_name || '未命名资源';
-}
-
-function singleLineText(value) {
-  return String(value || '').replace(/\s+/g, ' ').trim();
-}
-
-function weekOptionText(week) {
-  const start = singleLineText(week?.start);
-  const end = singleLineText(week?.end);
-  const range = start && end ? `${start} - ${end}` : start || end || '未设置时间';
-  const title = singleLineText(week?.title) || '未命名周任务';
-  return `${range}｜${title}`;
-}
-
-function fileOptionText(item) {
-  return item.title || item.original_name || item.url || '未命名文件';
-}
-
-function markdownOptionsWithCurrent(currentValue) {
-  const current = String(currentValue || '').trim();
-  if (!current || markdownFileOptions.value.some((item) => item.url === current)) {
-    return markdownFileOptions.value;
-  }
-  return [{ title: `${current}（当前配置）`, url: current, type: 'markdown' }, ...markdownFileOptions.value];
-}
-
-async function uploadSelectedFile() {
-  await uploadLibraryFile(uploadInput.value, uploadCategory.value);
-}
-
-async function runAdminExport(path, fallbackName, successMessage) {
-  try {
-    await downloadAdminExport(path, fallbackName, successMessage);
-  } catch (error) {
-    showToast(error.message);
-  }
-}
-
-async function runStudyWeeksImport() {
-  try {
-    await importStudyWeeksExcel(studyWeeksImportInput.value);
-  } catch (error) {
-    showToast(error.message);
-  }
-}
-
-async function runLocalBackupImport() {
-  try {
-    await importLocalBackupJSON(localBackupImportInput.value);
-  } catch (error) {
-    showToast(error.message);
-  }
 }
 
 function openAsset(asset) {
@@ -830,6 +577,7 @@ async function refreshResources() {
 
       <AppMobileNav
         :tab="tab"
+        :can-admin="canAdmin"
         :more-open="showMobileMoreMenu"
         :show-groups="ministryGroupCount > 0"
         :entry-setting="settings.ministry?.show_entry"
@@ -871,16 +619,6 @@ async function refreshResources() {
           >
             <Users :size="18" class="app-more-dialog__icon" />
             <span>切换小组 (当前: {{ activeGroup?.name }})</span>
-          </button>
-
-          <button
-            v-if="canAdmin"
-            class="quiet app-more-dialog__action"
-            type="button"
-            @click="setTab('admin'); showMobileMoreMenu = false;"
-          >
-            <Settings :size="18" class="app-more-dialog__icon" />
-            <span>管理工作台</span>
           </button>
 
           <button
