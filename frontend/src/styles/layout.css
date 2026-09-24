@@ -294,7 +294,7 @@
     left: 0;
     right: 0;
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(var(--mobile-nav-count, 5), minmax(0, 1fr));
     height: calc(60px + env(safe-area-inset-bottom));
     padding: 3px 4px env(safe-area-inset-bottom);
     background: #ffffff;
@@ -325,10 +325,6 @@
     color: var(--cd-primary);
     background: var(--cd-primary-soft);
     font-weight: 600;
-  }
-
-  .mobilebar.app-mobile-nav--no-groups {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .admin-checkbox-row {
