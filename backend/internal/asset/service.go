@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 )
 
 var (
@@ -22,6 +23,7 @@ var (
 	ErrInvalidShareScope  = errors.New("invalid_share_scope")
 	ErrInvalidGroupCode   = errors.New("invalid_group_code")
 	ErrInvalidBatchInput  = errors.New("invalid_batch_input")
+	ErrInvalidAssetTitle  = errors.New("invalid_asset_title")
 )
 
 var (
@@ -186,6 +188,29 @@ func (s *Service) ImportHistory(ctx context.Context, groupID uint64, limit int) 
 		return nil, err
 	}
 	return repo.ImportHistory(ctx, groupID, limit)
+}
+
+func (s *Service) Rename(ctx context.Context, groupID, assetID uint64, input RenameInput) (*AssetVO, error) {
+	title := strings.TrimSpace(input.Title)
+	if title == "" || !utf8.ValidString(title) || utf8.RuneCountInString(title) > 255 ||
+		strings.IndexFunc(title, unicode.IsControl) >= 0 {
+		return nil, ErrInvalidAssetTitle
+	}
+	repo, ok := s.repo.(interface {
+		Rename(context.Context, uint64, uint64, string, time.Time) error
+	})
+	if !ok {
+		return nil, ErrSharingUnsupported
+	}
+	if err := repo.Rename(ctx, groupID, assetID, title, time.Now().UTC()); err != nil {
+		return nil, err
+	}
+	item, err := s.repo.FindByID(ctx, groupID, assetID)
+	if err != nil {
+		return nil, err
+	}
+	vo := toAssetVO(*item)
+	return &vo, nil
 }
 
 func (s *Service) RemoveImport(ctx context.Context, groupID, importedAssetID, actorID uint64) error {

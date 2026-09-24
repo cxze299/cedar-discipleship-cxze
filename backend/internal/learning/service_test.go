@@ -379,6 +379,71 @@ func TestBuildTodayTasksUsesAssetURLBeforeTaskContent(t *testing.T) {
 	}
 }
 
+func TestBuildTodayTasksUsesLatestAssetTitleWithoutChangingTaskIdentity(t *testing.T) {
+	t.Parallel()
+
+	bookTaskID := uint64(31)
+	bookRecordTaskID := bookTaskID
+	tasks := buildTodayTasks(
+		"2026-09-22",
+		map[string]any{
+			"id":            uint64(7),
+			"book_enabled":  true,
+			"video_enabled": true,
+		},
+		[]map[string]any{
+			{
+				"id":        bookTaskID,
+				"task_type": "weekly_book",
+				"title":     "旧读物名称 36-40页",
+				"enabled":   true,
+				"assets": []map[string]any{{
+					"id":    uint64(145),
+					"title": "新读物名称",
+				}},
+			},
+			{
+				"id":        uint64(32),
+				"task_type": "weekly_video",
+				"title":     "旧视频名称",
+				"enabled":   true,
+				"assets": []map[string]any{{
+					"id":    uint64(146),
+					"title": "新视频名称",
+				}},
+			},
+		},
+		map[string]any{
+			"task_sections": map[string]any{
+				"daily": map[string]any{
+					"devotion":  map[string]any{"enabled": false},
+					"scripture": map[string]any{"enabled": false},
+				},
+			},
+		},
+		[]TodayRecord{{
+			ID:       201,
+			TaskType: "weekly_book",
+			TaskID:   &bookRecordTaskID,
+			Part:     "旧读物名称 36-40页",
+		}},
+	)
+	if len(tasks) != 2 {
+		t.Fatalf("buildTodayTasks returned %d tasks, want book and video", len(tasks))
+	}
+	book := tasks[0]
+	if book.Title != "新读物名称 36-40页" {
+		t.Fatalf("book title = %q, want latest asset title with task page range", book.Title)
+	}
+	if book.Part != "旧读物名称 36-40页" || book.Detail != "旧读物名称 36-40页" || !book.Completed {
+		t.Fatalf("book identity changed after rename: %+v", book)
+	}
+	video := tasks[1]
+	if video.Title != "新视频名称" || video.TaskID != 32 {
+		t.Fatalf("video display or identity = %+v", video)
+	}
+}
+
 func TestMatchingTodayRecordWeeklyOutlineMatchesSameTaskAcrossDates(t *testing.T) {
 	t.Parallel()
 

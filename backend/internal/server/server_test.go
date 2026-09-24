@@ -249,6 +249,12 @@ func TestResourceSharingAdminRoutesRequireGroupAdmin(t *testing.T) {
 			handler: a.handleUpdateAssetSharing,
 		},
 		{
+			name:    "rename asset",
+			method:  http.MethodPut,
+			path:    "/api/admin/assets/1/title",
+			handler: a.handleRenameAsset,
+		},
+		{
 			name:    "import resource",
 			method:  http.MethodPost,
 			path:    "/api/admin/resource-imports",

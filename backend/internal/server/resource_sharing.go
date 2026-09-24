@@ -83,6 +83,26 @@ func (a *app) handleUpdateAssetSharing(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+func (a *app) handleRenameAsset(w http.ResponseWriter, r *http.Request) {
+	u := mustUser(r)
+	groupID := requireGroupID(w, u)
+	if groupID == 0 {
+		return
+	}
+	assetID := pathUint64(r, "id")
+	var input assetdomain.RenameInput
+	if !readJSON(w, r, &input) {
+		return
+	}
+	item, err := a.assets.Rename(r.Context(), groupID, assetID, input)
+	if err != nil {
+		a.writeAssetError(w, err)
+		return
+	}
+	a.audit(groupID, u.ID, "rename_asset", "assets", assetID, nil, input, r)
+	writeJSON(w, http.StatusOK, map[string]any{"asset": item})
+}
+
 func (a *app) handleResourceImportPreview(w http.ResponseWriter, r *http.Request) {
 	u := mustUser(r)
 	groupID := requireGroupID(w, u)
@@ -245,6 +265,8 @@ func (a *app) handleResourceDependencyGraph(w http.ResponseWriter, r *http.Reque
 
 func (a *app) writeAssetError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, assetdomain.ErrInvalidAssetTitle):
+		writeError(w, http.StatusBadRequest, "invalid_asset_title")
 	case errors.Is(err, assetdomain.ErrInvalidBatchInput):
 		writeError(w, http.StatusBadRequest, "invalid_batch_input")
 	case errors.Is(err, assetdomain.ErrInvalidShareScope):

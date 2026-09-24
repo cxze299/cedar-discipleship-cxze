@@ -1036,15 +1036,15 @@ async function runLocalBackupImport() {
 .admin-wrapper { min-width: 0; }
 .admin-pagehead, .admin-tabs { margin-bottom: 24px; }
 .admin-wrapper .admin-tabs {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 6px;
   width: 100%;
   max-width: 100%;
-  padding-bottom: 4px;
+  padding: 4px;
   overflow: visible;
 }
-.admin-tabs button { flex: 0 0 auto; min-height: 44px; white-space: nowrap; }
+.admin-tabs button { min-width: 0; min-height: 44px; white-space: nowrap; }
 .admin-wrapper :where(input, select, textarea) { max-width: 100%; }
 .admin-wrapper :where(.card, .empty) { border-radius: var(--cd-radius-card); }
 .admin-wrapper .empty { padding: 32px 20px; text-align: center; }
@@ -1063,7 +1063,7 @@ async function runLocalBackupImport() {
 .week-planner-card { min-width: 0; }
 @media (max-width: 767px) {
   .admin-pagehead { align-items: flex-start; flex-wrap: wrap; gap: 12px; }
-  .admin-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-inline: 0; padding: 6px; }
+  .admin-wrapper .admin-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-inline: 0; padding: 6px; }
   .admin-tabs button { width: 100%; white-space: normal; }
   .admin-wrapper :where(button, select, input[type="file"]) { min-height: 44px; }
   .admin-wrapper :where(.form-actions, .inline-actions) {
@@ -1086,5 +1086,11 @@ async function runLocalBackupImport() {
     line-height: 1.35;
   }
   .admin-wrapper .member-actions button { min-height: 40px; }
+}
+@media (min-width: 480px) and (max-width: 767px) {
+  .admin-wrapper .admin-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (min-width: 640px) and (max-width: 767px) {
+  .admin-wrapper .admin-tabs { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
 </style>

@@ -74,6 +74,34 @@ func (r *MySQLRepository) SaveShareSettings(ctx context.Context, groupID, assetI
 	return tx.Commit()
 }
 
+func (r *MySQLRepository) Rename(ctx context.Context, groupID, assetID uint64, title string, at time.Time) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	_, binding, err := r.assetWithBinding(ctx, tx, groupID, assetID)
+	if err != nil {
+		return err
+	}
+	if binding.AssetKind == AssetKindOwned {
+		_, err = tx.ExecContext(ctx, `UPDATE assets a
+			JOIN asset_bindings b ON b.asset_id=a.id AND b.group_id=a.group_id
+			SET a.title=?,a.updated_at=?
+			WHERE (a.id=? AND a.group_id=?)
+			   OR (b.source_asset_id=? AND b.asset_kind=? AND b.deleted_at IS NULL)`,
+			title, at, assetID, groupID, assetID, AssetKindImported)
+	} else {
+		_, err = tx.ExecContext(ctx, `UPDATE assets SET title=?,updated_at=? WHERE id=? AND group_id=?`,
+			title, at, assetID, groupID)
+	}
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (r *MySQLRepository) BatchSaveShareSettings(ctx context.Context, groupID, actorID uint64, input BatchShareInput, at time.Time) (*BatchShareResult, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {

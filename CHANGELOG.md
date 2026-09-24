@@ -13,6 +13,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Allow group administrators to rename resources without changing file or weekly-task identity. Owned-resource names propagate to active imports, while imported-resource overrides remain local to the consuming group; task and notification displays use the latest applicable name.
 - Batch member roles and weekly task resources, and avoid holding a database connection while requesting another in member, task, and backup lists.
 - Reduce first-load JavaScript by registering only used UI components and loading management, statistics, ministry, and reading pages on demand. Compress static scripts and styles on NAS and reuse the installed PingFang Semibold font when available, while preserving signed audio/video streaming and Range requests.
 - Put the management workspace directly in mobile navigation for authorized users, with navigation width adapting to the available entries.
@@ -20,6 +21,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Keep management navigation compact on phones with two to four actions per row instead of one full-width action per row.
 - Apply the same date-specific daily-task admission and normalization to web and bot check-ins, including separate scripture tasks and combined daily mode.
 - Allow distinct videos to be completed within the same week and on the same date. Preserve same-resource carryover, legacy unbound-video completion, and idempotent retries.
 - Discard stale management, ministry-workspace, and content-viewer responses after navigation or group changes. Surface management load failures and allow retries instead of caching an empty resource library.

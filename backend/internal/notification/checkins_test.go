@@ -167,6 +167,19 @@ func TestBookName(t *testing.T) {
 	}
 }
 
+func TestNotificationBookNamePrefersLatestAssetTitle(t *testing.T) {
+	t.Parallel()
+
+	got := notificationBookName(
+		"旧读物名称 36-40页",
+		`{"book_name":"旧读物名称"}`,
+		"新读物名称",
+	)
+	if got != "新读物名称" {
+		t.Fatalf("notificationBookName() = %q, want latest asset title", got)
+	}
+}
+
 func TestSplitMessage(t *testing.T) {
 	t.Parallel()
 	text := strings.Repeat("1 张三 【新】视频 ", 900)

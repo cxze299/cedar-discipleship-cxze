@@ -445,11 +445,12 @@ func buildTodayTasks(date string, week map[string]any, rawTasks []map[string]any
 				continue
 			}
 			title := firstNonEmpty(asString(raw["title"]), todayTaskFallbackTitle(taskType))
+			displayTitle := todayTaskDisplayTitle(taskType, title, asString(raw["content"]), raw["assets"])
 			tasks = append(tasks, TodayTaskVO{
 				ID:       todayTaskID(taskType, mapUint64(raw, "id"), title),
 				Type:     taskType,
 				Kind:     todayTaskKind(taskType),
-				Title:    title,
+				Title:    displayTitle,
 				Summary:  todayTaskSummary(taskType),
 				TaskID:   mapUint64(raw, "id"),
 				WeekID:   weekID,
@@ -474,6 +475,32 @@ func buildTodayTasks(date string, week map[string]any, rawTasks []map[string]any
 		}
 	}
 	return tasks
+}
+
+func todayTaskDisplayTitle(taskType, taskTitle, content string, rawAssets any) string {
+	asset := firstTaskAsset(rawAssets)
+	if asset == nil {
+		return taskTitle
+	}
+	assetTitle := firstNonEmpty(asString(asset["title"]), asString(asset["original_name"]))
+	if assetTitle == "" {
+		return taskTitle
+	}
+	switch taskType {
+	case "weekly_video":
+		return assetTitle
+	case "weekly_book":
+		start, end, _ := readingPageRangeParts(taskTitle, content)
+		if start == "" {
+			return assetTitle
+		}
+		if end == "" || end == start {
+			return fmt.Sprintf("%s %s页", assetTitle, start)
+		}
+		return fmt.Sprintf("%s %s-%s页", assetTitle, start, end)
+	default:
+		return taskTitle
+	}
 }
 
 func DailyTaskEnabled(settings map[string]any) bool {

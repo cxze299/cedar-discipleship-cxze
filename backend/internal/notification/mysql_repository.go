@@ -192,7 +192,7 @@ func (s *CheckinSource) periodSnapshot(ctx context.Context, event Event, start, 
 		SELECT c.id,c.user_id,
 		       COALESCE(NULLIF(m.member_name,''),NULLIF(u.display_name,''),u.username),
 		       c.task_type,COALESCE(t.title,''),COALESCE(t.content,''),
-		       COALESCE(media_asset.mime_type,''),COALESCE(media_asset.original_name,'')
+		       COALESCE(media_asset.title,''),COALESCE(media_asset.mime_type,''),COALESCE(media_asset.original_name,'')
 		FROM checkin_records c
 		JOIN users u ON u.id=c.user_id
 		JOIN group_members m ON m.group_id=c.group_id AND m.user_id=c.user_id AND m.status=1
@@ -215,7 +215,7 @@ func (s *CheckinSource) periodSnapshot(ctx context.Context, event Event, start, 
 	var entries []Entry
 	for rows.Next() {
 		var entry Entry
-		var title, content, mediaType, mediaName string
+		var title, content, assetTitle, mediaType, mediaName string
 		if err := rows.Scan(
 			&entry.RecordID,
 			&entry.UserID,
@@ -223,12 +223,13 @@ func (s *CheckinSource) periodSnapshot(ctx context.Context, event Event, start, 
 			&entry.TaskType,
 			&title,
 			&content,
+			&assetTitle,
 			&mediaType,
 			&mediaName,
 		); err != nil {
 			return Snapshot{}, fmt.Errorf("scan notification summary: %w", err)
 		}
-		entry.BookName = bookName(title, content)
+		entry.BookName = notificationBookName(title, content, assetTitle)
 		entry.MediaKind = notificationMediaKind(mediaType, mediaName, content)
 		entries = append(entries, entry)
 	}
@@ -271,4 +272,11 @@ func bookName(title, content string) string {
 		return metadata.BookName
 	}
 	return title
+}
+
+func notificationBookName(title, content, assetTitle string) string {
+	if strings.TrimSpace(assetTitle) != "" {
+		return strings.TrimSpace(assetTitle)
+	}
+	return bookName(title, content)
 }

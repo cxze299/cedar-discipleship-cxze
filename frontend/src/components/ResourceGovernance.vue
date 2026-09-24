@@ -9,13 +9,14 @@ import {
   GitBranch,
   History,
   Import,
+  Pencil,
   RefreshCw,
   Share2,
   Trash2,
   X,
 } from '@lucide/vue';
 import { api, loadAdminData, reloadApp, toast } from '../legacy-app';
-import { confirmDialog } from '../ui/dialog';
+import { confirmDialog, promptDialog } from '../ui/dialog';
 import { filterSharedResources } from '../runtime/resourceGovernance';
 import { normalizeResourceCategory, resourceCategoryLabel, resourceCategorySort } from '../runtime/resources';
 import { useAppStateStore } from '../stores/appState';
@@ -49,6 +50,7 @@ const selectedAssetIDs = ref([]);
 const selectedSharedAssetIDs = ref([]);
 const batchBusy = ref(false);
 const batchProgress = ref('');
+const renamingAssetID = ref(0);
 
 const views = [
   { key: 'owned', label: '本组资源', icon: Share2 },
@@ -384,6 +386,37 @@ async function saveShare() {
   }
 }
 
+async function renameAsset(asset) {
+  const imported = asset.asset_kind === 'imported';
+  const title = await promptDialog({
+    title: '重命名资料',
+    message: imported
+      ? '此资料导入自其他小组，修改名称只影响当前小组。'
+      : '此资料属于当前小组，修改名称会同步到仍在使用该资料的导入小组。',
+    defaultValue: asset.title,
+    placeholder: '资料名称',
+    confirmLabel: '保存名称',
+  });
+  if (title === null || title === asset.title) return;
+  renamingAssetID.value = Number(asset.id);
+  try {
+    await api(`/admin/assets/${asset.id}/title`, {
+      method: 'PUT',
+      body: JSON.stringify({ title }),
+    });
+    await Promise.all([
+      reloadApp(),
+      loadAdminData(true),
+    ]);
+    await loadGovernance();
+    toast('资料名称已更新');
+  } catch (error) {
+    toast(error.message === 'invalid_asset_title' ? '资料名称不能为空、不能换行，且最多 255 个字符' : error.message);
+  } finally {
+    renamingAssetID.value = 0;
+  }
+}
+
 async function openImport(resource) {
   importDialog.value = {
     resource,
@@ -524,6 +557,7 @@ onMounted(loadGovernance);
               <td>{{ formatDate(asset.updated_at) }}</td>
               <td>
                 <div class="inline-actions">
+                  <button class="ghost resource-icon-button" type="button" title="重命名资料" aria-label="重命名资料" :disabled="renamingAssetID === Number(asset.id)" @click="renameAsset(asset)"><Pencil :size="16" /></button>
                   <button class="ghost" type="button" @click="openShare(asset)"><Share2 :size="15" />共享</button>
                 </div>
               </td>
@@ -536,6 +570,7 @@ onMounted(loadGovernance);
               <td>{{ formatDate(asset.updated_at) }}</td>
               <td>
                 <div class="inline-actions">
+                  <button class="ghost resource-icon-button" type="button" title="重命名资料" aria-label="重命名资料" :disabled="renamingAssetID === Number(asset.id)" @click="renameAsset(asset)"><Pencil :size="16" /></button>
                   <button class="danger resource-icon-button" type="button" title="移除导入" aria-label="移除导入资源" @click="removeImport(asset)"><Trash2 :size="16" /></button>
                 </div>
               </td>
@@ -550,8 +585,11 @@ onMounted(loadGovernance);
             <header><label><input type="checkbox" :checked="selectedAssetIDs.includes(Number(asset.id))" @change="setAssetSelected(asset.id, $event.target.checked)" /><span>选择</span></label><span class="pill">{{ categoryLabel(asset.category) }}</span></header>
             <div class="resource-stack-copy"><strong>{{ asset.title }}</strong><small>{{ asset.original_name }}</small></div>
             <dl><div><dt>归属</dt><dd>{{ asset.asset_kind === 'imported' ? '已导入' : '本组自有' }}</dd></div><div><dt>更新</dt><dd>{{ formatDate(asset.updated_at) }}</dd></div></dl>
-            <button v-if="asset.asset_kind === 'imported'" class="danger" type="button" @click="removeImport(asset)"><Trash2 :size="15" />移除导入</button>
-            <button v-else class="secondary" type="button" @click="openShare(asset)"><Share2 :size="15" />共享权限</button>
+            <div class="resource-stack-actions">
+              <button class="ghost resource-icon-button" type="button" title="重命名资料" aria-label="重命名资料" :disabled="renamingAssetID === Number(asset.id)" @click="renameAsset(asset)"><Pencil :size="16" /></button>
+              <button v-if="asset.asset_kind === 'imported'" class="danger" type="button" @click="removeImport(asset)"><Trash2 :size="15" />移除导入</button>
+              <button v-else class="secondary" type="button" @click="openShare(asset)"><Share2 :size="15" />共享权限</button>
+            </div>
           </article>
         </template>
       </StackedWheel>
@@ -796,7 +834,8 @@ onMounted(loadGovernance);
 .resource-stack-card dl > div { padding: 8px; border-radius: 8px; background: var(--cd-surface-subtle); }
 .resource-stack-card dt { color: var(--cd-muted); font-size: 10px; }
 .resource-stack-card dd { margin: 3px 0 0; overflow-wrap: anywhere; font-size: 12px; font-weight: 700; }
-.resource-stack-card > button { width: 100%; min-height: 42px; }
+.resource-stack-actions { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 8px; }
+.resource-stack-actions button { min-height: 42px; }
 .resource-stack-card--history { grid-template-rows: auto auto 1fr; }
 @media (max-width: 767px) {
   .resource-governance-head, .resource-batch-toolbar, .resource-filter-bar, .resource-graph-tools { align-items: stretch; flex-wrap: wrap; }
