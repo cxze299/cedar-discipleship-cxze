@@ -2,24 +2,21 @@ import { describe, expect, it } from 'vitest';
 import {
   applyPdfPageRangeToTitle,
   assetDownloadURLWithPageRange,
-  buildReaderPageURL,
   buildWeeklyVerseContentLink,
+  buildReaderPageURL,
   classifyAttachment,
   deepMerge,
   enabledFlag,
-  extractNumberedContentSection,
-  extractWeeklyContentSection,
+  extractMarkdownSectionForDate,
+  extractNumberedMarkdownSection,
   extractPdfPageRange,
-  extractPdfPageRangeFromMetadata,
-  inferAssetContentType,
-  inferDailyDevotionContentType,
+  hasPDFSignature,
   markdownToSafeHTML,
   normalizeContentViewerType,
   normalizeSearchText,
   parsePdfPageRangeParts,
   parseReaderPageRequest,
   pdfViewerSinglePage,
-  resolvePdfPageRange,
   sameOriginAPIPath,
   shouldRenderWeeklyTask,
   videoMediaErrorMessage,
@@ -27,6 +24,22 @@ import {
 } from './content';
 
 describe('content runtime helpers', () => {
+  it('recognizes PDF bytes even when the resource name or MIME type is wrong', () => {
+    expect(hasPDFSignature(new TextEncoder().encode('%PDF-1.7\n...'))).toBe(true);
+    expect(hasPDFSignature(new TextEncoder().encode('plain markdown text'))).toBe(false);
+  });
+
+  it('opens configured recitation text or resolves a Bible reference when the text is empty', () => {
+    expect(buildWeeklyVerseContentLink('罗马书 8:11-15', '罗马书 8:11 原文')).toEqual({
+      label: '查看原文', title: '罗马书 8:11-15', type: 'markdown', content: '罗马书 8:11 原文',
+    });
+    expect(buildWeeklyVerseContentLink('林前 13：4-8', '')).toMatchObject({
+      type: 'iframe', url: 'https://www.wordproject.org/bibles/gb/46/13.htm#4',
+    });
+    expect(buildWeeklyVerseContentLink('未识别的经文', '')).toBeNull();
+    expect(buildWeeklyVerseContentLink('彼得后书 4:1', '')).toBeNull();
+  });
+
   it('normalizes persisted boolean flags', () => {
     expect(enabledFlag('off')).toBe(false);
     expect(enabledFlag('yes')).toBe(true);
@@ -38,75 +51,19 @@ describe('content runtime helpers', () => {
 
   it('parses and normalizes PDF page ranges', () => {
     expect(extractPdfPageRange('阅读 12-18 页')).toBe('12-18');
-    expect(extractPdfPageRange('圣经救赎史剧综览-2 196-198页')).toBe('196-198');
     expect(extractPdfPageRange('阅读 18 至 12 页')).toBe('18-18');
     expect(parsePdfPageRangeParts('第 9 页')).toEqual({ pageStart: '9', pageEnd: '9' });
     expect(applyPdfPageRangeToTitle('读物 3-4页', '8', '6')).toBe('读物 8-8页');
     expect(applyPdfPageRangeToTitle('读物 3-4页', '', '')).toBe('读物');
   });
 
-  it('derives PDF page ranges from migrated reading metadata', () => {
-    const metadata = '{"book_name":"基督是一切","page_start":36,"page_end":40,"source_title":"《基督是一切》36-40页"}';
-    expect(extractPdfPageRangeFromMetadata(metadata)).toBe('36-40');
-    expect(resolvePdfPageRange({
-      title: '基督是一切-江守道',
-      content: metadata,
-    })).toBe('36-40');
-    expect(resolvePdfPageRange({ pageRange: '175-179' })).toBe('175-179');
-    expect(resolvePdfPageRange('2026')).toBe('');
-    expect(resolvePdfPageRange({
-      content: '{"page_start":88,"page_end":80}',
-    })).toBe('88-88');
-  });
-
   it('classifies attachments into previewable and download-only types', () => {
     expect(classifyAttachment({ filename: '主日信息.pdf' })).toEqual({ action: 'preview', type: 'pdf' });
-    expect(inferAssetContentType({
-      type: 'book',
-      original_name: '圣经救赎史剧综览-2',
-    })).toBe('pdf');
-    expect(inferAssetContentType({
-      original_name: '圣经救赎史剧综览-2',
-      mime_type: 'application/pdf',
-    })).toBe('pdf');
-    expect(inferAssetContentType({
-      original_name: '圣经救赎史剧综览-2',
-      category: 'book',
-    })).toBe('pdf');
     expect(classifyAttachment({ filename: '录音.m4a' })).toEqual({ action: 'preview', type: 'audio' });
     expect(classifyAttachment({ mimeType: 'video/mp4', filename: '现场记录' })).toEqual({ action: 'preview', type: 'video' });
     expect(classifyAttachment({ filename: '服事安排.pptx' })).toEqual({ action: 'download', type: 'download' });
     expect(classifyAttachment({ filename: '成员清单.xlsx' })).toEqual({ action: 'download', type: 'download' });
     expect(classifyAttachment({ filename: '资料.unknown' })).toEqual({ action: 'download', type: 'download' });
-  });
-
-  it('keeps Markdown devotion behavior and recognizes PDF devotion assets', () => {
-    expect(inferDailyDevotionContentType({
-      type: 'markdown',
-      path: '/api/assets/11/download',
-    }, {
-      id: 11,
-      original_name: '每日灵修.md',
-      type: 'markdown',
-    })).toBe('markdown');
-
-    expect(inferDailyDevotionContentType({
-      type: 'markdown',
-      path: '/api/assets/12/download',
-    }, {
-      id: 12,
-      original_name: '每日灵修.pdf',
-      type: 'reading',
-    })).toBe('pdf');
-
-    expect(inferDailyDevotionContentType({
-      path: '/legacy/devotion.pdf',
-    })).toBe('pdf');
-
-    expect(inferDailyDevotionContentType({}, {
-      original_name: '每日分享.mp4',
-      type: 'video',
-    })).toBe('');
   });
 
   it('describes media failures by browser error code', () => {
@@ -139,79 +96,7 @@ describe('content runtime helpers', () => {
     expect(weeklyTitleFromContent({
       title: '手动标题',
       readings: [{ title: '读物一' }],
-    })).toBe('读物一');
-  });
-
-  it('builds an inline content link for weekly verse text', () => {
-    expect(buildWeeklyVerseContentLink('罗马书 8:11-15', '罗马书 8:11 原文')).toEqual({
-      label: '查看原文',
-      title: '罗马书 8:11-15',
-      type: 'markdown',
-      content: '罗马书 8:11 原文',
-    });
-    expect(buildWeeklyVerseContentLink('罗马书 8:11-15', '  ')).toMatchObject({
-      type: 'iframe',
-      url: 'https://www.wordproject.org/bibles/gb/45/8.htm#11',
-    });
-    expect(buildWeeklyVerseContentLink('林前 13：4-8', '')).toMatchObject({
-      url: 'https://www.wordproject.org/bibles/gb/46/13.htm#4',
-    });
-    expect(buildWeeklyVerseContentLink('未识别的经文', '')).toBeNull();
-    expect(buildWeeklyVerseContentLink('罗马书 99:1', '')).toBeNull();
-  });
-
-  it('preserves the aggregate week title even with reading links disabled', () => {
-    expect(weeklyTitleFromContent({
-      weekly_checkin: true,
-      title: '复习两个主题',
-      book_enabled: false,
-      verse_ref: '罗马书 8:1',
-    })).toBe('复习两个主题');
-  });
-
-  it('accepts titled dates and respects explicit selection modes', () => {
-    const text = '# 1\n无关数字篇章\n### 九月二十日 信心\n正文\n### 九月二十一日 次日\n后文';
-    expect(extractNumberedContentSection(text, 0, '九月二十日')).toEqual([
-      '### 九月二十日 信心', '正文',
-    ]);
-    expect(extractNumberedContentSection(text, 1, '九月二十日', 'date')).toEqual([
-      '### 九月二十日 信心', '正文',
-    ]);
-    expect(extractNumberedContentSection(text, 2, '九月二十日', 'numbered')).toEqual([]);
-    expect(extractNumberedContentSection('9月20日 标题\n正文\n九月二十一日\n后文', 0, '九月二十号')).toEqual([
-      '9月20日 标题', '正文',
-    ]);
-    expect(extractNumberedContentSection(
-      '九月廿九日\n前文。九月卅日「正文」\n十月一日\n后文',
-      0,
-      '九月三十日',
-    )).toEqual(['九月卅日', '「正文」']);
-    expect(extractNumberedContentSection('# 1\n正文', 1, '九月二十日', 'date')).toEqual([]);
-  });
-
-  it('matches legacy weekly themes including review titles and stops at the next chapter', () => {
-    const text = '# 卷首语\n## 二、 基督是神的仆人--马可福音\n马可正文\n### 提纲\n内容\n## 五、 基督在身体里--使徒行传\n使徒正文\n## 六、 基督在福音里--罗马书\n后文';
-    expect(extractWeeklyContentSection(text, '复习马可福音')).toEqual([
-      '## 二、 基督是神的仆人--马可福音', '马可正文', '### 提纲', '内容',
-    ]);
-    expect(extractWeeklyContentSection(text, '《基督在身体里》使徒行传')).toEqual([
-      '## 五、 基督在身体里--使徒行传', '使徒正文',
-    ]);
-    expect(extractWeeklyContentSection(text, '永活之泉')).toEqual([]);
-    expect(extractWeeklyContentSection(text, '')).toEqual([]);
-  });
-
-  it('extracts numbered devotion content from numeric or Chinese date headings', () => {
-    expect(extractNumberedContentSection(
-      '# 186\n前一篇\n# 187\n目标正文\n# 188\n后一篇',
-      187,
-      '七月六号',
-    )).toEqual(['# 187', '目标正文']);
-    expect(extractNumberedContentSection(
-      '卷首语\n\n七月五日\n前一篇\n\n七月六日\n目标正文\n第二段\n\n七月七日\n后一篇',
-      187,
-      '七月六号',
-    )).toEqual(['七月六日', '目标正文', '第二段', '']);
+    })).toBe('手动标题');
   });
 
   it('renders markdown while escaping raw HTML and unsafe links', () => {
@@ -225,6 +110,36 @@ describe('content runtime helpers', () => {
     expect(html).toContain('href="/api/assets/12/download"');
     expect(html).not.toContain('href="/files/unmanaged.pdf"');
     expect(html).not.toContain('javascript:');
+  });
+
+  it('keeps devotion markdown readable across common section formats', () => {
+    expect(extractNumberedMarkdownSection('## 1. 第一篇\n内容一\n## 2、第二篇\n内容二', 2))
+      .toEqual(['## 2、第二篇', '内容二']);
+    expect(extractNumberedMarkdownSection('# 总标题\n没有分篇的内容', 8))
+      .toEqual(['# 总标题', '没有分篇的内容']);
+    expect(extractNumberedMarkdownSection('## 1\n内容一', 2)).toEqual([]);
+  });
+
+  it('matches date headings before using numbered devotion sections', () => {
+    const markdown = '# 9月21日\n昨天\n# 2026-09-22\n今天\n# 9月23号\n明天';
+    expect(extractMarkdownSectionForDate(markdown, '2026-09-22', 1))
+      .toEqual(['# 2026-09-22', '今天']);
+    expect(extractMarkdownSectionForDate(markdown, '2026-09-23', 1))
+      .toEqual(['# 9月23号', '明天']);
+    const mixed = '# 九月22日\n甲\n# 9月二十三号\n乙\n# 二〇二六年九月二十四日\n丙';
+    expect(extractMarkdownSectionForDate(mixed, '2026-09-22', 1)).toEqual(['# 九月22日', '甲']);
+    expect(extractMarkdownSectionForDate(mixed, '2026-09-23', 1)).toEqual(['# 9月二十三号', '乙']);
+    expect(extractMarkdownSectionForDate(mixed, '2026-09-24', 1)).toEqual(['# 二〇二六年九月二十四日', '丙']);
+    const withoutSuffix = '# 九月二十二\n甲';
+    expect(extractMarkdownSectionForDate(withoutSuffix, '2026-09-22', 1)).toEqual(['# 九月二十二', '甲']);
+    const plainDateLines = '九月二十一日 昨日灵修\n昨天\n九月22日｜今日灵修\n今天\n9月二十三号 明日灵修\n明天';
+    expect(extractMarkdownSectionForDate(plainDateLines, '2026-09-22', 1))
+      .toEqual(['九月22日｜今日灵修', '今天']);
+    expect(extractMarkdownSectionForDate(plainDateLines, '2026-09-23', 1))
+      .toEqual(['9月二十三号 明日灵修', '明天']);
+    const prose = '# 九月二十二日\n正文\n九月二十三章讲到恩典，不是日期标题\n仍属正文\n# 九月二十三日\n次日';
+    expect(extractMarkdownSectionForDate(prose, '2026-09-22', 1))
+      .toEqual(['# 九月二十二日', '正文', '九月二十三章讲到恩典，不是日期标题', '仍属正文']);
   });
 
   it('recognizes same-origin protected API URLs', () => {

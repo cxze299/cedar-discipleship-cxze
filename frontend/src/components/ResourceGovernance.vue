@@ -1,4 +1,5 @@
 <script setup>
+import { vDialogFocus } from '../ui/dialogFocus';
 import { computed, onMounted, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import {
@@ -14,15 +15,19 @@ import {
   X,
 } from '@lucide/vue';
 import { api, loadAdminData, reloadApp, toast } from '../legacy-app';
+import { confirmDialog } from '../ui/dialog';
 import { filterSharedResources } from '../runtime/resourceGovernance';
 import { normalizeResourceCategory, resourceCategoryLabel, resourceCategorySort } from '../runtime/resources';
 import { useAppStateStore } from '../stores/appState';
+import StackedWheel from './ui/StackedWheel.vue';
+import DateField from './ui/DateField.vue';
 
 const app = useAppStateStore();
 const { currentGroupID, resources } = storeToRefs(app);
 
 const activeView = ref('owned');
 const loading = ref(false);
+const refreshing = ref(false);
 const groups = ref([]);
 const sharedResources = ref([]);
 const historyItems = ref([]);
@@ -141,6 +146,24 @@ async function loadGovernance() {
     toast(error.message);
   } finally {
     loading.value = false;
+  }
+}
+
+async function refreshResources() {
+  if (refreshing.value || loading.value) return;
+  refreshing.value = true;
+  try {
+    // Keep the Pinia resource snapshot, admin library and governance views in sync.
+    await Promise.all([
+      reloadApp(),
+      loadAdminData(true),
+    ]);
+    await loadGovernance();
+    toast('资源已刷新');
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    refreshing.value = false;
   }
 }
 
@@ -405,7 +428,13 @@ async function confirmImport() {
 }
 
 async function removeImport(asset) {
-  if (!window.confirm(`移除已导入资源“${asset.title}”？`)) return;
+  const confirmed = await confirmDialog({
+    title: '移除导入资源',
+    message: `确认移除已导入资源“${asset.title}”？`,
+    tone: 'danger',
+    confirmLabel: '确认移除',
+  });
+  if (!confirmed) return;
   try {
     await api(`/admin/resource-imports/${asset.id}`, { method: 'DELETE' });
     toast('导入资源已移除');
@@ -425,12 +454,11 @@ onMounted(loadGovernance);
   <section class="resource-governance">
     <header class="resource-governance-head">
       <div>
-        <span class="eyebrow">资源治理</span>
         <h2>资源库管理</h2>
       </div>
       <div class="resource-governance-actions">
-        <button class="ghost resource-icon-button" type="button" title="刷新资源数据" @click="loadGovernance">
-          <RefreshCw :size="17" />
+        <button class="ghost resource-icon-button" type="button" :disabled="refreshing || loading" title="刷新资源数据" aria-label="刷新资源数据" @click="refreshResources">
+          <RefreshCw :size="17" :class="{ spin: refreshing || loading }" />
         </button>
       </div>
     </header>
@@ -442,6 +470,7 @@ onMounted(loadGovernance);
         :class="{ active: activeView === view.key }"
         type="button"
         role="tab"
+        :aria-selected="activeView === view.key"
         @click="activeView = view.key"
       >
         <component :is="view.icon" :size="16" />{{ view.label }}
@@ -464,7 +493,7 @@ onMounted(loadGovernance);
         </div>
       </div>
       <div v-if="batchProgress" class="resource-batch-progress"><RefreshCw :size="15" />{{ batchProgress }}</div>
-      <div class="resource-table-wrap">
+      <div class="resource-table-wrap desktop-resource-table">
         <table class="resource-governance-table">
           <thead><tr><th class="resource-select-column">选择</th><th>资源</th><th>类型</th><th>归属</th><th>更新时间</th><th>操作</th></tr></thead>
           <tbody>
@@ -488,7 +517,7 @@ onMounted(loadGovernance);
               <td>{{ formatDate(asset.updated_at) }}</td>
               <td>
                 <div class="inline-actions">
-                  <button class="danger resource-icon-button" type="button" title="移除导入" @click="removeImport(asset)"><Trash2 :size="16" /></button>
+                  <button class="danger resource-icon-button" type="button" title="移除导入" aria-label="移除导入资源" @click="removeImport(asset)"><Trash2 :size="16" /></button>
                 </div>
               </td>
             </tr>
@@ -496,13 +525,24 @@ onMounted(loadGovernance);
         </table>
         <div v-if="!databaseResources.length" class="empty">当前小组暂无资源。</div>
       </div>
+      <StackedWheel class="mobile-resource-stack" :items="databaseResources" :item-key="(asset) => asset.id" aria-label="本组资源" :card-height="246">
+        <template #default="{ item: asset }">
+          <article class="resource-stack-card">
+            <header><label><input type="checkbox" :checked="selectedAssetIDs.includes(Number(asset.id))" @change="setAssetSelected(asset.id, $event.target.checked)" /><span>选择</span></label><span class="pill">{{ categoryLabel(asset.category) }}</span></header>
+            <div class="resource-stack-copy"><strong>{{ asset.title }}</strong><small>{{ asset.original_name }}</small></div>
+            <dl><div><dt>归属</dt><dd>{{ asset.asset_kind === 'imported' ? '已导入' : '本组自有' }}</dd></div><div><dt>更新</dt><dd>{{ formatDate(asset.updated_at) }}</dd></div></dl>
+            <button v-if="asset.asset_kind === 'imported'" class="danger" type="button" @click="removeImport(asset)"><Trash2 :size="15" />移除导入</button>
+            <button v-else class="secondary" type="button" @click="openShare(asset)"><Share2 :size="15" />共享权限</button>
+          </article>
+        </template>
+      </StackedWheel>
     </template>
 
     <template v-else-if="activeView === 'shared'">
       <div class="resource-filter-bar">
         <select v-model="ownerFilter"><option value="">全部来源小组</option><option v-for="group in groups" :key="group.id" :value="group.id">{{ group.name }}</option></select>
         <select v-model="typeFilter"><option value="">全部资源类型</option><option v-for="type in resourceTypes" :key="type" :value="type">{{ categoryLabel(type) }}</option></select>
-        <input v-model="dateFilter" type="date" title="最早更新时间" />
+        <DateField v-model="dateFilter" label="最早更新时间" clearable />
         <select v-model="statusFilter"><option value="all">全部状态</option><option value="available">未导入</option><option value="imported">已导入</option></select>
       </div>
       <div class="resource-batch-toolbar">
@@ -517,7 +557,7 @@ onMounted(loadGovernance);
         </div>
       </div>
       <div v-if="batchProgress" class="resource-batch-progress"><RefreshCw :size="15" />{{ batchProgress }}</div>
-      <div class="resource-table-wrap">
+      <div class="resource-table-wrap desktop-resource-table">
         <table class="resource-governance-table">
           <thead><tr><th class="resource-select-column">选择</th><th>资源</th><th>来源小组</th><th>更新时间</th><th>状态</th><th>操作</th></tr></thead>
           <tbody>
@@ -537,10 +577,20 @@ onMounted(loadGovernance);
         </table>
         <div v-if="!visibleSharedResources.length" class="empty">没有符合筛选条件的共享资源。</div>
       </div>
+      <StackedWheel class="mobile-resource-stack" :items="visibleSharedResources" :item-key="(item) => item.asset_id" aria-label="共享资源" :card-height="258">
+        <template #default="{ item }">
+          <article class="resource-stack-card">
+            <header><label><input type="checkbox" :checked="selectedSharedAssetIDs.includes(Number(item.asset_id))" @change="setSharedSelected(item.asset_id, $event.target.checked)" /><span>选择</span></label><span :class="item.imported ? 'resource-imported-badge' : 'pill'">{{ item.imported ? '已导入' : '可导入' }}</span></header>
+            <div class="resource-stack-copy"><strong>{{ item.title }}</strong><small>{{ item.original_name }} · {{ formatSize(item.file_size) }}</small></div>
+            <dl><div><dt>来源</dt><dd>{{ item.owner_group?.name }}</dd></div><div><dt>更新</dt><dd>{{ formatDate(item.updated_at) }}</dd></div></dl>
+            <button class="secondary" type="button" @click="openImport(item)">{{ item.imported ? '重新导入' : '导入资源' }}</button>
+          </article>
+        </template>
+      </StackedWheel>
     </template>
 
     <template v-else-if="activeView === 'history'">
-      <div class="resource-table-wrap">
+      <div class="resource-table-wrap desktop-resource-table">
         <table class="resource-governance-table">
           <thead><tr><th>时间</th><th>事件</th><th>来源资源</th><th>导入资源</th></tr></thead>
           <tbody>
@@ -551,6 +601,15 @@ onMounted(loadGovernance);
         </table>
         <div v-if="!historyItems.length" class="empty">暂无导入历史。</div>
       </div>
+      <StackedWheel class="mobile-resource-stack" :items="historyItems" :item-key="(item) => item.id" aria-label="导入历史" :card-height="220">
+        <template #default="{ item }">
+          <article class="resource-stack-card resource-stack-card--history">
+            <span class="pill">{{ item.event_type }}</span>
+            <strong>{{ formatDate(item.created_at) }}</strong>
+            <dl><div><dt>来源资源</dt><dd>#{{ item.source_asset_id }}</dd></div><div><dt>导入资源</dt><dd>#{{ item.imported_asset_id }}</dd></div></dl>
+          </article>
+        </template>
+      </StackedWheel>
     </template>
 
     <template v-else>
@@ -590,8 +649,8 @@ onMounted(loadGovernance);
     </template>
 
     <div v-if="shareDialog" class="modal-backdrop" @click.self="shareDialog = null">
-      <section class="resource-dialog">
-        <header><div><span class="eyebrow">共享权限</span><h3>{{ shareDialog.asset.title }}</h3></div><button class="ghost resource-icon-button" type="button" @click="shareDialog = null"><X :size="18" /></button></header>
+      <section v-dialog-focus="() => { shareDialog = null; }" class="resource-dialog" role="dialog" aria-modal="true" aria-label="共享权限">
+        <header><div><span class="eyebrow">共享权限</span><h3>{{ shareDialog.asset.title }}</h3></div><button class="ghost resource-icon-button" type="button" aria-label="关闭共享权限弹窗" @click="shareDialog = null"><X :size="18" /></button></header>
         <div class="segmented-control resource-scope-control">
           <button v-for="scope in [['private','仅本组'],['selected_groups','指定小组'],['all_groups','所有小组']]" :key="scope[0]" :class="{ active: shareDialog.scope === scope[0] }" type="button" @click="shareDialog.scope = scope[0]">{{ scope[1] }}</button>
         </div>
@@ -603,8 +662,8 @@ onMounted(loadGovernance);
     </div>
 
     <div v-if="batchShareDialog" class="modal-backdrop" @click.self="batchShareDialog = null">
-      <section class="resource-dialog">
-        <header><div><span class="eyebrow">批量权限</span><h3>{{ batchShareDialog.assets.length }} 个自有资源</h3></div><button class="ghost resource-icon-button" type="button" :disabled="batchBusy" @click="batchShareDialog = null"><X :size="18" /></button></header>
+      <section v-dialog-focus="() => { if (!batchBusy) batchShareDialog = null; }" class="resource-dialog" role="dialog" aria-modal="true" aria-label="批量设置资源权限">
+        <header><div><span class="eyebrow">批量权限</span><h3>{{ batchShareDialog.assets.length }} 个自有资源</h3></div><button class="ghost resource-icon-button" type="button" aria-label="关闭批量权限弹窗" :disabled="batchBusy" @click="batchShareDialog = null"><X :size="18" /></button></header>
         <div class="segmented-control resource-scope-control">
           <button v-for="scope in [['private','仅本组'],['selected_groups','指定小组'],['all_groups','所有小组']]" :key="scope[0]" :class="{ active: batchShareDialog.scope === scope[0] }" type="button" @click="batchShareDialog.scope = scope[0]">{{ scope[1] }}</button>
         </div>
@@ -623,8 +682,8 @@ onMounted(loadGovernance);
     </div>
 
     <div v-if="batchDeleteDialog" class="modal-backdrop" @click.self="batchDeleteDialog = null">
-      <section class="resource-dialog">
-        <header><div><span class="eyebrow">批量删除</span><h3>{{ batchDeleteDialog.assets.length }} 个资源</h3></div><button class="ghost resource-icon-button" type="button" :disabled="batchBusy" @click="batchDeleteDialog = null"><X :size="18" /></button></header>
+      <section v-dialog-focus="() => { if (!batchBusy) batchDeleteDialog = null; }" class="resource-dialog" role="dialog" aria-modal="true" aria-label="批量删除资源">
+        <header><div><span class="eyebrow">批量删除</span><h3>{{ batchDeleteDialog.assets.length }} 个资源</h3></div><button class="ghost resource-icon-button" type="button" aria-label="关闭批量删除弹窗" :disabled="batchBusy" @click="batchDeleteDialog = null"><X :size="18" /></button></header>
         <div class="resource-dialog-body">
           <p>删除会在一个事务内完成。自有资源将从本组资料库移除并撤销共享；已导入资源将移除逻辑引用。</p>
           <ul class="resource-confirm-list">
@@ -639,8 +698,8 @@ onMounted(loadGovernance);
     </div>
 
     <div v-if="batchImportDialog" class="modal-backdrop" @click.self="batchImportDialog = null">
-      <section class="resource-dialog">
-        <header><div><span class="eyebrow">批量导入</span><h3>{{ batchImportDialog.resources.length }} 个共享资源</h3></div><button class="ghost resource-icon-button" type="button" :disabled="batchBusy" @click="batchImportDialog = null"><X :size="18" /></button></header>
+      <section v-dialog-focus="() => { if (!batchBusy) batchImportDialog = null; }" class="resource-dialog" role="dialog" aria-modal="true" aria-label="批量导入资源">
+        <header><div><span class="eyebrow">批量导入</span><h3>{{ batchImportDialog.resources.length }} 个共享资源</h3></div><button class="ghost resource-icon-button" type="button" aria-label="关闭批量导入弹窗" :disabled="batchBusy" @click="batchImportDialog = null"><X :size="18" /></button></header>
         <div class="resource-dialog-body">
           <p>本次会在一个事务内完成导入；任一资源失效或无权限时，全部导入都会回滚。</p>
           <ul class="resource-confirm-list">
@@ -656,8 +715,8 @@ onMounted(loadGovernance);
     </div>
 
     <div v-if="importDialog" class="modal-backdrop" @click.self="importDialog = null">
-      <section class="resource-dialog resource-import-dialog">
-        <header><div><span class="eyebrow">导入资源</span><h3>{{ importDialog.resource.title }}</h3></div><button class="ghost resource-icon-button" type="button" @click="importDialog = null"><X :size="18" /></button></header>
+      <section v-dialog-focus="() => { if (!importDialog?.confirming) importDialog = null; }" class="resource-dialog resource-import-dialog" role="dialog" aria-modal="true" aria-label="导入资源">
+        <header><div><span class="eyebrow">导入资源</span><h3>{{ importDialog.resource.title }}</h3></div><button class="ghost resource-icon-button" type="button" aria-label="关闭导入资源弹窗" @click="importDialog = null"><X :size="18" /></button></header>
         <div class="resource-import-steps"><span v-for="step in 3" :key="step" :class="{ active: importDialog.step >= step }">{{ step }}</span></div>
         <div v-if="importDialog.step === 1" class="resource-dialog-body">
           <h4>权限验证</h4>
@@ -684,3 +743,74 @@ onMounted(loadGovernance);
     </div>
   </section>
 </template>
+
+<style scoped>
+.resource-governance { min-width: 0; }
+.resource-governance-tabs { display: flex; max-width: 100%; flex-wrap: wrap; }
+.resource-governance-tabs button { flex: 0 0 auto; min-height: 44px; white-space: nowrap; }
+.resource-icon-button { min-width: 44px; min-height: 44px; }
+.resource-table-wrap { max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; }
+.resource-governance-table { width: max-content; min-width: 100%; }
+.resource-governance-table td.resource-select-column { min-width: 58px; }
+.resource-batch-toolbar { position: sticky; left: 0; max-width: 100%; }
+.resource-batch-actions button { min-height: 44px; }
+.resource-dialog {
+  width: min(560px, calc(100vw - 32px));
+  max-width: 100%;
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.resource-dialog header { align-items: flex-start; }
+.resource-dialog header > div { min-width: 0; }
+.resource-dialog h3 { overflow-wrap: anywhere; }
+.resource-dialog footer { position: sticky; bottom: 0; z-index: 2; background: var(--cd-surface, #fff); }
+.resource-dialog footer button { min-height: 44px; }
+.mobile-resource-stack { display: none; }
+.resource-stack-card { display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; gap: 10px; height: 100%; padding: 16px; overflow: hidden; border: 1px solid var(--cd-border); border-radius: var(--cd-radius-card); background: var(--cd-surface); box-shadow: var(--cd-shadow-card); }
+.resource-stack-card header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.resource-stack-card header label { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.resource-stack-copy { min-width: 0; }
+.resource-stack-copy strong, .resource-stack-copy small { display: block; overflow-wrap: anywhere; }
+.resource-stack-copy small { margin-top: 4px; color: var(--cd-muted); font-size: 11px; }
+.resource-stack-card dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0; }
+.resource-stack-card dl > div { padding: 8px; border-radius: 8px; background: var(--cd-surface-subtle); }
+.resource-stack-card dt { color: var(--cd-muted); font-size: 10px; }
+.resource-stack-card dd { margin: 3px 0 0; overflow-wrap: anywhere; font-size: 12px; font-weight: 700; }
+.resource-stack-card > button { width: 100%; min-height: 42px; }
+.resource-stack-card--history { grid-template-rows: auto auto 1fr; }
+@media (max-width: 767px) {
+  .resource-governance-head, .resource-batch-toolbar, .resource-filter-bar, .resource-graph-tools { align-items: stretch; flex-wrap: wrap; }
+  .resource-batch-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
+  .resource-batch-actions button:last-child { grid-column: 1 / -1; }
+  .resource-governance-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+  .resource-governance-tabs button { width: 100%; justify-content: center; white-space: normal; }
+  .desktop-resource-table { display: none; }
+  .mobile-resource-stack { display: block; }
+  .resource-governance-table th:first-child,
+  .resource-governance-table td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    background: var(--cd-surface, #fff);
+    box-shadow: 1px 0 0 var(--cd-border);
+  }
+  .resource-governance-table thead th:first-child { z-index: 3; background: var(--cd-surface-subtle); }
+  .resource-governance-table .resource-select-column + th,
+  .resource-governance-table .resource-select-column + td {
+    position: sticky;
+    left: 54px;
+    z-index: 1;
+    min-width: 180px;
+    background: var(--cd-surface, #fff);
+    box-shadow: 1px 0 0 var(--cd-border);
+  }
+  .resource-governance-table thead .resource-select-column + th { z-index: 2; background: var(--cd-surface-subtle); }
+  .modal-backdrop { padding: 12px; }
+  .resource-dialog { width: 100%; max-height: calc(100dvh - 24px); }
+  .resource-dialog footer { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .resource-dialog footer > span { display: none; }
+  .resource-scope-control { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); overflow: visible; }
+  .resource-scope-control button { min-height: 44px; white-space: normal; }
+}
+</style>
