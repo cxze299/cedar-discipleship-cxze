@@ -1,32 +1,40 @@
-# Changelog
+# 更新日志
 
-All notable changes to this project are documented in this file.
+项目的重要变更均记录在此文件中，并按时间倒序排列。
 
-The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+## 2026-09-25 | 发布流程与中文记录规范
 
-## [Unreleased]
+- 关联提交：本次提交；功能实现提交：`e66c6a6`。
+- 运维：NAS 发布默认改为本地交叉编译后仅传输增量制品，并复用线上基础镜像封装；首选路径超时后才降级到 GHCR，两个远程方案均失败且获得明确同意后才在 NAS 编译源码。
+- 运维：提交主题、提交说明和更新日志统一使用中文；每次变更在本文件顶部新增带日期、关联提交和影响说明的记录。
+- 修复：首页并发读取专项小组时先走完整目录的只读快速路径；确需补齐目录时按学习组串行初始化，避免 MySQL 1213 死锁导致首次进入显示 `ministry_failed`。
 
-### Security
+## 2026-09-25 | 资源重命名与移动端管理布局
 
-- Limit group default-password resets to active members of that group, retaining protections for leaders, super administrators, and accounts active in multiple groups.
-- Preserve resource ownership, source dependencies, and sharing permissions during backup restore. Resolve new references through authorized resource imports; unregistered file paths no longer establish ownership. Replayed startup migrations preserve private visibility and revoked grants.
+- 关联提交：`e66c6a6`。
+- 新增：小组管理员可重命名资料，不改变文件、周任务和打卡记录的唯一身份。
+- 变更：自有资料改名同步到有效导入副本；导入资料的本组自定义名称只影响当前组；任务、统计和通知按各自规则展示最新适用名称。
+- 修复：移动端管理入口恢复紧凑网格，在不同宽度下一行显示 2 至 4 个管理项。
 
-### Changed
+## 2026-09-25 | 后端权限与稳定性修复
 
-- Allow group administrators to rename resources without changing file or weekly-task identity. Owned-resource names propagate to active imports, while imported-resource overrides remain local to the consuming group; task and notification displays use the latest applicable name.
-- Batch member roles and weekly task resources, and avoid holding a database connection while requesting another in member, task, and backup lists.
-- Reduce first-load JavaScript by registering only used UI components and loading management, statistics, ministry, and reading pages on demand. Compress static scripts and styles on NAS and reuse the installed PingFang Semibold font when available, while preserving signed audio/video streaming and Range requests.
-- Put the management workspace directly in mobile navigation for authorized users, with navigation width adapting to the available entries.
-- Consolidate management actions in `AdminConsole` and share page-loading/error handling. Preserve the deployed NAS frontend features, including recitation practice, download handling, and existing mobile layouts.
+- 关联提交：`0783950`。
+- 安全：默认密码重置仅允许操作当前组的有效成员，并继续保护组长、超级管理员及仍活跃于其他组的账号。
+- 安全：备份恢复保留资源所有权、来源依赖与共享权限；新引用必须通过授权导入建立，未登记文件路径不再产生所有权；重复启动迁移不会恢复已撤销授权或扩大私有资源可见范围。
+- 变更：成员角色、周任务资源改为批量读取，成员、任务和备份列表不再占用一个数据库连接后继续申请另一个连接。
+- 修复：网页端与机器人端采用相同的按日期每日任务准入和标准化规则，兼容分开的经文任务及合并每日模式。
+- 修复：同一周、同一天允许完成不同视频，同时保留同资源跨周继承、旧版未绑定视频完成记录和幂等重试。
+- 修复：恢复 MP3 等音频资源的签名流式播放，解决前后端版本不一致时出现的 `asset_not_video`。
 
-### Fixed
+## 2026-09-24 | 首页性能与导航体验
 
-- Keep management navigation compact on phones with two to four actions per row instead of one full-width action per row.
-- Apply the same date-specific daily-task admission and normalization to web and bot check-ins, including separate scripture tasks and combined daily mode.
-- Allow distinct videos to be completed within the same week and on the same date. Preserve same-resource carryover, legacy unbound-video completion, and idempotent retries.
-- Discard stale management, ministry-workspace, and content-viewer responses after navigation or group changes. Surface management load failures and allow retries instead of caching an empty resource library.
-- Restored signed streaming for MP3 and other audio assets used by weekly media tasks. This closes the frontend/backend contract gap that caused `asset_not_video` after the streaming frontend was deployed without its matching backend change.
+- 关联提交：`05591a7`。
+- 变更：仅注册实际使用的 UI 组件，并按需加载管理、统计、专项小组和阅读页面；NAS 开启静态脚本与样式压缩，并在可用时复用已安装的苹方字体。
+- 变更：有权限的用户可从移动端主导航直接进入管理工作台，导航宽度随入口数量调整。
+- 变更：统一 `AdminConsole` 的管理操作及页面加载、错误处理逻辑，同时保留默写练习、下载处理和既有移动端布局。
+- 修复：导航或切换小组后丢弃过期的管理、专项小组和内容查看请求；管理加载失败时明确提示并允许重试，不再缓存空资料库。
 
-### Operations
+## 2026-09-24 | 工程约束
 
-- Require every non-merge commit to update this changelog.
+- 关联提交：`05591a7`。
+- 运维：所有非合并提交必须同步更新本文件。

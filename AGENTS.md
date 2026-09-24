@@ -78,11 +78,19 @@ Before changing this project, check the latest `master` commit of `wangz5940/ced
 
 Every non-merge commit must update `CHANGELOG.md`.
 
-- Add one concise reader-facing entry under `[Unreleased]`.
-- Use `Added`, `Changed`, `Fixed`, `Security`, or `Operations` as appropriate.
+- Add one concise reader-facing entry at the beginning of the changelog content, ordered newest first.
+- Write changelog entries in Chinese and include the date, related commit ID when already known, and the user-visible impact.
+- For the commit that contains its own changelog entry, write `本次提交` instead of attempting to embed the commit's self-referential hash.
+- Use `新增`, `变更`, `修复`, `安全`, or `运维` as appropriate.
 - Describe the behavior, compatibility, data, configuration, or deployment impact.
 - Do not use the changelog as a raw commit log; state why the change matters.
 - Include `CHANGELOG.md` in the same commit as the code, configuration, test, or documentation change.
+
+## 8. Chinese Git History
+
+- Write every new commit subject and description in Chinese.
+- Keep the subject concise and explain behavior, compatibility, or operational impact in the description.
+- Do not rewrite already-published history only to translate older commit messages.
 
 ---
 
