@@ -1,7 +1,5 @@
 import { createApp } from 'vue';
 import { createPinia } from 'pinia';
-import { Button, ConfigProvider, Spin } from 'ant-design-vue';
-import 'ant-design-vue/dist/reset.css';
 import App from './App.vue';
 import { installVersionRefresh } from './runtime/appVersion';
 import './styles.css';
@@ -16,9 +14,6 @@ installVersionRefresh();
 const app = createApp(App);
 const pinia = createPinia();
 app.use(pinia);
-app.use(Button);
-app.use(ConfigProvider);
-app.use(Spin);
 app.mount('#app');
 
 if (typeof window !== 'undefined') {

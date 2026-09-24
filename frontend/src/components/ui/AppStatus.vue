@@ -24,7 +24,7 @@ defineProps({
     :aria-busy="status === 'loading'"
     :aria-live="status === 'error' ? 'assertive' : 'polite'"
   >
-    <a-spin v-if="status === 'loading'" size="large" />
+    <div v-if="status === 'loading'" class="app-status__spinner" aria-hidden="true"></div>
     <div v-else class="app-status__icon" aria-hidden="true">!</div>
     <div class="app-status__copy">
       <h1 v-if="title" class="app-status__title">{{ title }}</h1>
@@ -62,6 +62,15 @@ defineProps({
   font-weight: var(--cd-font-weight-semibold);
 }
 
+.app-status__spinner {
+  width: var(--cd-space-10);
+  height: var(--cd-space-10);
+  border: 3px solid var(--cd-border);
+  border-top-color: var(--cd-primary);
+  border-radius: 50%;
+  animation: app-status-spin 0.8s linear infinite;
+}
+
 .app-status__copy {
   display: grid;
   gap: var(--cd-space-2);
@@ -79,5 +88,15 @@ defineProps({
 
 .app-status__action {
   margin-top: var(--cd-space-2);
+}
+
+@keyframes app-status-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-status__spinner {
+    animation-duration: 1.6s;
+  }
 }
 </style>

@@ -12,9 +12,6 @@ import { useContentViewerStore } from './stores/contentViewer';
 import { lazyPage } from './ui/lazyPage';
 import { disposeApp, initializeApp } from './legacy-app';
 import { parseReaderPageRequest } from './runtime/content';
-import { readComponentTheme } from './styles/theme';
-
-const componentTheme = readComponentTheme();
 
 const shell = useAppShellStore();
 const appState = useAppStateStore();
@@ -70,7 +67,6 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <a-config-provider :theme="componentTheme">
   <main class="antd-app-shell" :data-status="shell.status">
     <BookReaderPage v-if="readerRequest" :request="readerRequest" />
     <AppStatus
@@ -80,9 +76,9 @@ onBeforeUnmount(() => {
       :description="String(shell.error || '网络或数据服务异常')"
     >
       <template #action>
-        <a-button type="primary" :loading="retrying" @click="retryBoot">
-          重新加载
-        </a-button>
+        <button type="button" class="primary" :disabled="retrying" :aria-busy="retrying" @click="retryBoot">
+          {{ retrying ? '正在重试' : '重新加载' }}
+        </button>
       </template>
     </AppStatus>
     <AppStatus
@@ -104,5 +100,4 @@ onBeforeUnmount(() => {
     <SiteDialog />
     <AppToast :message="appState.toast" />
   </main>
-  </a-config-provider>
 </template>
