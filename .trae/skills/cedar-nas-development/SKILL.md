@@ -235,7 +235,8 @@ cd /Users/bytedance/program/agp
 该脚本：
 
 - 在本机构建 Linux amd64 后端二进制和前端静态文件。
-- 仅传输压缩后的业务制品，复用 NAS 当前容器的基础镜像层。
+- 将压缩后的业务制品切成 1 MiB 分片并默认使用 4 路 SSH 并行传输，规避单连接限速；复用 NAS 当前容器的基础镜像层。
+- 关闭 macOS copyfile 元数据并在传输前删除 `._*`，避免 AppleDouble 文件被后端误当成 SQL 迁移执行。
 - 检查当前基础镜像对应提交到目标提交之间的 Dockerfile、Nginx 和 Compose 契约；契约有变化时拒绝增量封装。
 - 在 NAS 上快速封装不可变镜像，再用临时镜像环境文件执行 `up -d --no-build`。
 - 不拉取 NAS 脏工作区，不覆盖 `.env`，不修改数据挂载，不留下临时构建目录。

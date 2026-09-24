@@ -11,6 +11,10 @@ SHA="${AGP_GIT_REF:-$(git -C "$ROOT_DIR" rev-parse HEAD)}"
 SHORT_SHA="${SHA:0:12}"
 STAGE_DIR="$(mktemp -d "/tmp/cedar-local-artifacts.${SHORT_SHA}.XXXXXX")"
 REMOTE_STAGE="/tmp/cedar-local-artifacts.${SHORT_SHA}.$$"
+BUNDLE="${STAGE_DIR}.tar.gz"
+CHUNK_DIR="${STAGE_DIR}.chunks"
+TRANSFER_JOBS="${AGP_TRANSFER_JOBS:-4}"
+TRANSFER_CHUNK_SIZE="${AGP_TRANSFER_CHUNK_SIZE:-1m}"
 
 log() {
   printf '[%s] %s\n' "$(date '+%F %T')" "$*"
@@ -22,7 +26,7 @@ fail() {
 }
 
 cleanup() {
-  rm -rf "$STAGE_DIR"
+  rm -rf "$STAGE_DIR" "$CHUNK_DIR" "$BUNDLE"
   ssh -p "$SSH_PORT" "$SSH_HOST" "rm -rf '$REMOTE_STAGE'" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT HUP INT TERM
@@ -56,8 +60,13 @@ verify_runtime_contract() {
 require_command git
 require_command go
 require_command npm
+require_command scp
+require_command split
 require_command ssh
 require_command tar
+
+[[ "$TRANSFER_JOBS" =~ ^[1-8]$ ]] ||
+  fail "AGP_TRANSFER_JOBS must be an integer from 1 to 8"
 
 if [ -n "$(git -C "$ROOT_DIR" status --porcelain=v1 -uno)" ]; then
   fail "tracked worktree changes exist; commit them before deployment"
@@ -98,6 +107,7 @@ log "Building frontend artifacts"
 )
 cp -R "$ROOT_DIR/frontend/dist/." "$STAGE_DIR/frontend/dist/"
 cp "$ROOT_DIR/frontend/nginx.conf" "$STAGE_DIR/frontend/nginx.conf"
+find "$STAGE_DIR" -name '._*' -delete
 
 cat >"$STAGE_DIR/Dockerfile.backend" <<'EOF'
 ARG BASE_IMAGE
@@ -115,10 +125,38 @@ COPY frontend/dist/ /usr/share/nginx/html/
 COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
 EOF
 
-log "Transferring compressed artifacts to NAS"
-ssh -p "$SSH_PORT" "$SSH_HOST" "mkdir -p '$REMOTE_STAGE'"
-tar -C "$STAGE_DIR" -czf - . |
-  ssh -p "$SSH_PORT" "$SSH_HOST" "tar -xzf - -C '$REMOTE_STAGE'"
+log "Packing artifacts without macOS metadata"
+COPYFILE_DISABLE=1 tar \
+  --exclude='._*' \
+  --exclude='.DS_Store' \
+  -C "$STAGE_DIR" \
+  -czf "$BUNDLE" \
+  .
+mkdir -p "$CHUNK_DIR"
+split -b "$TRANSFER_CHUNK_SIZE" "$BUNDLE" "$CHUNK_DIR/part-"
+
+log "Transferring $(du -h "$BUNDLE" | awk '{print $1}') in $TRANSFER_JOBS parallel streams"
+ssh -p "$SSH_PORT" "$SSH_HOST" "mkdir -p '$REMOTE_STAGE/chunks'"
+upload_pids=()
+for part in "$CHUNK_DIR"/part-*; do
+  scp -q -P "$SSH_PORT" "$part" "$SSH_HOST:$REMOTE_STAGE/chunks/$(basename "$part")" &
+  upload_pids+=("$!")
+  if [ "${#upload_pids[@]}" -ge "$TRANSFER_JOBS" ]; then
+    for pid in "${upload_pids[@]}"; do
+      wait "$pid"
+    done
+    upload_pids=()
+  fi
+done
+for pid in "${upload_pids[@]}"; do
+  wait "$pid"
+done
+ssh -p "$SSH_PORT" "$SSH_HOST" "
+  cat '$REMOTE_STAGE'/chunks/part-* > '$REMOTE_STAGE/bundle.tar.gz'
+  gzip -t '$REMOTE_STAGE/bundle.tar.gz'
+  tar -xzf '$REMOTE_STAGE/bundle.tar.gz' -C '$REMOTE_STAGE'
+  rm -rf '$REMOTE_STAGE/chunks' '$REMOTE_STAGE/bundle.tar.gz'
+"
 
 BACKEND_IMAGE="local/cedar-discipleship-backend:$SHA"
 FRONTEND_IMAGE="local/cedar-discipleship-frontend:$SHA"
