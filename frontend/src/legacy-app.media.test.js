@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildMediaViewerSections } from './legacy-app';
-
-afterEach(() => vi.unstubAllGlobals());
+import { createPinia, setActivePinia } from 'pinia';
+import { api, buildMediaViewerSections, currentWeeklyVideoLinks, openContentTarget } from './legacy-app';
+import { useContentViewerStore } from './stores/contentViewer';
 
 describe('video learning related resources', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
   it('shows only matching readings, handouts, and media', () => {
     vi.stubGlobal('window', { location: { origin: 'https://mouss.synology.me:7399' } });
     const assets = [
@@ -30,5 +32,48 @@ describe('video learning related resources', () => {
       'https://example.com/lesson.mp4',
       '/api/assets/5/download',
     ]);
+  });
+
+  it('keeps configured audio tasks as audio content', () => {
+    const links = currentWeeklyVideoLinks([], { videos: [{ title: '科大门训音频', url: 'https://example.com/lesson.mp3' }] });
+    expect(links[0]).toMatchObject({ title: '科大门训音频', type: 'audio' });
+  });
+
+  it.each(['audio', 'video'])('opens a bound %s asset with its matching player', async (type) => {
+    setActivePinia(createPinia());
+    vi.stubGlobal('window', { location: { origin: 'https://mouss.synology.me:7399' } });
+    vi.stubGlobal('document', { cookie: '' });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ url: '/api/assets/5/stream?signature=test' }),
+    }));
+
+    await openContentTarget({ url: '/api/assets/5/download', type, title: '科大门训音频' });
+    expect(useContentViewerStore().viewer).toMatchObject({
+      type,
+      url: '/api/assets/5/stream?signature=test',
+      sourceURL: '/api/assets/5/download',
+    });
+    expect(fetch).toHaveBeenCalledWith('/api/assets/5/playback', expect.any(Object));
+  });
+});
+
+describe('API error details', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('preserves an existing account for the member conflict flow', async () => {
+    vi.stubGlobal('document', { cookie: '' });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({ error: 'username_exists', existing_user: { id: 7, username: 'member7' } }),
+    }));
+
+    await expect(api('/admin/members', { method: 'POST', body: '{}' })).rejects.toMatchObject({
+      code: 'username_exists',
+      status: 409,
+      payload: { existing_user: { id: 7, username: 'member7' } },
+    });
   });
 });

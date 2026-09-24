@@ -38,6 +38,13 @@ var defaultCatalog = []struct {
 }
 
 func (r *MySQLRepository) EnsureCatalog(ctx context.Context, studyGroupID uint64, at time.Time) error {
+	var autoSeed bool
+	if err := r.db.QueryRowContext(ctx, `SELECT auto_seed_ministry_catalog FROM study_groups WHERE id=?`, studyGroupID).Scan(&autoSeed); err != nil {
+		return fmt.Errorf("checking ministry catalog initialization: %w", err)
+	}
+	if !autoSeed {
+		return nil
+	}
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("beginning ministry catalog initialization: %w", err)

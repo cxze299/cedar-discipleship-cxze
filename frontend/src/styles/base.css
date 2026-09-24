@@ -1,0 +1,307 @@
+/**
+ * 香柏木 (Cedar Discipleship) - 基础样式与排版
+ * 对应 cedar-ui-plan.md
+ */
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--cd-bg);
+  color: var(--cd-text);
+  font-family: var(--cd-font-sans);
+  font-size: var(--cd-font-size-body);
+  line-height: var(--cd-line-height-base);
+  -webkit-font-smoothing: antialiased;
+  letter-spacing: normal;
+  font-synthesis: none;
+}
+
+body::before { content: none; }
+svg { flex-shrink: 0; }
+
+#app,
+.cedar-app-shell {
+  min-height: 100vh;
+  width: 100%;
+}
+
+/* 标题排版 */
+h1, h2, h3, h4, p {
+  margin: 0;
+}
+
+h1 {
+  font-size: var(--cd-font-size-page-title);
+  line-height: var(--cd-line-height-tight);
+  font-weight: var(--cd-font-weight-semibold);
+  letter-spacing: -0.01em;
+}
+
+h2 {
+  font-size: var(--cd-font-size-section-title);
+  line-height: 1.5;
+  font-weight: var(--cd-font-weight-semibold);
+}
+
+h3 {
+  font-size: var(--cd-font-size-card-title);
+  line-height: 1.5;
+  font-weight: var(--cd-font-weight-semibold);
+}
+
+/* 宋体品牌与短标题 */
+.brand-serif {
+  font-family: var(--cd-font-serif);
+  font-weight: 500;
+  letter-spacing: 0.5px;
+}
+
+/* 按钮规范 */
+button {
+  font: inherit;
+  cursor: pointer;
+  color: inherit;
+  min-height: var(--cd-control-h-desktop);
+  border: 1px solid var(--cd-border);
+  background: #ffffff;
+  border-radius: var(--cd-radius-base);
+  padding: var(--cd-space-2) var(--cd-space-4);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--cd-space-2);
+  transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+  user-select: none;
+  text-decoration: none;
+  box-shadow: none;
+  letter-spacing: normal;
+}
+
+button:hover {
+  background: var(--cd-surface-hover);
+  box-shadow: none;
+  transform: none;
+}
+
+button:active { transform: none; }
+button.secondary, button.ghost { box-shadow: none; }
+button.secondary { background: var(--cd-primary-soft); color: var(--cd-primary); }
+button.secondary:hover { background: #dce8df; box-shadow: none; }
+button.ghost { background: transparent; border-color: var(--cd-border); }
+button.ghost:hover { background: var(--cd-surface-subtle); box-shadow: none; }
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: var(--cd-focus-width) solid var(--cd-focus-ring);
+  outline-offset: 2px;
+}
+
+button.primary {
+  background: var(--cd-primary);
+  border-color: var(--cd-primary);
+  color: #ffffff;
+  font-weight: 500;
+}
+
+button.primary:hover {
+  background: var(--cd-primary-hover);
+  border-color: var(--cd-primary-hover);
+}
+
+button.quiet:not(.primary) {
+  border-color: transparent;
+  background: transparent;
+}
+
+button.quiet:not(.primary):hover {
+  background: var(--cd-surface-subtle);
+}
+
+button.taskdone {
+  background: var(--cd-primary-soft);
+  color: var(--cd-primary);
+  border-color: transparent;
+  font-weight: 500;
+}
+
+button.taskdone:hover {
+  background: #dce7df;
+}
+
+button.danger {
+  border-color: var(--cd-danger);
+  color: var(--cd-danger);
+  background: #ffffff;
+}
+
+button.danger:hover {
+  background: #fdf2f2;
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* 输入控件规范 */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+select,
+textarea {
+  font: inherit;
+  color: var(--cd-text);
+  border: 1px solid var(--cd-border);
+  border-radius: var(--cd-radius-base);
+  padding: var(--cd-space-2) var(--cd-space-3);
+  background: #ffffff;
+  min-height: var(--cd-control-h-desktop);
+  box-sizing: border-box;
+}
+
+input[type="checkbox"], input[type="radio"] {
+  appearance: auto;
+  width: 18px;
+  height: 18px;
+  min-height: 0;
+  flex: 0 0 18px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--cd-primary);
+  box-shadow: none;
+}
+input[type="range"] { min-height: 24px; padding: 0; accent-color: var(--cd-primary); }
+input:focus, select:focus, textarea:focus { border-color: var(--cd-primary); box-shadow: none; }
+
+/* Existing business cards keep their layout and share the same material. */
+.card, .bar-chart-card, .task-progress-card, .member-check-card {
+  border-color: var(--cd-border);
+  border-radius: var(--cd-radius-card);
+  background: var(--cd-surface);
+  box-shadow: none;
+  backdrop-filter: none;
+}
+.card::before { content: none; }
+.card:hover, .member-check-card:hover, .task-progress-card:hover {
+  transform: none;
+  box-shadow: none;
+}
+.card h2, .card h3 { letter-spacing: normal; }
+
+@media (max-width: 767px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea { font-size: 16px; }
+  .card, .panel { padding: var(--cd-space-4); }
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--cd-muted);
+}
+
+/* 常用排版与组件类 */
+.muted {
+  color: var(--cd-muted);
+}
+
+.small {
+  font-size: var(--cd-font-size-caption);
+  line-height: 1.5;
+}
+
+.eyebrow {
+  font-size: 11px;
+  letter-spacing: 1.5px;
+  color: var(--cd-muted);
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.pill {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: var(--cd-radius-pill);
+  background: var(--cd-primary-soft);
+  color: var(--cd-primary);
+  white-space: nowrap;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pill.danger {
+  background: #fde8e7;
+  color: var(--cd-danger);
+}
+
+.pill.warning {
+  background: #fef5e7;
+  color: var(--cd-warning);
+}
+
+.spread {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--cd-space-4);
+}
+
+.inline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.panel {
+  background: var(--cd-surface);
+  border: 1px solid var(--cd-border);
+  border-radius: var(--cd-radius-card);
+  padding: var(--cd-space-6);
+}
+
+/* 分类磁贴规格 */
+.tile {
+  width: 42px;
+  height: 46px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  background: #eef1e9;
+  color: var(--cd-primary);
+  flex-shrink: 0;
+}
+
+.tile.blue {
+  background: #ebf0f5;
+  color: #376e94;
+}
+
+.tile.gold {
+  background: #f5efe2;
+  color: #8d692d;
+}
+
+.tile.purple {
+  background: #f0edf5;
+  color: #796091;
+}
+
+/* 数字等宽 tabular-nums */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 动效与减弱偏好 */
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
