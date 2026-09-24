@@ -69,8 +69,8 @@ func (a *app) handleAssetPlayback(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "asset_not_found")
 		return
 	}
-	if !isVideoAsset(file) {
-		writeError(w, http.StatusBadRequest, "asset_not_video")
+	if !isStreamableAsset(file) {
+		writeError(w, http.StatusBadRequest, "asset_not_media")
 		return
 	}
 	expiresAt := time.Now().Add(assetPlaybackTTL).Unix()
@@ -115,7 +115,7 @@ func (a *app) handleStreamAsset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	file, err := a.assets.DownloadFile(r.Context(), groupID, id)
-	if err != nil || !isVideoAsset(file) {
+	if err != nil || !isStreamableAsset(file) {
 		writeError(w, http.StatusNotFound, "asset_not_found")
 		return
 	}
@@ -172,15 +172,16 @@ func (a *app) verifyAssetPlaybackSource(assetID, groupID uint64, expiresAt int64
 	return err == nil && hmac.Equal(expected, got)
 }
 
-func isVideoAsset(file *assetdomain.DownloadFile) bool {
+func isStreamableAsset(file *assetdomain.DownloadFile) bool {
 	if file == nil {
 		return false
 	}
-	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(file.MimeType)), "video/") {
+	mimeType := strings.ToLower(strings.TrimSpace(file.MimeType))
+	if strings.HasPrefix(mimeType, "video/") || strings.HasPrefix(mimeType, "audio/") {
 		return true
 	}
 	switch strings.ToLower(filepath.Ext(file.OriginalName)) {
-	case ".mp4", ".m4v", ".mov", ".webm":
+	case ".mp4", ".m4v", ".mov", ".webm", ".mp3", ".m4a", ".aac", ".ogg", ".opus", ".wav", ".flac", ".weba":
 		return true
 	default:
 		return false

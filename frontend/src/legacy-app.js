@@ -1054,7 +1054,7 @@ export async function openContentTarget(target) {
     render();
     return;
   }
-  const videoAssetMatch = type === 'video'
+  const videoAssetMatch = isMediaResourceType(type)
     ? String(sourceAPIPath || '').match(/^\/api\/assets\/(\d+)\/download$/)
     : null;
   if (videoAssetMatch) {
@@ -1192,7 +1192,7 @@ export async function openViewerItemInNewWindow(item, popup = null) {
     const sourceURL = resolveContentSourceURL(item);
     const sourceAPIPath = sameOriginAPIPath(sourceURL, window.location.origin);
     const type = String(item.type || inferResourceType(item.url)).toLowerCase();
-    const videoAssetMatch = type === 'video'
+    const videoAssetMatch = isMediaResourceType(type)
       ? String(sourceAPIPath || '').match(/^\/api\/assets\/(\d+)\/download$/)
       : null;
     if (videoAssetMatch) {
