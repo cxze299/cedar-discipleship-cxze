@@ -1621,7 +1621,7 @@ function bookTaskForReading(bookTasks, reading, index) {
   return bookTasks[index] || null;
 }
 
-function currentWeeklyVideoLinks(videoTasks, configPlan = null) {
+export function currentWeeklyVideoLinks(videoTasks, configPlan = null) {
   const taskList = Array.isArray(videoTasks) ? videoTasks.filter(Boolean) : (videoTasks ? [videoTasks] : []);
   const assetLinks = taskList
     .map((task) => firstTaskAssetLink(task, task?.title || '本周视频'))
@@ -1630,7 +1630,7 @@ function currentWeeklyVideoLinks(videoTasks, configPlan = null) {
     label: item.title || '视频内容',
     title: item.title || '本周视频',
     url: item.url,
-    type: 'video',
+    type: inferResourceType(item.url, 'video'),
   })).filter((item) => isPlayableContentURL(item.url));
   const directTaskLinks = taskList
     .map((task) => {

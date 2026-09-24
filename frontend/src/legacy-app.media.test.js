@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { api, buildMediaViewerSections } from './legacy-app';
+import { api, buildMediaViewerSections, currentWeeklyVideoLinks } from './legacy-app';
 
 describe('video learning related resources', () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -30,6 +30,11 @@ describe('video learning related resources', () => {
       'https://example.com/lesson.mp4',
       '/api/assets/5/download',
     ]);
+  });
+
+  it('keeps configured audio tasks as audio content', () => {
+    const links = currentWeeklyVideoLinks([], { videos: [{ title: '科大门训音频', url: 'https://example.com/lesson.mp3' }] });
+    expect(links[0]).toMatchObject({ title: '科大门训音频', type: 'audio' });
   });
 });
 
