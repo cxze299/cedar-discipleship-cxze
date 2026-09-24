@@ -248,6 +248,13 @@ func botTaskLabel(taskType string, values ...string) string {
 			}
 		}
 		return "每日读经"
+	case "weekly_checkin":
+		for _, value := range values {
+			if label := strings.TrimSpace(value); label != "" {
+				return label
+			}
+		}
+		return "周任务"
 	case "weekly_book":
 		return "周读物"
 	case "weekly_video":
@@ -274,6 +281,10 @@ func botTaskType(value string) string {
 	switch strings.TrimSpace(value) {
 	case "每日灵修", "灵修", "daily_devotion":
 		return "daily_devotion"
+	case "每日读经", "读经", "daily_scripture":
+		return "daily_scripture"
+	case "周任务", "每周打卡", "weekly_checkin":
+		return "weekly_checkin"
 	case "周读物", "读物", "weekly_book":
 		return "weekly_book"
 	case "周视频", "视频", "weekly_video":
@@ -366,7 +377,7 @@ func (a *app) handleBotCreateCheckin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	record := &checkindomain.Record{GroupID: group.ID, UserID: userID, LogicalDate: req.LogicalDate, TaskType: taskType, Detail: strings.TrimSpace(req.Detail), IsRetro: req.IsRetro}
-	if taskType != "daily_devotion" {
+	if taskType != "daily_devotion" && taskType != "daily_scripture" {
 		weeks, loadErr := a.learning.ListWeeks(r.Context(), group.ID)
 		if loadErr != nil {
 			writeError(w, http.StatusInternalServerError, "bot_week_failed")
