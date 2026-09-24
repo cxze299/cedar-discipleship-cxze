@@ -25,6 +25,8 @@ docs/
 
 # Logs and local OS noise
 .playwright-cli/
+__pycache__/
+*.pyc
 log/
 logs/*
 *.log
