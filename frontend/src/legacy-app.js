@@ -1373,14 +1373,21 @@ function currentTaskOptions() {
   }
   if (shouldRenderWeeklyTask(week.video_enabled, videoTasks)) {
     const weeklyMediaType = videoLinks[0]?.type === 'audio' ? 'audio' : 'video';
+    const generatedWeekTitle = [
+      ...(enabledFlag(week.book_enabled) ? bookTasks.map((item) => item.title) : []),
+      enabledFlag(week.video_enabled) ? videoTasks[0]?.title : '',
+      enabledFlag(week.verse_enabled) ? week.verse_ref : '',
+    ].filter(Boolean).join('；');
+    const customWeekTitle = week.title && week.title !== generatedWeekTitle && week.title !== '周任务'
+      ? week.title : '';
     tasks.push({
       type: 'weekly_video',
       taskID: Number(videoTasks[0]?.id || 0),
       weekID: Number(week.id || 0),
-      title: videoLinks[0]?.title || videoTasks[0]?.title || (weeklyMediaType === 'audio' ? '本周音频' : '本周视频'),
+      title: customWeekTitle || videoLinks[0]?.title || videoTasks[0]?.title || (weeklyMediaType === 'audio' ? '本周音频' : '本周视频'),
       icon: weeklyMediaType === 'audio' ? '音频' : '视频',
       part: '',
-      detail: videoLinks[0]?.title || videoTasks[0]?.title || (weeklyMediaType === 'audio' ? '本周音频' : '本周视频'),
+      detail: customWeekTitle || videoLinks[0]?.title || videoTasks[0]?.title || (weeklyMediaType === 'audio' ? '本周音频' : '本周视频'),
       summary: weeklyMediaType === 'audio' ? '必听音频' : '必看视频',
       contentURL: videoLinks[0]?.url || '',
       contentLinks: videoLinks,

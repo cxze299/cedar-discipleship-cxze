@@ -124,7 +124,7 @@ function taskTypeLabel(task) {
     case 'daily_scripture': return '每日读经';
     case 'weekly_checkin': return '本周任务';
     case 'weekly_book': return '本周书籍';
-    case 'weekly_video': return '本周音视频';
+    case 'weekly_video': return '本周任务';
     case 'weekly_outline': return '背诵大纲';
     default: return '学习任务';
   }
