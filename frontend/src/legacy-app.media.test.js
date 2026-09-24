@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { api, buildMediaViewerSections } from './legacy-app';
 
-afterEach(() => vi.unstubAllGlobals());
-
 describe('video learning related resources', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
   it('shows only matching readings, handouts, and media', () => {
     vi.stubGlobal('window', { location: { origin: 'https://mouss.synology.me:7399' } });
     const assets = [
@@ -34,6 +34,8 @@ describe('video learning related resources', () => {
 });
 
 describe('API error details', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
   it('preserves an existing account for the member conflict flow', async () => {
     vi.stubGlobal('document', { cookie: '' });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
