@@ -22,6 +22,8 @@ type Target struct {
 
 var tokenPattern = regexp.MustCompile(`^[0-9]+:[A-Za-z0-9_-]+$`)
 
+const potatoReadAttempts = 3
+
 func ParseTargets(token, value string) (map[uint64]Target, error) {
 	value = strings.TrimSpace(value)
 	if token == "" && value == "" {
@@ -112,21 +114,27 @@ func newPotatoClientWithToken(token string) (*PotatoClient, error) {
 }
 
 func (c *PotatoClient) Identity(ctx context.Context) (RobotIdentity, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.identityEndpoint, nil)
-	if err != nil {
-		return RobotIdentity{}, errors.New("create robot identity request")
-	}
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return RobotIdentity{}, errors.New("request robot identity")
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return RobotIdentity{}, fmt.Errorf("robot identity http_%d", resp.StatusCode)
-	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024+1))
-	if err != nil || len(data) > 64*1024 {
-		return RobotIdentity{}, errors.New("read robot identity response")
+	var data []byte
+	for attempt := 0; attempt < potatoReadAttempts; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.identityEndpoint, nil)
+		if err != nil {
+			return RobotIdentity{}, errors.New("create robot identity request")
+		}
+		resp, err := c.client.Do(req)
+		if err != nil {
+			return RobotIdentity{}, errors.New("request robot identity")
+		}
+		data, err = io.ReadAll(io.LimitReader(resp.Body, 64*1024+1))
+		resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return RobotIdentity{}, fmt.Errorf("robot identity http_%d", resp.StatusCode)
+		}
+		if err != nil || len(data) > 64*1024 {
+			return RobotIdentity{}, errors.New("read robot identity response")
+		}
+		if len(data) > 0 {
+			break
+		}
 	}
 	var result struct {
 		OK     bool          `json:"ok"`
@@ -142,21 +150,27 @@ func (c *PotatoClient) Identity(ctx context.Context) (RobotIdentity, error) {
 }
 
 func (c *PotatoClient) ListChats(ctx context.Context) ([]Chat, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.groupsEndpoint, nil)
-	if err != nil {
-		return nil, errors.New("create group list request")
-	}
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return nil, errors.New("request group list")
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("group list http_%d", resp.StatusCode)
-	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024+1))
-	if err != nil || len(data) > 64*1024 {
-		return nil, errors.New("read group list response")
+	var data []byte
+	for attempt := 0; attempt < potatoReadAttempts; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.groupsEndpoint, nil)
+		if err != nil {
+			return nil, errors.New("create group list request")
+		}
+		resp, err := c.client.Do(req)
+		if err != nil {
+			return nil, errors.New("request group list")
+		}
+		data, err = io.ReadAll(io.LimitReader(resp.Body, 64*1024+1))
+		resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return nil, fmt.Errorf("group list http_%d", resp.StatusCode)
+		}
+		if err != nil || len(data) > 64*1024 {
+			return nil, errors.New("read group list response")
+		}
+		if len(data) > 0 {
+			break
+		}
 	}
 	type group struct {
 		PeerID   int64  `json:"PeerID"`
