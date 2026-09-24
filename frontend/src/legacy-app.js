@@ -1060,7 +1060,7 @@ export async function openContentTarget(target) {
   if (videoAssetMatch) {
     closeViewer();
     const pendingViewer = {
-      type: 'video',
+      type,
       title,
       url: '',
       fallbackURL: '',

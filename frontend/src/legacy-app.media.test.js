@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { api, buildMediaViewerSections, currentWeeklyVideoLinks } from './legacy-app';
+import { createPinia, setActivePinia } from 'pinia';
+import { api, buildMediaViewerSections, currentWeeklyVideoLinks, openContentTarget } from './legacy-app';
+import { useContentViewerStore } from './stores/contentViewer';
 
 describe('video learning related resources', () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -35,6 +37,25 @@ describe('video learning related resources', () => {
   it('keeps configured audio tasks as audio content', () => {
     const links = currentWeeklyVideoLinks([], { videos: [{ title: '科大门训音频', url: 'https://example.com/lesson.mp3' }] });
     expect(links[0]).toMatchObject({ title: '科大门训音频', type: 'audio' });
+  });
+
+  it.each(['audio', 'video'])('opens a bound %s asset with its matching player', async (type) => {
+    setActivePinia(createPinia());
+    vi.stubGlobal('window', { location: { origin: 'https://mouss.synology.me:7399' } });
+    vi.stubGlobal('document', { cookie: '' });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ url: '/api/assets/5/stream?signature=test' }),
+    }));
+
+    await openContentTarget({ url: '/api/assets/5/download', type, title: '科大门训音频' });
+    expect(useContentViewerStore().viewer).toMatchObject({
+      type,
+      url: '/api/assets/5/stream?signature=test',
+      sourceURL: '/api/assets/5/download',
+    });
+    expect(fetch).toHaveBeenCalledWith('/api/assets/5/playback', expect.any(Object));
   });
 });
 
