@@ -65,6 +65,7 @@ type app struct {
 	botManager interface {
 		Robots(context.Context) []notificationdomain.RobotStatus
 		Register(context.Context, notificationdomain.RobotRegistration) (notificationdomain.RobotStatus, error)
+		Remove(string) error
 		Assign(context.Context, string, notificationdomain.Target, uint64, time.Time) error
 		BindingGroupID(string, int64) uint64
 	}
@@ -416,6 +417,7 @@ func (a *app) routes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/super-admin/groups/{id}/leaders/{user_id}", a.auth(a.requireSuper(a.handleSuperUnsetLeader)))
 	mux.HandleFunc("GET /api/super-admin/bot-management", a.auth(a.requireSuper(a.handleBotManagement)))
 	mux.HandleFunc("POST /api/super-admin/bot-robots", a.auth(a.requireSuper(a.handleBotRobot)))
+	mux.HandleFunc("DELETE /api/super-admin/bot-robots/{id}", a.auth(a.requireSuper(a.handleBotRobotDelete)))
 	mux.HandleFunc("PUT /api/super-admin/bot-bindings", a.auth(a.requireSuper(a.handleBotBinding)))
 }
 
