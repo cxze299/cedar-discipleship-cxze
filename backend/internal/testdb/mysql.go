@@ -1,0 +1,73 @@
+//go:build integration
+
+package testdb
+
+import (
+	"database/sql"
+	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+	"time"
+
+	_ "github.com/go-sql-driver/mysql"
+)
+
+// Open creates a disposable database on the explicitly configured local test server.
+func Open(t *testing.T) *sql.DB {
+	t.Helper()
+	addr := os.Getenv("CEDAR_TEST_MYSQL_ADDR")
+	if addr == "" {
+		t.Skip("set CEDAR_TEST_MYSQL_ADDR to an isolated local MySQL server")
+	}
+	if !strings.HasPrefix(addr, "127.0.0.1:") {
+		t.Fatal("integration database must be local")
+	}
+	admin, err := sql.Open("mysql", "root@tcp("+addr+")/?parseTime=true&multiStatements=true")
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := fmt.Sprintf("cedar_test_%d", time.Now().UnixNano())
+	if _, err := admin.Exec("CREATE DATABASE " + name); err != nil {
+		admin.Close()
+		t.Fatal(err)
+	}
+	db, err := sql.Open("mysql", "root@tcp("+addr+")/"+name+"?parseTime=true&multiStatements=true")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Error(err)
+		}
+		if _, err := admin.Exec("DROP DATABASE " + name); err != nil {
+			t.Error(err)
+		}
+		if err := admin.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	for _, migration := range []string{"001_init.sql", "002_checkin_partitions.sql", "007_resource_sharing.sql"} {
+		Apply(t, db, migration)
+	}
+	return db
+}
+
+func Apply(t *testing.T, db *sql.DB, migration string) {
+	t.Helper()
+	_, source, _, _ := runtime.Caller(0)
+	data, err := os.ReadFile(filepath.Join(filepath.Dir(source), "../../migrations", migration))
+	if err != nil {
+		t.Fatal(err)
+	}
+	Exec(t, db, string(data))
+}
+
+func Exec(t *testing.T, db *sql.DB, query string, args ...any) {
+	t.Helper()
+	if _, err := db.Exec(query, args...); err != nil {
+		t.Fatal(err)
+	}
+}

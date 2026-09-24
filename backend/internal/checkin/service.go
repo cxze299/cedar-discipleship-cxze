@@ -52,10 +52,17 @@ func (s *Service) Create(ctx context.Context, record *Record, actorID uint64) (u
 		}
 	}
 	id, err := s.repo.Create(ctx, record, actorID)
-	if err != nil && (record.TaskType == "daily_devotion" || record.TaskType == "daily_scripture") {
+	if err != nil {
 		var mysqlErr *mysql.MySQLError
 		if errors.As(err, &mysqlErr) && mysqlErr.Number == 1062 {
-			existingID, findErr := s.repo.FindExistingDaily(ctx, record.GroupID, record.UserID, record.TaskType, record.LogicalDate)
+			var existingID uint64
+			findErr := sql.ErrNoRows
+			switch record.TaskType {
+			case "daily_devotion", "daily_scripture":
+				existingID, findErr = s.repo.FindExistingDaily(ctx, record.GroupID, record.UserID, record.TaskType, record.LogicalDate)
+			case "weekly_video":
+				existingID, findErr = s.repo.FindExistingWeeklyTask(ctx, record.GroupID, record.UserID, record.TaskID, record.WeekID, record.TaskType)
+			}
 			if findErr == nil {
 				return existingID, true, nil
 			}

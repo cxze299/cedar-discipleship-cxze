@@ -27,18 +27,6 @@ func TestMapBackupTaskIDsHandlesDuplicateTitles(t *testing.T) {
 	}
 }
 
-func TestBackupResourceKeyFromStoragePath(t *testing.T) {
-	t.Parallel()
-
-	got := backupResourceKeyFromStoragePath("team-agape-a-resources/objects/A2DB2A2E5D31A9EDC6215E79F9B499DE/newtestament.md")
-	if got != "a2db2a2e5d31a9edc6215e79f9b499de" {
-		t.Fatalf("backupResourceKeyFromStoragePath() = %q, want normalized resource key", got)
-	}
-	if invalid := backupResourceKeyFromStoragePath("legacy/newtestament.md"); invalid != "" {
-		t.Fatalf("backupResourceKeyFromStoragePath() = %q, want empty for legacy path", invalid)
-	}
-}
-
 func TestBackupTaskAssetRefsUsesReadingMetadata(t *testing.T) {
 	t.Parallel()
 

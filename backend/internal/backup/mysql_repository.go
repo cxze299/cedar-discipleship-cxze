@@ -2,9 +2,7 @@ package backup
 
 import (
 	"context"
-	"crypto/rand"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +14,7 @@ import (
 	"time"
 	"unicode"
 
+	"agp/backend/internal/asset"
 	"agp/backend/internal/learning"
 )
 
@@ -24,9 +23,6 @@ const (
 	roleGroupLeader = "group_leader"
 
 	resourceStoragePattern = "team-%-resources/objects/%"
-	assetKindOwned         = "owned"
-	sharePermissionImport  = "import"
-	shareStatusActive      = "active"
 )
 
 type MySQLRepository struct {
@@ -130,6 +126,10 @@ func (r *MySQLRepository) GroupInfo(ctx context.Context, groupID uint64) (*Group
 }
 
 func (r *MySQLRepository) BackupMembers(ctx context.Context, groupID uint64) ([]Member, error) {
+	roleMap, err := r.memberRoleMap(ctx, groupID)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := r.db.QueryContext(ctx, `SELECT u.username,u.display_name,u.name_pinyin
 		FROM group_members m JOIN users u ON u.id=m.user_id
 		WHERE m.group_id=? AND m.status=1
@@ -138,10 +138,6 @@ func (r *MySQLRepository) BackupMembers(ctx context.Context, groupID uint64) ([]
 		return nil, err
 	}
 	defer rows.Close()
-	roleMap, err := r.memberRoleMap(ctx, groupID)
-	if err != nil {
-		return nil, err
-	}
 	var items []Member
 	for rows.Next() {
 		var item Member
@@ -587,71 +583,31 @@ func (r *MySQLRepository) importBackupAssetsTx(
 	now time.Time,
 ) (map[uint64]uint64, error) {
 	assetIDs := make(map[uint64]uint64, len(assets))
+	resources := asset.NewMySQLRepository(r.db)
 	for _, item := range assets {
 		storagePath := strings.TrimSpace(item.StoragePath)
 		if storagePath == "" {
 			continue
 		}
 		title := canonicalBackupAssetTitle(item.Category, item.Title, item.OriginalName)
-		var id uint64
-		err := tx.QueryRowContext(ctx, `
-			SELECT id
-			FROM assets
-			WHERE group_id=? AND storage_path=?
-			ORDER BY id
-			LIMIT 1`,
-			groupID,
-			storagePath,
-		).Scan(&id)
-		if errors.Is(err, sql.ErrNoRows) {
-			res, insertErr := tx.ExecContext(ctx, `
-				INSERT INTO assets
-				(group_id,category,title,original_name,storage_path,mime_type,
-				 file_size,visibility,created_by,created_at,updated_at)
-				VALUES (?,?,?,?,?,?,?,'group',?,?,?)`,
-				groupID,
-				item.Category,
-				title,
-				item.OriginalName,
-				storagePath,
-				item.MimeType,
-				item.FileSize,
-				actorID,
-				now,
-				now,
-			)
-			if insertErr != nil {
-				return nil, insertErr
-			}
-			newID, insertErr := res.LastInsertId()
-			if insertErr != nil {
-				return nil, insertErr
-			}
-			if newID <= 0 {
-				return nil, errors.New("invalid_insert_id")
-			}
-			id = uint64(newID)
-		} else if err != nil {
-			return nil, err
-		} else {
-			if _, err := tx.ExecContext(ctx, `
+		id, err := resources.RestoreReferenceTx(ctx, tx, groupID, actorID, storagePath, now)
+		if err != nil {
+			return nil, fmt.Errorf("restore backup asset %d: %w", item.ID, err)
+		}
+		if _, err := tx.ExecContext(ctx, `
 				UPDATE assets
 				SET category=?,title=?,original_name=?,mime_type=?,
 				    file_size=?,updated_at=?
 				WHERE id=? AND group_id=?`,
-				item.Category,
-				title,
-				item.OriginalName,
-				item.MimeType,
-				item.FileSize,
-				now,
-				id,
-				groupID,
-			); err != nil {
-				return nil, err
-			}
-		}
-		if err := ensureBackupAssetBindingTx(ctx, tx, groupID, actorID, id, storagePath, now); err != nil {
+			item.Category,
+			title,
+			item.OriginalName,
+			item.MimeType,
+			item.FileSize,
+			now,
+			id,
+			groupID,
+		); err != nil {
 			return nil, err
 		}
 		if item.ID > 0 {
@@ -659,103 +615,6 @@ func (r *MySQLRepository) importBackupAssetsTx(
 		}
 	}
 	return assetIDs, nil
-}
-
-func ensureBackupAssetBindingTx(
-	ctx context.Context,
-	tx *sql.Tx,
-	groupID, actorID, assetID uint64,
-	storagePath string,
-	now time.Time,
-) error {
-	resourceKey := backupResourceKeyFromStoragePath(storagePath)
-	if resourceKey != "" {
-		ownerID, exists, err := backupResourceKeyOwnerTx(ctx, tx, resourceKey)
-		if err != nil {
-			return err
-		}
-		if exists && ownerID != assetID {
-			resourceKey = ""
-		}
-	}
-	if resourceKey == "" {
-		var err error
-		resourceKey, err = randomUnusedBackupResourceKeyTx(ctx, tx)
-		if err != nil {
-			return err
-		}
-	}
-
-	if _, err := tx.ExecContext(ctx, `INSERT INTO asset_bindings
-		(asset_id,group_id,resource_key,asset_kind,source_asset_id,imported_at,deleted_at,created_at,updated_at)
-		VALUES (?,?,?,?,NULL,NULL,NULL,?,?)
-		ON DUPLICATE KEY UPDATE group_id=VALUES(group_id),resource_key=VALUES(resource_key),asset_kind=VALUES(asset_kind),
-			source_asset_id=NULL,imported_at=NULL,deleted_at=NULL,updated_at=VALUES(updated_at)`,
-		assetID, groupID, resourceKey, assetKindOwned, now, now); err != nil {
-		return err
-	}
-	_, err := tx.ExecContext(ctx, `INSERT INTO asset_share_grants
-		(asset_id,owner_group_id,consumer_group_id,permission,status,created_by,created_at,revoked_by,revoked_at)
-		VALUES (?,?,NULL,?,?,?,?,NULL,NULL)
-		ON DUPLICATE KEY UPDATE status=VALUES(status),created_by=VALUES(created_by),created_at=VALUES(created_at),
-			revoked_by=NULL,revoked_at=NULL`,
-		assetID, groupID, sharePermissionImport, shareStatusActive, firstNonZero(actorID, 1), now)
-	return err
-}
-
-func backupResourceKeyOwnerTx(ctx context.Context, tx *sql.Tx, resourceKey string) (uint64, bool, error) {
-	var assetID uint64
-	err := tx.QueryRowContext(ctx, `SELECT asset_id FROM asset_bindings WHERE resource_key=? LIMIT 1`, resourceKey).Scan(&assetID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return 0, false, nil
-	}
-	if err != nil {
-		return 0, false, err
-	}
-	return assetID, true, nil
-}
-
-func randomUnusedBackupResourceKeyTx(ctx context.Context, tx *sql.Tx) (string, error) {
-	for attempt := 0; attempt < 16; attempt++ {
-		resourceKey, err := randomBackupResourceKey()
-		if err != nil {
-			return "", err
-		}
-		if _, exists, err := backupResourceKeyOwnerTx(ctx, tx, resourceKey); err != nil {
-			return "", err
-		} else if !exists {
-			return resourceKey, nil
-		}
-	}
-	return "", errors.New("generate_unique_resource_key_failed")
-}
-
-func randomBackupResourceKey() (string, error) {
-	var value [16]byte
-	if _, err := rand.Read(value[:]); err != nil {
-		return "", fmt.Errorf("generate resource key: %w", err)
-	}
-	return hex.EncodeToString(value[:]), nil
-}
-
-func backupResourceKeyFromStoragePath(storagePath string) string {
-	parts := strings.Split(strings.Trim(strings.ReplaceAll(storagePath, "\\", "/"), "/"), "/")
-	if len(parts) < 4 || strings.ToLower(parts[1]) != "objects" || !isBackupResourceKey(parts[2]) {
-		return ""
-	}
-	return strings.ToLower(parts[2])
-}
-
-func isBackupResourceKey(value string) bool {
-	if len(value) != 32 {
-		return false
-	}
-	for _, r := range value {
-		if !('0' <= r && r <= '9') && !('a' <= r && r <= 'f') && !('A' <= r && r <= 'F') {
-			return false
-		}
-	}
-	return true
 }
 
 func (r *MySQLRepository) remapWeekAssetsTx(
@@ -992,15 +851,6 @@ func maxInt(left, right int) int {
 		return left
 	}
 	return right
-}
-
-func firstNonZero(values ...uint64) uint64 {
-	for _, value := range values {
-		if value > 0 {
-			return value
-		}
-	}
-	return 0
 }
 
 func (r *MySQLRepository) memberRoleMap(ctx context.Context, groupID uint64) (map[string][]string, error) {

@@ -308,14 +308,39 @@ func (r *MySQLRepository) ListMembers(ctx context.Context, groupID uint64) ([]Me
 		if err := rows.Scan(&member.MemberID, &member.UserID, &member.Username, &member.DisplayName, &member.MemberName, &member.IsSuperAdmin); err != nil {
 			return nil, err
 		}
-		roles, err := r.ListRoles(ctx, member.UserID, groupID)
-		if err != nil {
-			return nil, err
-		}
-		member.Roles = roles
 		members = append(members, member)
 	}
-	return members, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if len(members) == 0 {
+		return members, nil
+	}
+	roleRows, err := r.db.QueryContext(ctx,
+		`SELECT user_id,role FROM user_group_roles WHERE group_id=? ORDER BY user_id,role`, groupID)
+	if err != nil {
+		return nil, err
+	}
+	defer roleRows.Close()
+	roles := make(map[uint64][]string)
+	for roleRows.Next() {
+		var userID uint64
+		var role string
+		if err := roleRows.Scan(&userID, &role); err != nil {
+			return nil, err
+		}
+		roles[userID] = append(roles[userID], role)
+	}
+	if err := roleRows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range members {
+		members[i].Roles = append(roles[members[i].UserID], RoleMember)
+	}
+	return members, nil
 }
 
 func (r *MySQLRepository) CreateMember(ctx context.Context, groupID, actorID uint64, input CreateMemberInput) (uint64, error) {
@@ -411,7 +436,7 @@ func (r *MySQLRepository) SetGroupDefaultPassword(ctx context.Context, groupID u
 		return 0, err
 	}
 	res, err := tx.ExecContext(ctx, `UPDATE users u
-		JOIN group_members m ON m.user_id=u.id AND m.group_id=?
+		JOIN group_members m ON m.user_id=u.id AND m.group_id=? AND m.status=1
 		LEFT JOIN user_group_roles r ON r.user_id=u.id AND r.group_id=? AND r.role=?
 		SET u.password_hash=?, u.must_change_password=1, u.updated_at=?
 		WHERE u.is_super_admin=0

@@ -274,6 +274,10 @@ func botTaskType(value string) string {
 	switch strings.TrimSpace(value) {
 	case "每日灵修", "灵修", "daily_devotion":
 		return "daily_devotion"
+	case "每日读经", "读经", "daily_scripture":
+		return "daily_scripture"
+	case "每周学习", "周学习", "weekly_checkin":
+		return "weekly_checkin"
 	case "周读物", "读物", "weekly_book":
 		return "weekly_book"
 	case "周视频", "视频", "weekly_video":
@@ -366,7 +370,7 @@ func (a *app) handleBotCreateCheckin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	record := &checkindomain.Record{GroupID: group.ID, UserID: userID, LogicalDate: req.LogicalDate, TaskType: taskType, Detail: strings.TrimSpace(req.Detail), IsRetro: req.IsRetro}
-	if taskType != "daily_devotion" {
+	if taskType != "daily_devotion" && taskType != "daily_scripture" {
 		weeks, loadErr := a.learning.ListWeeks(r.Context(), group.ID)
 		if loadErr != nil {
 			writeError(w, http.StatusInternalServerError, "bot_week_failed")
@@ -402,7 +406,16 @@ func (a *app) handleBotCreateCheckin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	id, existing, err := a.checkins.Create(r.Context(), record, userID)
+	id, existing, err := a.createAdmittedCheckin(r.Context(), record, userID)
+	if errors.Is(err, errDailyTaskDisabled) {
+		writeError(w, http.StatusBadRequest, "daily_task_disabled")
+		return
+	}
+	if errors.Is(err, errCheckinConfig) {
+		slog.ErrorContext(r.Context(), "bot checkin learning config lookup failed", "group_id", group.ID, "error", err)
+		writeError(w, http.StatusInternalServerError, "checkin_save_failed")
+		return
+	}
 	if errors.Is(err, checkindomain.ErrInvalidWeeklyTarget) {
 		writeError(w, http.StatusBadRequest, "invalid_checkin_target")
 		return

@@ -1,7 +1,9 @@
 package server
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -11,6 +13,31 @@ import (
 	learningdomain "agp/backend/internal/learning"
 	notificationdomain "agp/backend/internal/notification"
 )
+
+var (
+	errDailyTaskDisabled = errors.New("daily_task_disabled")
+	errCheckinConfig     = errors.New("checkin_config_lookup_failed")
+)
+
+func (a *app) createAdmittedCheckin(
+	ctx context.Context,
+	record *checkindomain.Record,
+	actorID uint64,
+) (uint64, bool, error) {
+	if record.TaskType == "daily_devotion" || record.TaskType == "daily_scripture" {
+		settings, err := a.groupLearningConfig(ctx, record.GroupID)
+		if err != nil {
+			return 0, false, fmt.Errorf("%w: %w", errCheckinConfig, err)
+		}
+		if !learningdomain.DailyTaskTypeEnabledOnDate(settings, record.TaskType, record.LogicalDate) {
+			return 0, false, errDailyTaskDisabled
+		}
+		record.Part = ""
+		record.TaskID = 0
+		record.WeekID = 0
+	}
+	return a.checkins.Create(ctx, record, actorID)
+}
 
 func (a *app) handleCreateCheckin(w http.ResponseWriter, r *http.Request) {
 	u := mustUser(r)
@@ -53,22 +80,7 @@ func (a *app) handleCreateCheckin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "future_checkin_not_allowed")
 		return
 	}
-	if req.TaskType == "daily_devotion" || req.TaskType == "daily_scripture" {
-		settings, err := a.groupLearningConfig(r.Context(), groupID)
-		if err != nil {
-			slog.ErrorContext(r.Context(), "checkin learning config lookup failed", "group_id", groupID, "error", err)
-			writeError(w, http.StatusInternalServerError, "checkin_save_failed")
-			return
-		}
-		if !learningdomain.DailyTaskTypeEnabledOnDate(settings, req.TaskType, req.LogicalDate) {
-			writeError(w, http.StatusBadRequest, "daily_task_disabled")
-			return
-		}
-		req.Part = ""
-		req.TaskID = 0
-		req.WeekID = 0
-	}
-	id, existing, err := a.checkins.Create(r.Context(), &checkindomain.Record{
+	record := &checkindomain.Record{
 		GroupID:     groupID,
 		UserID:      u.ID,
 		TaskID:      req.TaskID,
@@ -79,7 +91,17 @@ func (a *app) handleCreateCheckin(w http.ResponseWriter, r *http.Request) {
 		Detail:      req.Detail,
 		Note:        req.Note,
 		IsRetro:     req.IsRetro,
-	}, u.ID)
+	}
+	id, existing, err := a.createAdmittedCheckin(r.Context(), record, u.ID)
+	if errors.Is(err, errDailyTaskDisabled) {
+		writeError(w, http.StatusBadRequest, "daily_task_disabled")
+		return
+	}
+	if errors.Is(err, errCheckinConfig) {
+		slog.ErrorContext(r.Context(), "checkin learning config lookup failed", "group_id", groupID, "error", err)
+		writeError(w, http.StatusInternalServerError, "checkin_save_failed")
+		return
+	}
 	if errors.Is(err, checkindomain.ErrInvalidWeeklyTarget) {
 		writeError(w, http.StatusBadRequest, "invalid_checkin_target")
 		return
@@ -106,9 +128,9 @@ func (a *app) handleCreateCheckin(w http.ResponseWriter, r *http.Request) {
 	a.audit(groupID, u.ID, "create_checkin", "checkin_records", id, nil, map[string]any{
 		"logical_date": req.LogicalDate,
 		"task_type":    req.TaskType,
-		"task_id":      req.TaskID,
-		"week_id":      req.WeekID,
-		"part":         req.Part,
+		"task_id":      record.TaskID,
+		"week_id":      record.WeekID,
+		"part":         record.Part,
 	}, r)
 	writeJSON(w, http.StatusCreated, map[string]any{"id": id})
 }

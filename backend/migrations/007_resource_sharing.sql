@@ -73,12 +73,8 @@ SELECT
   updated_at
 FROM assets;
 
-UPDATE assets a
-JOIN asset_bindings b ON b.asset_id = a.id AND b.group_id = a.group_id
-SET a.visibility = 'all_groups'
-WHERE b.asset_kind = 'owned';
-
-INSERT INTO asset_share_grants
+-- Startup replays this file. Preserve private visibility and revoked grants.
+INSERT IGNORE INTO asset_share_grants
   (asset_id, owner_group_id, consumer_group_id, permission, status, created_by, created_at, revoked_by, revoked_at)
 SELECT
   a.id,
@@ -92,10 +88,4 @@ SELECT
   NULL
 FROM assets a
 JOIN asset_bindings b ON b.asset_id = a.id AND b.group_id = a.group_id
-WHERE b.asset_kind = 'owned'
-ON DUPLICATE KEY UPDATE
-  status = 'active',
-  created_by = VALUES(created_by),
-  created_at = VALUES(created_at),
-  revoked_by = NULL,
-  revoked_at = NULL;
+WHERE b.asset_kind = 'owned' AND a.visibility = 'all_groups';

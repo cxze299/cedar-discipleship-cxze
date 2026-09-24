@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -141,7 +142,12 @@ func (r *MySQLRepository) FindExistingWeeklyTask(ctx context.Context, groupID, u
 	var id uint64
 	err := r.db.QueryRowContext(ctx, `SELECT id FROM checkin_records
 		WHERE group_id=? AND user_id=? AND week_id=? AND task_type=? AND deleted_at IS NULL
-		ORDER BY logical_date,id LIMIT 1`, groupID, userID, weekID, taskType).Scan(&id)
+		  AND (?<>'weekly_video' OR NOT EXISTS (
+		    SELECT 1 FROM task_assets ta JOIN assets a ON a.id=ta.asset_id AND a.group_id=ta.group_id
+		    WHERE ta.group_id=? AND ta.task_id=?
+		  ))
+		ORDER BY logical_date,id LIMIT 1`,
+		groupID, userID, weekID, taskType, taskType, groupID, taskID).Scan(&id)
 	return id, err
 }
 
@@ -192,9 +198,15 @@ type recordExecer interface {
 }
 
 func createRecord(ctx context.Context, execer recordExecer, record *Record, actorID uint64, now string) (uint64, error) {
+	part := truncate(record.Part, 64)
+	if record.TaskType == "weekly_video" && record.TaskID > 0 {
+		// Distinct videos may be completed on the same day. Keep the existing
+		// unique-key dimension while legacy records remain matched by task/asset.
+		part = "video:" + strconv.FormatUint(record.TaskID, 10)
+	}
 	res, err := execer.ExecContext(ctx, `INSERT INTO checkin_records (group_id,user_id,task_id,week_id,logical_date,checkin_time,task_type,status,is_retro,detail,note,part,source,created_by,created_at,updated_at)
 		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		record.GroupID, record.UserID, nullableID(record.TaskID), nullableID(record.WeekID), record.LogicalDate, now, record.TaskType, "done", record.IsRetro, record.Detail, record.Note, truncate(record.Part, 64), "web", actorID, now, now)
+		record.GroupID, record.UserID, nullableID(record.TaskID), nullableID(record.WeekID), record.LogicalDate, now, record.TaskType, "done", record.IsRetro, record.Detail, record.Note, part, "web", actorID, now, now)
 	if err != nil {
 		return 0, err
 	}
