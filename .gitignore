@@ -22,6 +22,10 @@ docs/
 .env.local
 .env.production
 .env.bak*
+.env.development
+.env.*.local
+.env*.bak*
+*.env.bak*
 
 # Logs and local OS noise
 .playwright-cli/
