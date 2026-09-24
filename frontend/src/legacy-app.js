@@ -1825,7 +1825,7 @@ function monthlyRankingItems() {
 }
 
 function normalizeActiveMemberRule(rule) {
-  const validTypes = ['daily_devotion', 'weekly_book', 'weekly_video', 'weekly_outline'];
+  const validTypes = ['daily_devotion', 'weekly_book', 'weekly_video', 'weekly_verse', 'weekly_outline'];
   const requested = new Set(Array.isArray(rule?.task_types) ? rule.task_types : ['weekly_outline']);
   const taskTypes = validTypes.filter((taskType) => requested.has(taskType));
   return {

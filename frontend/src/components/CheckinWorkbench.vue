@@ -47,6 +47,7 @@ const legend = [
   { key: 'daily_devotion', label: '灵修' },
   { key: 'weekly_book', label: '书籍' },
   { key: 'weekly_video', label: '音视频' },
+  { key: 'weekly_verse', label: '背经' },
   { key: 'weekly_outline', label: '背大纲' },
 ];
 
@@ -125,6 +126,7 @@ function taskTypeLabel(task) {
     case 'weekly_checkin': return '本周任务';
     case 'weekly_book': return '本周书籍';
     case 'weekly_video': return '本周任务';
+    case 'weekly_verse': return '背经任务';
     case 'weekly_outline': return '背诵大纲';
     default: return '学习任务';
   }
@@ -156,6 +158,7 @@ async function exportStatsChart() {
     daily_devotion: '#0a84ff',
     weekly_book: '#8b5cf6',
     weekly_video: '#19bf7a',
+    weekly_verse: '#e66a52',
     weekly_outline: '#f59e0b',
   };
   const slotWidth = chartWidth / Math.max(1, items.length);

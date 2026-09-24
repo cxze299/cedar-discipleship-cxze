@@ -49,6 +49,7 @@ const legend = [
   { key: 'weekly_book', label: '书籍' },
   { key: 'weekly_video', label: '音视频' },
   { key: 'weekly_outline', label: '背大纲' },
+  { key: 'weekly_verse', label: '背经' },
 ];
 
 const statsView = ref(typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches ? 'table' : 'chart');
@@ -185,6 +186,7 @@ async function exportRankingChart() {
     weekly_book: '#8b5cf6',
     weekly_video: '#19bf7a',
     weekly_outline: '#f59e0b',
+    weekly_verse: '#e66a52',
   };
   const slotWidth = chartWidth / Math.max(1, items.length);
   const barWidth = Math.max(26, Math.min(42, slotWidth * 0.48));
