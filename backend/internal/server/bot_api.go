@@ -11,6 +11,7 @@ import (
 	"time"
 
 	checkindomain "agp/backend/internal/checkin"
+	learningdomain "agp/backend/internal/learning"
 	notificationdomain "agp/backend/internal/notification"
 	userdomain "agp/backend/internal/user"
 )
@@ -375,6 +376,18 @@ func (a *app) handleBotCreateCheckin(w http.ResponseWriter, r *http.Request) {
 	if date.After(today) {
 		writeError(w, http.StatusBadRequest, "future_checkin_not_allowed")
 		return
+	}
+	if taskType == "daily_devotion" || taskType == "daily_scripture" {
+		settings, err := a.groupLearningConfig(r.Context(), group.ID)
+		if err != nil {
+			slog.ErrorContext(r.Context(), "bot checkin learning config lookup failed", "group_id", group.ID, "error", err)
+			writeError(w, http.StatusInternalServerError, "checkin_save_failed")
+			return
+		}
+		if !learningdomain.DailyTaskTypeEnabledOnDate(settings, taskType, req.LogicalDate) {
+			writeError(w, http.StatusBadRequest, "daily_task_disabled")
+			return
+		}
 	}
 	record := &checkindomain.Record{GroupID: group.ID, UserID: userID, LogicalDate: req.LogicalDate, TaskType: taskType, Detail: strings.TrimSpace(req.Detail), IsRetro: req.IsRetro}
 	if taskType != "daily_devotion" && taskType != "daily_scripture" {
