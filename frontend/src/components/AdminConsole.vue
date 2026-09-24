@@ -1034,10 +1034,11 @@ async function runLocalBackupImport() {
 <style scoped>
 .admin-wrapper { min-width: 0; }
 .admin-pagehead, .admin-tabs { margin-bottom: 24px; }
-.admin-tabs {
+.admin-wrapper .admin-tabs {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  width: 100%;
   max-width: 100%;
   padding-bottom: 4px;
   overflow: visible;

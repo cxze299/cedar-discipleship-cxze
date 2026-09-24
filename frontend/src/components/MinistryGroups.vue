@@ -182,6 +182,7 @@ async function loadWorkspace(preferredGroupID = selectedGroupID.value, options =
       api('/ministry-requests'),
     ]);
     groups.value = groupResult.groups || [];
+    if (groupID === Number(currentGroupID.value)) app.ministryGroupCount = groups.value.length;
     notifications.value = notificationResult.notifications || [];
     requests.value = requestResult.requests || [];
     const selectedStillExists = groups.value.some((group) => Number(group.id) === Number(preferredGroupID));

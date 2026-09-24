@@ -11,6 +11,7 @@ export const useAppStateStore = defineStore('appState', {
     pageTitle: 'Cedar Discipleship',
     navItems: [],
     groups: [],
+    ministryGroupCount: 0,
     currentGroupID: 0,
     defaultGroupID: 0,
     showGroupPicker: false,

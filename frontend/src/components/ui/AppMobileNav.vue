@@ -1,8 +1,11 @@
 <script setup>
+import { computed } from 'vue';
 import { BarChart2, Book, Folder, MoreHorizontal, Users } from '@lucide/vue';
 
-defineProps({ tab: { type: String, required: true }, moreOpen: Boolean });
+const props = defineProps({ tab: { type: String, required: true }, moreOpen: Boolean, showGroups: Boolean, entrySetting: { type: Boolean, default: undefined } });
 defineEmits(['navigate', 'more']);
+
+const groupsVisible = computed(() => props.entrySetting === true || (props.entrySetting !== false && props.showGroups));
 
 const items = [
   ['home', '学习', Book],
@@ -13,9 +16,9 @@ const items = [
 </script>
 
 <template>
-  <nav class="mobilebar app-mobile-nav" aria-label="手机主导航">
+  <nav class="mobilebar app-mobile-nav" :class="{ 'app-mobile-nav--no-groups': !groupsVisible }" aria-label="手机主导航">
     <button
-      v-for="item in items"
+      v-for="item in items.filter((entry) => entry[0] !== 'groups' || groupsVisible)"
       :key="item[0]"
       :class="{ active: tab === item[0] }"
       :aria-current="tab === item[0] ? 'page' : undefined"
