@@ -55,6 +55,10 @@ export const useDownloadManagerStore = defineStore('downloadManager', {
   },
 
   actions: {
+    openPanel() {
+      this.activeTab = this.history.length ? 'history' : 'queue';
+      this.panelOpen = true;
+    },
     async initialize(scope: string) {
       const normalizedScope = String(scope || '').trim();
       if (!normalizedScope || (this.initialized && this.scope === normalizedScope)) return;
