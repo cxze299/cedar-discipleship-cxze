@@ -70,7 +70,7 @@ func (r *MySQLRepository) CreateGroup(ctx context.Context, name, passwordHash st
 	if err != nil {
 		return 0, err
 	}
-	res, err := r.db.ExecContext(ctx, `INSERT INTO study_groups (code,name,description,default_password_hash,created_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?)`, code, name, "", passwordHash, actorID, at, at)
+	res, err := r.db.ExecContext(ctx, `INSERT INTO study_groups (code,name,description,default_password_hash,auto_seed_ministry_catalog,created_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)`, code, name, "", passwordHash, false, actorID, at, at)
 	if err != nil {
 		return 0, err
 	}
