@@ -185,6 +185,31 @@ func (a *app) handleSetDefaultGroup(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": u})
 }
 
+func (a *app) handleUpdatePersonalSettings(w http.ResponseWriter, r *http.Request) {
+	u := mustUser(r)
+	groupID := requireGroupID(w, u)
+	if groupID == 0 {
+		return
+	}
+	var req userdomain.PersonalSettings
+	if !readJSON(w, r, &req) {
+		return
+	}
+	settings, err := a.users.UpdatePersonalSettings(r.Context(), u.ID, groupID, req, time.Now().UTC())
+	switch {
+	case errors.Is(err, userdomain.ErrMemberNameRequired),
+		errors.Is(err, userdomain.ErrMemberNameTooLong),
+		errors.Is(err, userdomain.ErrInvalidMobileViewMode):
+		writeError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, userdomain.ErrMemberNotFound):
+		writeError(w, http.StatusForbidden, "forbidden")
+	case err != nil:
+		writeError(w, http.StatusInternalServerError, "personal_settings_failed")
+	default:
+		writeJSON(w, http.StatusOK, map[string]any{"settings": settings})
+	}
+}
+
 func (a *app) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	u := mustUser(r)
 	var req struct {

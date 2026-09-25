@@ -32,7 +32,7 @@ import AppMobileNav from './ui/AppMobileNav.vue';
 import AppSidebar from './ui/AppSidebar.vue';
 import DateCalendarDialog from './ui/DateCalendarDialog.vue';
 import GroupSwitcher from './ui/GroupSwitcher.vue';
-import StackedWheel from './ui/StackedWheel.vue';
+import MobileCardCollection from './ui/MobileCardCollection.vue';
 import './app-root.css';
 import {
   api,
@@ -50,6 +50,7 @@ import {
 } from '../legacy-app';
 
 const AdminConsole = lazyPage(() => import('./AdminConsole.vue'));
+const PersonalSettings = lazyPage(() => import('./PersonalSettings.vue'));
 const app = useAppStateStore();
 const downloadManager = useDownloadManagerStore();
 const {
@@ -96,6 +97,7 @@ watch([authenticated, currentGroupID], async ([isAuthenticated, groupID]) => {
   }
 }, { immediate: true });
 const settings = computed(() => learningConfig.value || {});
+const mobileViewMode = computed(() => user.value?.mobile_view_mode || 'masonry');
 const resourceTypeOptions = computed(() => [...new Set(resources.value
   .map((item) => normalizeResourceCategory(item.category))
   .filter(Boolean))].sort(resourceCategorySort));
@@ -531,11 +533,12 @@ async function refreshResources() {
               </div>
             </article>
           </div>
-          <StackedWheel
+          <MobileCardCollection
             v-if="filteredResources.length"
             class="app-resource-grid--mobile"
             :items="filteredResources"
             :item-key="resourceSelectionKey"
+            :mode="mobileViewMode"
             aria-label="学习资料"
             :card-height="196"
           >
@@ -563,13 +566,15 @@ async function refreshResources() {
                 </div>
               </article>
             </template>
-          </StackedWheel>
+          </MobileCardCollection>
           <div v-else class="panel app-resource-empty">
             <Book :size="48" class="app-resource-empty__icon" />
             <h3>暂无相关学习资料</h3>
             <p class="muted small">请尝试更改搜索关键字或分类筛选条件。</p>
           </div>
         </section>
+
+        <PersonalSettings v-else-if="!showGroupPicker && tab === 'settings'" />
 
         <!-- Admin Console -->
         <AdminConsole v-else-if="tab === 'admin'" />
@@ -597,9 +602,9 @@ async function refreshResources() {
       <section v-dialog-focus="() => { showMobileMoreMenu = false; }" class="cd-dialog app-more-dialog" aria-label="账户与更多功能">
         <header class="cd-dialog-head">
           <div class="inline app-dialog-account">
-            <div class="avatar">{{ (user?.display_name || user?.username || '?').slice(0, 1) }}</div>
+            <div class="avatar">{{ (user?.member_name || user?.display_name || user?.username || '?').slice(0, 1) }}</div>
             <div>
-              <h2 class="app-dialog-account__name">{{ user?.display_name || user?.username }}</h2>
+              <h2 class="app-dialog-account__name">{{ user?.member_name || user?.display_name || user?.username }}</h2>
               <span class="small muted">{{ roleLabel(user || {}) || '组员' }} · {{ activeGroup?.name || '未选小组' }}</span>
             </div>
           </div>
@@ -608,6 +613,14 @@ async function refreshResources() {
           </button>
         </header>
         <div class="cd-dialog-body app-more-dialog__body">
+          <button
+            class="quiet app-more-dialog__action"
+            type="button"
+            @click="setTab('settings'); showMobileMoreMenu = false;"
+          >
+            <User :size="18" class="app-more-dialog__icon" />
+            <span>个人设置</span>
+          </button>
           <button v-if="currentGroupID && defaultGroupID !== currentGroupID" class="quiet app-more-dialog__action" type="button" @click="setDefaultGroupAction(currentGroupID)">
             将当前小组设为默认
           </button>

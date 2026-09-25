@@ -9,8 +9,9 @@ import {
 import DateNavigator from './ui/DateNavigator.vue';
 import DateCalendarDialog from './ui/DateCalendarDialog.vue';
 import DateField from './ui/DateField.vue';
+import MobileCardCollection from './ui/MobileCardCollection.vue';
 import RankingChart from './ui/RankingChart.vue';
-import StackedWheel from './ui/StackedWheel.vue';
+import { useAppStateStore } from '../stores/appState';
 import { useDashboardStore } from '../stores/dashboard';
 import {
   openMemberCalendar,
@@ -22,6 +23,8 @@ import {
 } from '../legacy-app';
 
 const store = useDashboardStore();
+const app = useAppStateStore();
+const { user: appUser } = storeToRefs(app);
 const {
   visible,
   selectedDate,
@@ -43,6 +46,7 @@ const {
   statsTo,
   statsMaxDate,
 } = storeToRefs(store);
+const mobileViewMode = computed(() => appUser.value?.mobile_view_mode || 'masonry');
 
 const legend = [
   { key: 'daily_devotion', label: '灵修' },
@@ -382,10 +386,11 @@ async function exportRankingChart() {
             </tbody>
           </table>
         </div>
-        <StackedWheel
+        <MobileCardCollection
           class="mobile-stack-content"
           :items="members"
           :item-key="(member) => member.user_id"
+          :mode="mobileViewMode"
           aria-label="成员打卡明细"
           :card-height="memberCardHeight"
         >
@@ -404,7 +409,7 @@ async function exportRankingChart() {
               </div>
             </div>
           </template>
-        </StackedWheel>
+        </MobileCardCollection>
       </div>
 
       <!-- Category Progress Horizontal Bar Chart -->
@@ -512,10 +517,11 @@ async function exportRankingChart() {
             :get-height="stackHeight"
             :get-label="chartMemberLabel"
           />
-          <StackedWheel
+          <MobileCardCollection
             class="mobile-stack-content"
             :items="rankedItems"
             :item-key="(member) => member.user_id || member.member_name"
+            :mode="mobileViewMode"
             aria-label="成员完成排行"
             :card-height="190"
           >
@@ -526,7 +532,7 @@ async function exportRankingChart() {
                 <div class="ranking-stack-parts"><span v-for="part in visibleLegend" :key="part.key">{{ part.label }} {{ segmentCount(member, part.key) }}</span></div>
               </div>
             </template>
-          </StackedWheel>
+          </MobileCardCollection>
         </div>
 
         <div v-else>
@@ -590,10 +596,11 @@ async function exportRankingChart() {
               </tfoot>
             </table>
           </div>
-          <StackedWheel
+          <MobileCardCollection
             class="mobile-stack-content"
             :items="sortedPeriodRows"
             :item-key="(row) => row.userID"
+            :mode="mobileViewMode"
             aria-label="周期成员完成数"
             :card-height="230"
           >
@@ -603,7 +610,7 @@ async function exportRankingChart() {
                 <dl><div v-for="part in legend" :key="part.key"><dt>{{ part.label }}</dt><dd>{{ row.counts[part.key] }} 次</dd></div></dl>
               </div>
             </template>
-          </StackedWheel>
+          </MobileCardCollection>
         </div>
       </section>
     </div>

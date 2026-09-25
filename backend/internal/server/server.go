@@ -314,6 +314,7 @@ func (a *app) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/auth/me", a.auth(a.handleMe))
 	mux.HandleFunc("POST /api/auth/switch-group", a.auth(a.handleSwitchGroup))
 	mux.HandleFunc("POST /api/auth/default-group", a.auth(a.handleSetDefaultGroup))
+	mux.HandleFunc("PUT /api/personal-settings", a.auth(a.handleUpdatePersonalSettings))
 	mux.HandleFunc("POST /api/auth/change-password", a.auth(a.handleChangePassword))
 
 	mux.HandleFunc("GET /api/app/bootstrap", a.auth(a.handleBootstrap))

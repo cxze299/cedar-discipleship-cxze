@@ -1,6 +1,6 @@
 import { createPinia, setActivePinia } from 'pinia';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { login, logout } from '../legacy-app';
+import { login, logout, savePersonalSettings, setTab } from '../legacy-app';
 import { useAppStateStore } from '../stores/appState';
 
 function jsonResponse(payload: unknown) {
@@ -67,5 +67,62 @@ describe('learning content permissions', () => {
     expect(app.canAdmin).toBe(true);
     expect(app.canEditLearning).toBe(true);
     expect(app.canEditStudyWeeks).toBe(true);
+  });
+
+  it('lets an ordinary member open personal settings but not the admin console', async () => {
+    setActivePinia(createPinia());
+    vi.stubGlobal('document', { cookie: '' });
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const path = String(input);
+      if (path === '/config.json') return jsonResponse({});
+      if (path === '/api/auth/login' || path === '/api/auth/me') {
+        return jsonResponse({
+          token: 'access-token',
+          user: {
+            id: 8,
+            username: 'member',
+            member_name: '组员',
+            mobile_view_mode: 'masonry',
+            current_group_id: 3,
+            study_groups: [{ id: 3, name: '测试小组' }],
+            roles: ['member'],
+          },
+        });
+      }
+      if (path.startsWith('/api/app/bootstrap')) return jsonResponse({ members: [], learning_config: {} });
+      if (path === '/api/study-weeks') return jsonResponse({ weeks: [] });
+      if (path === '/api/assets') return jsonResponse({ assets: [] });
+      if (path === '/api/library') return jsonResponse({ sections: [] });
+      if (path === '/api/ministry-groups') return jsonResponse({ groups: [] });
+      if (path === '/api/personal-settings') {
+        return jsonResponse({ settings: { member_name: '本组新名字', mobile_view_mode: 'stacked' } });
+      }
+      if (path.startsWith('/api/checkins')) return jsonResponse({ items: [] });
+      if (path.startsWith('/api/dashboard/task-completions')) return jsonResponse({ items: [] });
+      if (path.startsWith('/api/today')) return jsonResponse({});
+      throw new Error(`Unexpected request: ${path}`);
+    }));
+
+    await login('member', 'password');
+
+    const app = useAppStateStore();
+    expect(app.navItems.map((item) => item[0])).toContain('settings');
+    expect(app.navItems.map((item) => item[0])).not.toContain('admin');
+
+    setTab('settings');
+    expect(app.tab).toBe('settings');
+
+    await savePersonalSettings('本组新名字', 'stacked');
+    const currentUser = app.user as unknown as {
+      username: string;
+      member_name: string;
+      mobile_view_mode: string;
+    };
+    expect(currentUser.username).toBe('member');
+    expect(currentUser.member_name).toBe('本组新名字');
+    expect(currentUser.mobile_view_mode).toBe('stacked');
+
+    setTab('admin');
+    expect(app.tab).toBe('home');
   });
 });

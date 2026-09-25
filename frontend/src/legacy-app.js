@@ -53,6 +53,7 @@ import {
 import {
   buildTaskCompletionMatrix,
 } from './runtime/checkins';
+import { normalizeMobileViewMode } from './runtime/personalSettings';
 import {
   dailyDevotionPlanForDate,
   dailyDevotionPlanMode,
@@ -299,6 +300,7 @@ const navItems = [
   ['dashboard', '统计', 'Insights'],
   ['groups', '小组', 'Teams'],
   ['resources', '资源', 'Library'],
+  ['settings', '个人设置', 'Settings'],
   ['admin', '管理', 'Admin'],
 ];
 
@@ -627,6 +629,29 @@ export function setTab(tab) {
   render();
 }
 
+export async function savePersonalSettings(memberName, mobileViewMode) {
+  const result = await api('/personal-settings', {
+    method: 'PUT',
+    body: JSON.stringify({
+      member_name: memberName,
+      mobile_view_mode: normalizeMobileViewMode(mobileViewMode),
+    }),
+  });
+  const settings = result.settings || {};
+  state.user = {
+    ...state.user,
+    member_name: settings.member_name || state.user?.member_name || state.user?.display_name || '',
+    mobile_view_mode: normalizeMobileViewMode(settings.mobile_view_mode),
+  };
+  state.members = state.members.map((member) => (
+    Number(member.user_id) === Number(state.user?.id)
+      ? { ...member, member_name: state.user.member_name }
+      : member
+  ));
+  render();
+  return settings;
+}
+
 export function toggleSidebar() {
   state.sidebarCollapsed = !state.sidebarCollapsed;
   render();
@@ -653,7 +678,7 @@ export async function openCalendarMonth(member, month) {
 }
 
 function pageTitle() {
-  const titles = { home: '今日学习', dashboard: '统计中心', groups: '专项小组', resources: '资源中心', admin: '管理后台' };
+  const titles = { home: '今日学习', dashboard: '统计中心', groups: '专项小组', resources: '资源中心', settings: '个人设置', admin: '管理后台' };
   if (state.tab === 'admin' && !canAdminAccess()) return titles.home;
   return titles[state.tab] || 'Cedar Discipleship';
 }

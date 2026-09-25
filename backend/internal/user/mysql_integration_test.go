@@ -13,6 +13,7 @@ import (
 
 func TestMemberQueriesAndPasswordScope(t *testing.T) {
 	db := testdb.Open(t)
+	testdb.Apply(t, db, "013_member_personal_settings.sql")
 	testdb.Exec(t, db, `INSERT INTO study_groups(id,code,name,created_at,updated_at)
 		VALUES (1,'a','A',NOW(),NOW()),(2,'b','B',NOW(),NOW());
 		INSERT INTO users(id,username,display_name,name_pinyin,password_hash,is_super_admin,created_at,updated_at)
@@ -29,6 +30,31 @@ func TestMemberQueriesAndPasswordScope(t *testing.T) {
 		INSERT INTO user_group_roles(group_id,user_id,role,created_at)
 		VALUES (1,4,'group_leader',NOW()),(2,3,'group_admin',NOW())`)
 	repo := NewMySQLRepository(db)
+	t.Run("personal settings stay within membership", func(t *testing.T) {
+		settings := PersonalSettings{
+			MemberName:     "Only In A",
+			MobileViewMode: MobileViewStacked,
+		}
+		if err := repo.UpdatePersonalSettings(t.Context(), 2, 1, settings, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		got, err := repo.PersonalSettings(t.Context(), 2, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != settings {
+			t.Fatalf("personal settings = %+v, want %+v", got, settings)
+		}
+		var username, displayName, otherGroupName string
+		if err := db.QueryRow(`SELECT u.username,u.display_name,gm.member_name
+			FROM users u JOIN group_members gm ON gm.user_id=u.id AND gm.group_id=2
+			WHERE u.id=2`).Scan(&username, &displayName, &otherGroupName); err != nil {
+			t.Fatal(err)
+		}
+		if username != "both" || displayName != "Both" || otherGroupName != "Both" {
+			t.Fatalf("account or other group changed: username=%q display=%q other_group=%q", username, displayName, otherGroupName)
+		}
+	})
 	t.Run("active membership reset boundary", func(t *testing.T) {
 		count, err := repo.SetGroupDefaultPassword(t.Context(), 1, "new", time.Now())
 		if err != nil {

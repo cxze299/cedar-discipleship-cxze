@@ -13,7 +13,7 @@ defineProps({
 defineEmits(['navigate', 'downloads', 'logout']);
 
 function navIcon(id) {
-  return { home: Book, dashboard: BarChart2, groups: Users, resources: Folder }[id] || Book;
+  return { home: Book, dashboard: BarChart2, groups: Users, resources: Folder, settings: Settings }[id] || Book;
 }
 </script>
 
@@ -63,9 +63,9 @@ function navIcon(id) {
 
     <div class="sidefoot app-sidebar__footer">
       <div class="inline app-sidebar__account">
-        <div class="avatar">{{ (user?.display_name || user?.username || '?').slice(0, 1) }}</div>
+        <div class="avatar">{{ (user?.member_name || user?.display_name || user?.username || '?').slice(0, 1) }}</div>
         <div class="accountcopy app-sidebar__account-copy">
-          <b>{{ user?.display_name || user?.username }}</b>
+          <b>{{ user?.member_name || user?.display_name || user?.username }}</b>
           <p class="small muted">{{ role }}</p>
         </div>
       </div>

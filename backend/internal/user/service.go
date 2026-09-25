@@ -25,6 +25,9 @@ var ErrMemberAddFailed = errors.New("member_add_failed")
 var ErrInvalidRole = errors.New("invalid_role")
 var ErrGroupNameRequired = errors.New("group_name_required")
 var ErrGroupNotFound = errors.New("group_not_found")
+var ErrMemberNameRequired = errors.New("member_name_required")
+var ErrMemberNameTooLong = errors.New("member_name_too_long")
+var ErrInvalidMobileViewMode = errors.New("invalid_mobile_view_mode")
 
 type UsernameConflictError struct {
 	ExistingUser ExistingUserVO
@@ -66,6 +69,12 @@ func (s *Service) CurrentUser(ctx context.Context, userID, currentGroupID uint64
 			return UserVO{}, err
 		}
 		vo.Roles = roles
+		settings, err := s.repo.PersonalSettings(ctx, userID, vo.CurrentGroupID)
+		if err != nil && !errors.Is(err, ErrMemberNotFound) {
+			return UserVO{}, err
+		}
+		vo.MemberName = firstNonEmpty(settings.MemberName, item.DisplayName)
+		vo.MobileViewMode = normalizeMobileViewMode(settings.MobileViewMode)
 	}
 	return vo, nil
 }
@@ -303,6 +312,28 @@ func (s *Service) AddMember(ctx context.Context, groupID, userID uint64, memberN
 	return s.repo.AddMember(ctx, groupID, userID, memberName, actorID, at)
 }
 
+func (s *Service) UpdatePersonalSettings(
+	ctx context.Context,
+	userID, groupID uint64,
+	settings PersonalSettings,
+	at time.Time,
+) (PersonalSettings, error) {
+	settings.MemberName = strings.TrimSpace(settings.MemberName)
+	if settings.MemberName == "" {
+		return PersonalSettings{}, ErrMemberNameRequired
+	}
+	if len([]rune(settings.MemberName)) > 128 {
+		return PersonalSettings{}, ErrMemberNameTooLong
+	}
+	if settings.MobileViewMode != MobileViewMasonry && settings.MobileViewMode != MobileViewStacked {
+		return PersonalSettings{}, ErrInvalidMobileViewMode
+	}
+	if err := s.repo.UpdatePersonalSettings(ctx, userID, groupID, settings, at); err != nil {
+		return PersonalSettings{}, err
+	}
+	return settings, nil
+}
+
 func (s *Service) RecordLogin(ctx context.Context, userID uint64, at time.Time) error {
 	return s.repo.UpdateLastLogin(ctx, userID, at)
 }
@@ -341,7 +372,16 @@ func toUserVO(item User) UserVO {
 		IsSuperAdmin:       item.IsSuperAdmin,
 		DefaultGroupID:     item.DefaultGroupID,
 		MustChangePassword: item.MustChangePassword,
+		MemberName:         item.DisplayName,
+		MobileViewMode:     MobileViewMasonry,
 	}
+}
+
+func normalizeMobileViewMode(mode string) string {
+	if mode == MobileViewStacked {
+		return MobileViewStacked
+	}
+	return MobileViewMasonry
 }
 
 func firstNonEmpty(values ...string) string {

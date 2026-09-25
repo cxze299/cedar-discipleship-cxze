@@ -25,6 +25,14 @@ const RoleMember = "member"
 const RoleGroupAdmin = "group_admin"
 const RoleGroupLeader = "group_leader"
 
+const MobileViewMasonry = "masonry"
+const MobileViewStacked = "stacked"
+
+type PersonalSettings struct {
+	MemberName     string `json:"member_name"`
+	MobileViewMode string `json:"mobile_view_mode"`
+}
+
 type Member struct {
 	MemberID     uint64
 	UserID       uint64

@@ -343,6 +343,49 @@ func (r *MySQLRepository) ListMembers(ctx context.Context, groupID uint64) ([]Me
 	return members, nil
 }
 
+func (r *MySQLRepository) PersonalSettings(ctx context.Context, userID, groupID uint64) (PersonalSettings, error) {
+	var settings PersonalSettings
+	err := r.db.QueryRowContext(ctx, `SELECT member_name,COALESCE(NULLIF(mobile_view_mode,''),?)
+		FROM group_members
+		WHERE user_id=? AND group_id=? AND status=1`,
+		MobileViewMasonry, userID, groupID,
+	).Scan(&settings.MemberName, &settings.MobileViewMode)
+	if errors.Is(err, sql.ErrNoRows) {
+		return PersonalSettings{}, ErrMemberNotFound
+	}
+	return settings, err
+}
+
+func (r *MySQLRepository) UpdatePersonalSettings(
+	ctx context.Context,
+	userID, groupID uint64,
+	settings PersonalSettings,
+	at time.Time,
+) error {
+	result, err := r.db.ExecContext(ctx, `UPDATE group_members
+		SET member_name=?,mobile_view_mode=?,updated_at=?
+		WHERE user_id=? AND group_id=? AND status=1`,
+		settings.MemberName, settings.MobileViewMode, at, userID, groupID,
+	)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil || affected > 0 {
+		return err
+	}
+	var exists bool
+	if err := r.db.QueryRowContext(ctx, `SELECT EXISTS(
+		SELECT 1 FROM group_members WHERE user_id=? AND group_id=? AND status=1
+	)`, userID, groupID).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		return ErrMemberNotFound
+	}
+	return nil
+}
+
 func (r *MySQLRepository) CreateMember(ctx context.Context, groupID, actorID uint64, input CreateMemberInput) (uint64, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
