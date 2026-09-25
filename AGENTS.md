@@ -80,7 +80,9 @@ Every non-merge commit must update `CHANGELOG.md`.
 
 - Add one concise reader-facing entry at the beginning of the changelog content, ordered newest first.
 - Write changelog entries in Chinese and include the date, related commit ID when already known, and the user-visible impact.
-- For the commit that contains its own changelog entry, write `本次提交` instead of attempting to embed the commit's self-referential hash.
+- For a product change commit whose hash is not yet known, temporarily write `待回填`; immediately follow it with a changelog-only commit that replaces the marker with the product change commit ID.
+- A changelog-only hash backfill commit updates the existing entry and does not add another entry for itself.
+- Before pushing, `CHANGELOG.md` must not contain `本次提交` or `待回填`.
 - Use `新增`, `变更`, `修复`, `安全`, or `运维` as appropriate.
 - Describe the behavior, compatibility, data, configuration, or deployment impact.
 - Do not use the changelog as a raw commit log; state why the change matters.

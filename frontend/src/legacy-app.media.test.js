@@ -92,6 +92,7 @@ describe('renamed task titles', () => {
         taskID: 31,
         weekID: 7,
         title: '旧读物名称 36-40页',
+        icon: '旧读',
         part: '旧读物名称 36-40页',
         detail: '旧读物名称 36-40页',
       }],
@@ -110,8 +111,19 @@ describe('renamed task titles', () => {
       taskID: 31,
       weekID: 7,
       title: '新读物名称 36-40页',
+      icon: '新读',
       part: '旧读物名称 36-40页',
       detail: '旧读物名称 36-40页',
     });
+  });
+
+  it('keeps non-book task icons unchanged when the hub title changes', () => {
+    const [task] = mergeTodayHubTasks(
+      [{ type: 'weekly_video', taskID: 32, title: '旧视频名称', icon: '视频' }],
+      [{ type: 'weekly_video', task_id: 32, title: '新视频名称' }],
+      [],
+    );
+
+    expect(task).toMatchObject({ title: '新视频名称', icon: '视频' });
   });
 });

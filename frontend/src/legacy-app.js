@@ -1463,6 +1463,7 @@ export function mergeTodayHubTasks(
   return tasks.map((task) => {
     const hubTask = findTodayHubTask(task, hubTasks);
     const ownRecord = hubTask?.record || ownRecords.find((item) => checkinMatchesTask(item, task));
+    const title = hubTask?.title || task.title;
     return {
       ...task,
       taskID: Number(task.taskID || hubTask?.task_id || 0),
@@ -1471,7 +1472,8 @@ export function mergeTodayHubTasks(
       status: hubTask?.status || (ownRecord ? 'done' : 'pending'),
       completed: Boolean(hubTask?.completed || ownRecord),
       ownRecord,
-      title: hubTask?.title || task.title,
+      title,
+      icon: task.type === 'weekly_book' && hubTask?.title ? shortTaskIcon(title) : task.icon,
       summary: hubTask?.summary || task.summary,
     };
   });
