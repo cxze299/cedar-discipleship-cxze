@@ -297,6 +297,9 @@ func WeekTitle(input WeekInput) string {
 	if input.WeeklyCheckin {
 		return firstNonEmpty(strings.TrimSpace(input.Title), "周任务")
 	}
+	if title := strings.TrimSpace(input.Title); title != "" {
+		return title
+	}
 	parts := make([]string, 0, 3)
 	if input.BookEnabled {
 		for _, reading := range input.Readings {

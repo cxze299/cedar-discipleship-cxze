@@ -21,10 +21,25 @@ docs/
 .env
 .env.local
 .env.production
+.env.bak*
+.env.development
+.env.*.local
+.env*.bak*
+*.env.bak*
 
 # Logs and local OS noise
+.playwright-cli/
+__pycache__/
+*.pyc
 log/
 logs/*
 *.log
 npm-debug.log*
 .DS_Store
+
+# Local reference material and development launchers
+/Kuangye.md
+/newtestament.md
+/weekly_task.md
+/start-frontend-dev.sh
+/test.bat

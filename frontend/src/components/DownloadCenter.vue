@@ -15,11 +15,12 @@ import {
 import { useAppStateStore } from '../stores/appState';
 import { useDownloadManagerStore, type DownloadHistoryItem, type DownloadTask } from '../stores/downloadManager';
 import { downloadErrorMessage, formatDownloadProgress, formatDownloadSize } from '../runtime/downloads';
+import AppOverlay from './ui/AppOverlay.vue';
 
 const app = useAppStateStore();
 const manager = useDownloadManagerStore();
 const { authenticated, currentGroupID, user } = storeToRefs(app);
-const { activeCount, activeTab, history, notice, panelOpen, tasks, unfinishedCount } = storeToRefs(manager);
+const { activeTab, history, notice, panelOpen, tasks, unfinishedCount } = storeToRefs(manager);
 
 const visible = computed(() => authenticated.value && currentGroupID.value > 0);
 
@@ -72,34 +73,34 @@ function downloadedAt(item: DownloadHistoryItem): string {
 
 <template>
   <div v-if="visible" class="download-center">
-    <button
-      class="download-center-trigger"
-      type="button"
-      title="下载中心"
-      aria-label="打开下载中心"
-      :aria-expanded="panelOpen"
-      @click="manager.togglePanel"
+    <AppOverlay
+      :open="panelOpen"
+      variant="drawer"
+      panel-id="download-center-panel"
+      title-id="download-center-title"
+      panel-class="download-center-panel"
+      header-class="download-center-head"
+      body-class="download-center-drawer-body"
+      @close="manager.panelOpen = false"
     >
-      <Download :size="20" />
-      <span v-if="activeCount" class="download-center-badge">{{ activeCount }}</span>
-    </button>
-
-    <section v-if="panelOpen" class="download-center-panel" aria-label="下载中心">
-      <header class="download-center-head">
+      <template #header>
         <div>
           <span class="eyebrow">资源下载</span>
-          <h2>下载中心</h2>
+          <h2 id="download-center-title">下载中心</h2>
         </div>
         <button class="ghost icon-button" type="button" title="关闭" aria-label="关闭下载中心" @click="manager.panelOpen = false">
           <X :size="18" />
         </button>
-      </header>
+      </template>
 
       <div class="download-center-tabs" role="tablist">
         <button
           type="button"
           role="tab"
+          id="download-queue-tab"
+          aria-controls="download-queue-panel"
           :aria-selected="activeTab === 'queue'"
+          :tabindex="activeTab === 'queue' ? 0 : -1"
           :class="{ active: activeTab === 'queue' }"
           @click="manager.activeTab = 'queue'"
         >
@@ -108,7 +109,10 @@ function downloadedAt(item: DownloadHistoryItem): string {
         <button
           type="button"
           role="tab"
+          id="download-history-tab"
+          aria-controls="download-history-panel"
           :aria-selected="activeTab === 'history'"
+          :tabindex="activeTab === 'history' ? 0 : -1"
           :class="{ active: activeTab === 'history' }"
           @click="manager.activeTab = 'history'"
         >
@@ -118,7 +122,13 @@ function downloadedAt(item: DownloadHistoryItem): string {
 
       <p v-if="notice" class="download-center-notice">{{ notice }}</p>
 
-      <div v-if="activeTab === 'queue'" class="download-center-list">
+      <div
+        v-if="activeTab === 'queue'"
+        id="download-queue-panel"
+        class="download-center-list"
+        role="tabpanel"
+        aria-labelledby="download-queue-tab"
+      >
         <article v-for="task in tasks" :key="task.id" class="download-task">
           <div class="download-task-icon" :class="`kind-${task.resource.kind}`">
             <File :size="18" />
@@ -194,7 +204,13 @@ function downloadedAt(item: DownloadHistoryItem): string {
         </button>
       </div>
 
-      <div v-else class="download-center-list">
+      <div
+        v-else
+        id="download-history-panel"
+        class="download-center-list"
+        role="tabpanel"
+        aria-labelledby="download-history-tab"
+      >
         <article v-for="item in history" :key="`${item.id}:${item.downloadedAt}`" class="download-history-item">
           <div class="download-task-icon"><CheckCircle2 :size="18" /></div>
           <div class="download-task-main">
@@ -217,6 +233,21 @@ function downloadedAt(item: DownloadHistoryItem): string {
           清空下载记录
         </button>
       </div>
-    </section>
+    </AppOverlay>
   </div>
 </template>
+
+<style scoped>
+:deep(.download-center-drawer-body) {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  padding: 0;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+:deep(.download-center-drawer-body .download-center-list) {
+  flex: 1;
+  max-height: none;
+}
+</style>

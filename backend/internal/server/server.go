@@ -65,9 +65,11 @@ type app struct {
 	botManager interface {
 		Robots(context.Context) []notificationdomain.RobotStatus
 		Register(context.Context, notificationdomain.RobotRegistration) (notificationdomain.RobotStatus, error)
+		Remove(string) error
 		Assign(context.Context, string, notificationdomain.Target, uint64, time.Time) error
 		BindingGroupID(string, int64) uint64
 	}
+	botAPIKey []byte
 }
 
 type config struct {
@@ -85,6 +87,7 @@ type config struct {
 	PotatoBotToken       string
 	PotatoGroups         string
 	NotificationDir      string
+	BotAPIKey            string
 }
 
 type ctxKey string
@@ -166,6 +169,7 @@ func Run() error {
 		pdfRangeCache: newPDFRangeCache(defaultPDFRangeCacheMaxEntries, defaultPDFRangeCacheMaxBytes),
 		cacheRefresh:  make(chan uint64, defaultTodayCacheMaxEntries),
 		users:         userdomain.NewService(userdomain.NewMySQLRepository(db)),
+		botAPIKey:     []byte(cfg.BotAPIKey),
 	}
 	if err := a.runMigrations(); err != nil {
 		return err
@@ -236,6 +240,7 @@ func loadConfig() config {
 		PotatoBotToken:       env("AGP_POTATO_BOT_TOKEN", ""),
 		PotatoGroups:         env("AGP_POTATO_GROUPS", ""),
 		NotificationDir:      env("AGP_NOTIFICATION_DIR", "./data/notifications"),
+		BotAPIKey:            env("AGP_BOT_API_KEY", ""),
 	}
 }
 
@@ -298,6 +303,12 @@ func env(key, fallback string) string {
 
 func (a *app) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/health", a.handleHealth)
+	mux.HandleFunc("GET /api/bot/groups", a.botAuth(a.handleBotGroups))
+	mux.HandleFunc("GET /api/bot/groups/{code}/config", a.botAuth(a.handleBotConfig))
+	mux.HandleFunc("GET /api/bot/groups/{code}/state", a.botAuth(a.handleBotState))
+	mux.HandleFunc("GET /api/bot/groups/{code}/events", a.botAuth(a.handleBotEvents))
+	mux.HandleFunc("POST /api/bot/groups/{code}/checkins", a.botAuth(a.handleBotCreateCheckin))
+	mux.HandleFunc("DELETE /api/bot/groups/{code}/checkins/{id}", a.botAuth(a.handleBotDeleteCheckin))
 	mux.HandleFunc("POST /api/auth/login", a.handleLogin)
 	mux.HandleFunc("POST /api/auth/refresh", a.handleRefreshSession)
 	mux.HandleFunc("POST /api/auth/logout", a.handleLogout)
@@ -353,6 +364,9 @@ func (a *app) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/checkins", a.auth(a.handleCreateCheckin))
 	mux.HandleFunc("DELETE /api/checkins/{id}", a.auth(a.handleDeleteOwnCheckin))
 	mux.HandleFunc("GET /api/checkins", a.auth(a.handleListCheckins))
+	mux.HandleFunc("GET /api/recite-attempts", a.auth(a.handleListReciteAttempts))
+	mux.HandleFunc("POST /api/recite-attempts", a.auth(a.handleCreateReciteAttempt))
+	mux.HandleFunc("GET /api/recite-leaderboard", a.auth(a.handleReciteLeaderboard))
 	mux.HandleFunc("DELETE /api/admin/checkins/{id}", a.auth(a.requireRole(roleGroupAdmin, a.handleAdminDeleteCheckin)))
 
 	mux.HandleFunc("GET /api/assets", a.auth(a.handleListAssets))
@@ -404,8 +418,11 @@ func (a *app) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/super-admin/groups/{id}/members", a.auth(a.requireSuper(a.handleSuperAddGroupMember)))
 	mux.HandleFunc("POST /api/super-admin/groups/{id}/leaders", a.auth(a.requireSuper(a.handleSuperSetLeader)))
 	mux.HandleFunc("DELETE /api/super-admin/groups/{id}/leaders/{user_id}", a.auth(a.requireSuper(a.handleSuperUnsetLeader)))
+	mux.HandleFunc("GET /api/super-admin/recite-attempts", a.auth(a.requireSuper(a.handleSuperListReciteAttempts)))
+	mux.HandleFunc("DELETE /api/super-admin/recite-attempts/{id}", a.auth(a.requireSuper(a.handleSuperDeleteReciteAttempt)))
 	mux.HandleFunc("GET /api/super-admin/bot-management", a.auth(a.requireSuper(a.handleBotManagement)))
 	mux.HandleFunc("POST /api/super-admin/bot-robots", a.auth(a.requireSuper(a.handleBotRobot)))
+	mux.HandleFunc("DELETE /api/super-admin/bot-robots/{id}", a.auth(a.requireSuper(a.handleBotRobotDelete)))
 	mux.HandleFunc("PUT /api/super-admin/bot-bindings", a.auth(a.requireSuper(a.handleBotBinding)))
 }
 
