@@ -21,4 +21,13 @@ describe('mobile viewport safeguards', () => {
     expect(css).toMatch(/@media\s*\(max-width:\s*980px\)\s*{[\s\S]*input,\s*\n\s*select,\s*\n\s*textarea\s*{[\s\S]*font-size:\s*16px;/);
     expect(css).toMatch(/@media\s*\(max-width:\s*430px\)\s*{[\s\S]*input\[type="date"\][\s\S]*font-size:\s*16px;/);
   });
+
+  it('applies the personal card layout preference to ministry groups', () => {
+    const component = readFileSync(new URL('../components/MinistryGroups.vue', import.meta.url), 'utf8');
+
+    expect(component).toContain("normalizeMobileViewMode(user.value?.mobile_view_mode)");
+    expect(component).toContain("mobileViewMode.value === 'masonry'");
+    expect(component).toContain("groups.length && !ministryMasonry");
+    expect(component).toContain('ministry-masonry-selector');
+  });
 });
