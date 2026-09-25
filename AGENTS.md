@@ -92,6 +92,19 @@ Every non-merge commit must update `CHANGELOG.md`.
 - Keep the subject concise and explain behavior, compatibility, or operational impact in the description.
 - Do not rewrite already-published history only to translate older commit messages.
 
+## 9. Repository Publish Guard
+
+Before every commit or push, read and follow:
+
+```text
+.trae/skills/repository-publish-guard/SKILL.md
+```
+
+- Remove local-only, private, generated, transient, and task-unrelated files from the staged list.
+- Local deployment and verification scripts or Skills must not be committed unless they are generalized and required by other repository users.
+- Review every ignored file that is intentionally tracked or force-added.
+- Unstage local files without deleting the user's local copy.
+
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
