@@ -99,6 +99,9 @@ func (a *app) handleRenameAsset(w http.ResponseWriter, r *http.Request) {
 		a.writeAssetError(w, err)
 		return
 	}
+	if a.todayCache != nil {
+		a.todayCache.Clear()
+	}
 	a.audit(groupID, u.ID, "rename_asset", "assets", assetID, nil, input, r)
 	writeJSON(w, http.StatusOK, map[string]any{"asset": item})
 }

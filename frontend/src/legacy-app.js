@@ -1455,9 +1455,11 @@ function currentTaskOptions() {
   return mergeTodayHubTasks([...dailyTasks, ...weeklyTasks, ...otherTasks]);
 }
 
-function mergeTodayHubTasks(tasks) {
-  const hubTasks = Array.isArray(state.todayHub?.tasks) ? state.todayHub.tasks : [];
-  const ownRecords = state.checkins.filter((item) => item.user_id === state.user?.id);
+export function mergeTodayHubTasks(
+  tasks,
+  hubTasks = Array.isArray(state.todayHub?.tasks) ? state.todayHub.tasks : [],
+  ownRecords = state.checkins.filter((item) => item.user_id === state.user?.id),
+) {
   return tasks.map((task) => {
     const hubTask = findTodayHubTask(task, hubTasks);
     const ownRecord = hubTask?.record || ownRecords.find((item) => checkinMatchesTask(item, task));
@@ -1469,6 +1471,7 @@ function mergeTodayHubTasks(tasks) {
       status: hubTask?.status || (ownRecord ? 'done' : 'pending'),
       completed: Boolean(hubTask?.completed || ownRecord),
       ownRecord,
+      title: hubTask?.title || task.title,
       summary: hubTask?.summary || task.summary,
     };
   });
