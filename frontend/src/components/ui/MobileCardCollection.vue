@@ -5,7 +5,7 @@ import { normalizeMobileViewMode } from '../../runtime/personalSettings';
 const props = defineProps({
   items: { type: Array, default: () => [] },
   itemKey: { type: Function, required: true },
-  mode: { type: String, default: 'masonry' },
+  mode: { type: String, default: 'stacked' },
   ariaLabel: { type: String, default: '卡片列表' },
   cardHeight: { type: Number, default: 210 },
 });

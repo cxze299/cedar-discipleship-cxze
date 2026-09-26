@@ -97,7 +97,7 @@ watch([authenticated, currentGroupID], async ([isAuthenticated, groupID]) => {
   }
 }, { immediate: true });
 const settings = computed(() => learningConfig.value || {});
-const mobileViewMode = computed(() => user.value?.mobile_view_mode || 'masonry');
+const mobileViewMode = computed(() => user.value?.mobile_view_mode || 'stacked');
 const resourceTypeOptions = computed(() => [...new Set(resources.value
   .map((item) => normalizeResourceCategory(item.category))
   .filter(Boolean))].sort(resourceCategorySort));

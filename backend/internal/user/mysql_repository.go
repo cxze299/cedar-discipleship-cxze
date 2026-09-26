@@ -348,7 +348,7 @@ func (r *MySQLRepository) PersonalSettings(ctx context.Context, userID, groupID 
 	err := r.db.QueryRowContext(ctx, `SELECT member_name,COALESCE(NULLIF(mobile_view_mode,''),?)
 		FROM group_members
 		WHERE user_id=? AND group_id=? AND status=1`,
-		MobileViewMasonry, userID, groupID,
+		MobileViewStacked, userID, groupID,
 	).Scan(&settings.MemberName, &settings.MobileViewMode)
 	if errors.Is(err, sql.ErrNoRows) {
 		return PersonalSettings{}, ErrMemberNotFound

@@ -373,15 +373,15 @@ func toUserVO(item User) UserVO {
 		DefaultGroupID:     item.DefaultGroupID,
 		MustChangePassword: item.MustChangePassword,
 		MemberName:         item.DisplayName,
-		MobileViewMode:     MobileViewMasonry,
+		MobileViewMode:     MobileViewStacked,
 	}
 }
 
 func normalizeMobileViewMode(mode string) string {
-	if mode == MobileViewStacked {
-		return MobileViewStacked
+	if mode == MobileViewMasonry {
+		return MobileViewMasonry
 	}
-	return MobileViewMasonry
+	return MobileViewStacked
 }
 
 func firstNonEmpty(values ...string) string {

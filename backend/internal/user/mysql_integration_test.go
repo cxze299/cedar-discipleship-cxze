@@ -11,6 +11,36 @@ import (
 	"agp/backend/internal/testdb"
 )
 
+func TestRestoreStackedMobileViewMigrationRunsOnce(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Apply(t, db, "013_member_personal_settings.sql")
+	testdb.Exec(t, db, `INSERT INTO study_groups(id,code,name,created_at,updated_at)
+		VALUES (1,'a','A',NOW(),NOW());
+		INSERT INTO users(id,username,display_name,name_pinyin,password_hash,is_super_admin,created_at,updated_at)
+		VALUES (1,'member','Member','member','old',0,NOW(),NOW()),
+		       (2,'new-member','New Member','new-member','old',0,NOW(),NOW());
+		INSERT INTO group_members(group_id,user_id,member_name,status,joined_at,created_at,updated_at)
+		VALUES (1,1,'Member',1,NOW(),NOW(),NOW())`)
+
+	testdb.Apply(t, db, "014_restore_stacked_mobile_view.sql")
+	var mode string
+	if err := db.QueryRow(`SELECT mobile_view_mode FROM group_members WHERE user_id=1`).Scan(&mode); err != nil || mode != MobileViewStacked {
+		t.Fatalf("migrated mobile view = %q, error = %v", mode, err)
+	}
+
+	testdb.Exec(t, db, `UPDATE group_members SET mobile_view_mode='masonry' WHERE user_id=1;
+		INSERT INTO group_members(group_id,user_id,member_name,status,joined_at,created_at,updated_at)
+		VALUES (1,2,'New Member',1,NOW(),NOW(),NOW())`)
+	testdb.Apply(t, db, "014_restore_stacked_mobile_view.sql")
+	var newMode string
+	if err := db.QueryRow(`SELECT mobile_view_mode FROM group_members WHERE user_id=1`).Scan(&mode); err != nil || mode != MobileViewMasonry {
+		t.Fatalf("chosen mobile view after rerun = %q, error = %v", mode, err)
+	}
+	if err := db.QueryRow(`SELECT mobile_view_mode FROM group_members WHERE user_id=2`).Scan(&newMode); err != nil || newMode != MobileViewStacked {
+		t.Fatalf("new member mobile view = %q, error = %v", newMode, err)
+	}
+}
+
 func TestMemberQueriesAndPasswordScope(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Apply(t, db, "013_member_personal_settings.sql")

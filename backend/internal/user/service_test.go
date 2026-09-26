@@ -97,6 +97,25 @@ func TestServiceCurrentUserIncludesCurrentGroupPersonalSettings(t *testing.T) {
 	}
 }
 
+func TestServiceCurrentUserDefaultsToStackedButKeepsMasonryChoice(t *testing.T) {
+	t.Parallel()
+	repo := &personalSettingsTestRepository{
+		user: &User{ID: 23, Username: "account-name", DisplayName: "全局名称", Status: 1},
+		groups: []Group{{ID: 7, Code: "alpha", Name: "甲组"}},
+		settings: PersonalSettings{MemberName: "甲组名称"},
+	}
+	service := NewService(repo)
+	defaultUser, err := service.CurrentUser(context.Background(), 23, 7)
+	if err != nil || defaultUser.MobileViewMode != MobileViewStacked {
+		t.Fatalf("default mobile view = %q, error = %v", defaultUser.MobileViewMode, err)
+	}
+	repo.settings.MobileViewMode = MobileViewMasonry
+	masonryUser, err := service.CurrentUser(context.Background(), 23, 7)
+	if err != nil || masonryUser.MobileViewMode != MobileViewMasonry {
+		t.Fatalf("chosen mobile view = %q, error = %v", masonryUser.MobileViewMode, err)
+	}
+}
+
 func TestServiceUpdatePersonalSettingsValidatesAndScopesInput(t *testing.T) {
 	t.Parallel()
 

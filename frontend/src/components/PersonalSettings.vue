@@ -9,7 +9,7 @@ import { normalizeMobileViewMode } from '../runtime/personalSettings';
 const app = useAppStateStore();
 const { user, groups, currentGroupID } = storeToRefs(app);
 const memberName = ref('');
-const mobileViewMode = ref('masonry');
+const mobileViewMode = ref('stacked');
 const saving = ref(false);
 
 const activeGroup = computed(() => groups.value.find((group) => Number(group.id) === Number(currentGroupID.value)));

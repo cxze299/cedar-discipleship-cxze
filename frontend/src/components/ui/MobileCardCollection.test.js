@@ -23,23 +23,22 @@ describe('MobileCardCollection', () => {
     vi.unstubAllGlobals();
   });
 
-  it('renders every item in masonry mode by default', async () => {
+  it('renders the stacked wheel by default', async () => {
+    vi.stubGlobal('window', {
+      matchMedia: () => ({ matches: true }),
+    });
     const html = await renderCollection(undefined);
+
+    expect(html).toContain('stacked-wheel__stage');
+    expect(html).not.toContain('mobile-card-collection__masonry');
+  });
+
+  it('preserves masonry as an explicit option', async () => {
+    const html = await renderCollection('masonry');
 
     expect(html).toContain('mobile-card-collection__masonry');
     expect(html).not.toContain('stacked-wheel__stage');
     expect(html).toContain('甲');
     expect(html).toContain('乙');
-  });
-
-  it('preserves the stacked wheel as an explicit option', async () => {
-    vi.stubGlobal('window', {
-      matchMedia: () => ({ matches: true }),
-    });
-
-    const html = await renderCollection('stacked');
-
-    expect(html).toContain('stacked-wheel__stage');
-    expect(html).not.toContain('mobile-card-collection__masonry');
   });
 });

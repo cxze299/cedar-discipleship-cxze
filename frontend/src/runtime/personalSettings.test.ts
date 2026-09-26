@@ -4,9 +4,9 @@ import { normalizeMobileViewMode } from './personalSettings';
 
 describe('normalizeMobileViewMode', () => {
   it.each([
-    [undefined, 'masonry'],
-    ['', 'masonry'],
-    ['unknown', 'masonry'],
+    [undefined, 'stacked'],
+    ['', 'stacked'],
+    ['unknown', 'stacked'],
     ['masonry', 'masonry'],
     ['stacked', 'stacked'],
   ])('normalizes %j to %s', (value, expected) => {

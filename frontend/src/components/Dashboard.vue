@@ -46,7 +46,7 @@ const {
   statsTo,
   statsMaxDate,
 } = storeToRefs(store);
-const mobileViewMode = computed(() => appUser.value?.mobile_view_mode || 'masonry');
+const mobileViewMode = computed(() => appUser.value?.mobile_view_mode || 'stacked');
 
 const legend = [
   { key: 'daily_devotion', label: '灵修' },
