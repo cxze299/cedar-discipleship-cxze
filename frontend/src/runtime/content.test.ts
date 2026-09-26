@@ -162,6 +162,18 @@ describe('content runtime helpers', () => {
       title: '门训读物',
       pageRange: '10-11',
     });
+    const groupURL = buildReaderPageURL({
+      sourceURL: '/api/assets/473/range?pages=36-37',
+      title: '今日灵修',
+      pageRange: '36-37',
+      groupCode: 'group-652872b0',
+    }, 'http://localhost:5114');
+    expect(parseReaderPageRequest(new URL(groupURL).search)).toEqual({
+      sourceURL: '/api/assets/473/range?pages=36-37',
+      title: '今日灵修',
+      pageRange: '36-37',
+      groupCode: 'group-652872b0',
+    });
     expect(buildReaderPageURL({
       sourceURL: 'https://example.com/book.pdf',
       title: '外部文件',

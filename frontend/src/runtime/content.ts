@@ -87,6 +87,7 @@ export type ReaderPageRequest = {
   sourceURL: string;
   title: string;
   pageRange: string;
+  groupCode?: string;
 };
 
 export function buildReaderPageURL(input: ReaderPageRequest, origin = ''): string {
@@ -97,6 +98,7 @@ export function buildReaderPageURL(input: ReaderPageRequest, origin = ''): strin
   url.searchParams.set('reader_source', sourceURL);
   url.searchParams.set('reader_title', String(input.title || 'PDF 资料').trim() || 'PDF 资料');
   if (input.pageRange) url.searchParams.set('reader_pages', input.pageRange);
+  if (input.groupCode) url.searchParams.set('reader_group', input.groupCode);
   return origin ? url.toString() : `${url.pathname}${url.search}`;
 }
 
@@ -105,10 +107,12 @@ export function parseReaderPageRequest(search: unknown): ReaderPageRequest | nul
   const sourceURL = params.get('reader_source') || '';
   if (!/^\/api\/assets\/\d+\/range\?/.test(sourceURL)) return null;
   if (!new URLSearchParams(sourceURL.split('?')[1] || '').get('pages')) return null;
+  const groupCode = (params.get('reader_group') || '').trim();
   return {
     sourceURL,
     title: (params.get('reader_title') || 'PDF 资料').trim() || 'PDF 资料',
     pageRange: params.get('reader_pages') || '',
+    ...(groupCode ? { groupCode } : {}),
   };
 }
 

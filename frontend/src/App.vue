@@ -41,10 +41,6 @@ async function boot() {
   retrying.value = true;
   shell.setMounting();
   try {
-    if (readerRequest) {
-      shell.setReady();
-      return;
-    }
     await initializeApp();
     shell.setReady();
   } catch (error) {
@@ -68,9 +64,8 @@ onBeforeUnmount(() => {
 
 <template>
   <main class="antd-app-shell" :data-status="shell.status">
-    <BookReaderPage v-if="readerRequest" :request="readerRequest" />
     <AppStatus
-      v-else-if="shell.error"
+      v-if="shell.error"
       status="error"
       title="前端加载失败"
       :description="String(shell.error || '网络或数据服务异常')"
@@ -88,8 +83,9 @@ onBeforeUnmount(() => {
       description="正在载入门训打卡数据..."
     />
     <template v-else>
-      <AppRoot />
-      <template v-if="appState.authenticated">
+      <BookReaderPage v-if="readerRequest && appState.authenticated" :request="readerRequest" />
+      <AppRoot v-else />
+      <template v-if="appState.authenticated && !readerRequest">
         <CheckinWorkbench />
         <Dashboard v-if="visited.has('dashboard')" />
         <MinistryGroups v-if="visited.has('groups')" />
