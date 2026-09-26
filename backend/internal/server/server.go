@@ -305,6 +305,7 @@ func (a *app) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/health", a.handleHealth)
 	mux.HandleFunc("GET /api/bot/groups", a.botAuth(a.handleBotGroups))
 	mux.HandleFunc("GET /api/bot/groups/{code}/config", a.botAuth(a.handleBotConfig))
+	mux.HandleFunc("GET /api/bot/groups/{code}/assets/{id}/download", a.botAuth(a.handleBotAsset))
 	mux.HandleFunc("GET /api/bot/groups/{code}/state", a.botAuth(a.handleBotState))
 	mux.HandleFunc("GET /api/bot/groups/{code}/events", a.botAuth(a.handleBotEvents))
 	mux.HandleFunc("POST /api/bot/groups/{code}/checkins", a.botAuth(a.handleBotCreateCheckin))

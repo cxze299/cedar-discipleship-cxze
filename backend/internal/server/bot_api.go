@@ -101,10 +101,72 @@ func (a *app) handleBotConfig(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "bot_config_failed")
 		return
 	}
+	settings, err := a.groupLearningConfig(r.Context(), group.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "bot_config_failed")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"site_info": map[string]any{"title": group.Name, "group_code": group.Code},
 		"members":   botMemberNames(members), "weekly_schedule": schedule,
+		"task_sections": settings["task_sections"],
 	})
+}
+
+func (a *app) handleBotAsset(w http.ResponseWriter, r *http.Request) {
+	group, err := a.botGroup(r)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "bot_group_not_found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "bot_asset_failed")
+		return
+	}
+	id, err := strconv.ParseUint(r.PathValue("id"), 10, 64)
+	if err != nil || id == 0 {
+		writeError(w, http.StatusBadRequest, "invalid_asset_id")
+		return
+	}
+	settings, err := a.groupLearningConfig(r.Context(), group.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "bot_asset_failed")
+		return
+	}
+	if !botDevotionAssetAllowed(settings, id) {
+		writeError(w, http.StatusNotFound, "asset_not_found")
+		return
+	}
+	file, err := a.assets.DownloadFile(r.Context(), group.ID, id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "asset_not_found")
+		return
+	}
+	serveAssetFile(w, r, file)
+}
+
+func botDevotionAssetAllowed(settings map[string]any, id uint64) bool {
+	sections, _ := settings["task_sections"].(map[string]any)
+	daily, _ := sections["daily"].(map[string]any)
+	devotion, _ := daily["devotion"].(map[string]any)
+	want := "/api/assets/" + strconv.FormatUint(id, 10) + "/download"
+	allowed := func(value any) bool {
+		path, ok := value.(string)
+		return ok && strings.TrimSpace(path) == want
+	}
+	if allowed(daily["path"]) || allowed(devotion["path"]) || allowed(devotion["custom_path"]) {
+		return true
+	}
+	for _, key := range []string{"plans", "schedule_history"} {
+		items, _ := devotion[key].([]any)
+		for _, item := range items {
+			entry, _ := item.(map[string]any)
+			if allowed(entry["path"]) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (a *app) handleBotState(w http.ResponseWriter, r *http.Request) {

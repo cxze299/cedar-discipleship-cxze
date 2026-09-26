@@ -17,3 +17,17 @@ func TestBotTaskTypeSupportsExistingCheckinTypes(t *testing.T) {
 		}
 	}
 }
+
+func TestBotDevotionAssetOnlyAllowsConfiguredGroupResource(t *testing.T) {
+	settings := map[string]any{"task_sections": map[string]any{"daily": map[string]any{
+		"devotion": map[string]any{"path": "/api/assets/263/download", "plans": []any{
+			map[string]any{"path": "/api/assets/473/download"},
+		}},
+	}}}
+	if !botDevotionAssetAllowed(settings, 263) || !botDevotionAssetAllowed(settings, 473) {
+		t.Fatal("configured devotion resources were rejected")
+	}
+	if botDevotionAssetAllowed(settings, 999) {
+		t.Fatal("unrelated group asset was allowed")
+	}
+}
