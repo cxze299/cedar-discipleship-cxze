@@ -77,6 +77,38 @@ Before changing this project, check the latest `master` commit of `wangz5940/ced
 ## 7. Exclude Local Environment Files Before Every Commit
 
 Before committing or opening a PR, inspect staged file paths with `git diff --cached --name-only`. Never include environment backups (`.env*.bak*`, `*.env.bak*`) or local development configuration (`.env.development`, `.env.*.local`), even when Git allows them to be force-added. Remove any such paths from the index before committing. Keep `.env.example` as the committed template.
+## 7. Changelog Required
+
+Every non-merge commit must update `CHANGELOG.md`.
+
+- Add one concise reader-facing entry at the beginning of the changelog content, ordered newest first.
+- Write changelog entries in Chinese and include the date, related commit ID when already known, and the user-visible impact.
+- For a product change commit whose hash is not yet known, temporarily write `待回填`; immediately follow it with a changelog-only commit that replaces the marker with the product change commit ID.
+- A changelog-only hash backfill commit updates the existing entry and does not add another entry for itself.
+- Before pushing, `CHANGELOG.md` must not contain `本次提交` or `待回填`.
+- Use `新增`, `变更`, `修复`, `安全`, or `运维` as appropriate.
+- Describe the behavior, compatibility, data, configuration, or deployment impact.
+- Do not use the changelog as a raw commit log; state why the change matters.
+- Include `CHANGELOG.md` in the same commit as the code, configuration, test, or documentation change.
+
+## 8. Chinese Git History
+
+- Write every new commit subject and description in Chinese.
+- Keep the subject concise and explain behavior, compatibility, or operational impact in the description.
+- Do not rewrite already-published history only to translate older commit messages.
+
+## 9. Repository Publish Guard
+
+Before every commit or push, read and follow:
+
+```text
+.trae/skills/repository-publish-guard/SKILL.md
+```
+
+- Remove local-only, private, generated, transient, and task-unrelated files from the staged list.
+- Local deployment and verification scripts or Skills must not be committed unless they are generalized and required by other repository users.
+- Review every ignored file that is intentionally tracked or force-added.
+- Unstage local files without deleting the user's local copy.
 
 ---
 

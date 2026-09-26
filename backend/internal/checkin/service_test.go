@@ -58,6 +58,24 @@ func TestServiceCreateDailyPreservesStorageErrors(t *testing.T) {
 	}
 }
 
+func TestServiceCreateVideoConcurrentRetry(t *testing.T) {
+	repo := &fakeRepository{
+		existingWeeklyTaskErr: sql.ErrNoRows,
+		createErr:            &mysql.MySQLError{Number: 1062},
+	}
+	repo.onCreate = func() {
+		repo.existingWeeklyTaskErr = nil
+		repo.existingWeeklyTaskID = 43
+	}
+	id, existing, err := NewService(repo).Create(t.Context(), &Record{
+		GroupID: 1, UserID: 2, TaskID: 3, WeekID: 4,
+		TaskType: "weekly_video", LogicalDate: "2026-09-23",
+	}, 2)
+	if err != nil || !existing || id != 43 {
+		t.Fatalf("id=%d existing=%t err=%v", id, existing, err)
+	}
+}
+
 func TestServiceCreateWeeklyTaskIdempotent(t *testing.T) {
 	tests := []struct {
 		name     string

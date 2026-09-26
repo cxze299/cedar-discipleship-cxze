@@ -315,6 +315,7 @@ func (a *app) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/auth/me", a.auth(a.handleMe))
 	mux.HandleFunc("POST /api/auth/switch-group", a.auth(a.handleSwitchGroup))
 	mux.HandleFunc("POST /api/auth/default-group", a.auth(a.handleSetDefaultGroup))
+	mux.HandleFunc("PUT /api/personal-settings", a.auth(a.handleUpdatePersonalSettings))
 	mux.HandleFunc("POST /api/auth/change-password", a.auth(a.handleChangePassword))
 
 	mux.HandleFunc("GET /api/app/bootstrap", a.auth(a.handleBootstrap))
@@ -378,6 +379,7 @@ func (a *app) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin/assets/upload", a.auth(a.requireRole(roleGroupAdmin, a.handleAdminUploadAsset)))
 	mux.HandleFunc("GET /api/admin/assets/{id}/sharing", a.auth(a.requireRole(roleGroupAdmin, a.handleAssetSharing)))
 	mux.HandleFunc("PUT /api/admin/assets/{id}/sharing", a.auth(a.requireRole(roleGroupAdmin, a.handleUpdateAssetSharing)))
+	mux.HandleFunc("PUT /api/admin/assets/{id}/title", a.auth(a.requireRole(roleGroupAdmin, a.handleRenameAsset)))
 	mux.HandleFunc("GET /api/admin/resource-library", a.auth(a.requireRole(roleGroupAdmin, a.handleAdminResourceLibrary)))
 	mux.HandleFunc("GET /api/admin/resource-groups", a.auth(a.requireRole(roleGroupAdmin, a.handleResourceGroups)))
 	mux.HandleFunc("GET /api/admin/shared-resources", a.auth(a.requireRole(roleGroupAdmin, a.handleSharedResources)))

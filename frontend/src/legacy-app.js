@@ -53,6 +53,7 @@ import {
 import {
   buildTaskCompletionMatrix,
 } from './runtime/checkins';
+import { normalizeMobileViewMode } from './runtime/personalSettings';
 import {
   dailyDevotionPlanForDate,
   dailyDevotionPlanMode,
@@ -95,6 +96,10 @@ const state = {
   weekDraft: null,
   toast: '',
 };
+
+let sessionGeneration = 0;
+let adminRequestID = 0;
+let viewerRequestID = 0;
 
 function viewerStore() {
   return useContentViewerStore();
@@ -295,6 +300,7 @@ const navItems = [
   ['dashboard', '统计', 'Insights'],
   ['groups', '小组', 'Teams'],
   ['resources', '资源', 'Library'],
+  ['settings', '个人设置', 'Settings'],
   ['admin', '管理', 'Admin'],
 ];
 
@@ -572,6 +578,12 @@ export async function switchGroup(groupID) {
     method: 'POST',
     body: JSON.stringify({ group_id: Number(groupID) }),
   });
+  sessionGeneration += 1;
+  closeViewer();
+  state.adminLoading = false;
+  state.adminDataGroupID = 0;
+  state.resourceLibrary = null;
+  state.weekDraft = null;
   state.token = result.token;
   setAccessToken(state.token);
   await loadAll();
@@ -587,6 +599,7 @@ export async function login(username, password) {
     method: 'POST',
     body: JSON.stringify({ username, password }),
   });
+  sessionGeneration += 1;
   state.token = data.token;
   state.user = data.user;
   setAccessToken(state.token);
@@ -616,6 +629,29 @@ export function setTab(tab) {
   render();
 }
 
+export async function savePersonalSettings(memberName, mobileViewMode) {
+  const result = await api('/personal-settings', {
+    method: 'PUT',
+    body: JSON.stringify({
+      member_name: memberName,
+      mobile_view_mode: normalizeMobileViewMode(mobileViewMode),
+    }),
+  });
+  const settings = result.settings || {};
+  state.user = {
+    ...state.user,
+    member_name: settings.member_name || state.user?.member_name || state.user?.display_name || '',
+    mobile_view_mode: normalizeMobileViewMode(settings.mobile_view_mode),
+  };
+  state.members = state.members.map((member) => (
+    Number(member.user_id) === Number(state.user?.id)
+      ? { ...member, member_name: state.user.member_name }
+      : member
+  ));
+  render();
+  return settings;
+}
+
 export function toggleSidebar() {
   state.sidebarCollapsed = !state.sidebarCollapsed;
   render();
@@ -642,7 +678,7 @@ export async function openCalendarMonth(member, month) {
 }
 
 function pageTitle() {
-  const titles = { home: '今日学习', dashboard: '统计中心', groups: '专项小组', resources: '资源中心', admin: '管理后台' };
+  const titles = { home: '今日学习', dashboard: '统计中心', groups: '专项小组', resources: '资源中心', settings: '个人设置', admin: '管理后台' };
   if (state.tab === 'admin' && !canAdminAccess()) return titles.home;
   return titles[state.tab] || 'Cedar Discipleship';
 }
@@ -1014,6 +1050,7 @@ function resolveContentSourceURL(target) {
 }
 
 export function closeViewer() {
+  viewerRequestID += 1;
   if (state.viewer?.revokeURL) URL.revokeObjectURL(state.viewer.revokeURL);
   state.viewer = null;
   viewerStore().clearViewer();
@@ -1095,6 +1132,7 @@ export async function openContentTarget(target) {
     return;
   }
   closeViewer();
+  const requestID = viewerRequestID;
   if (sourceAPIPath) {
     const res = await fetchWithAuth(sourceAPIPath);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -1103,6 +1141,7 @@ export async function openContentTarget(target) {
     const blobType = pdfHeader ? 'pdf' : inferResourceTypeFromMime(blob.type, type);
     if (blobType === 'markdown') {
       const text = await blob.text();
+      if (requestID !== viewerRequestID) return;
       const lines = target.date
         ? extractMarkdownSectionForDate(text, target.date, target.section)
         : (target.section ? extractNumberedMarkdownSection(text, target.section) : text.split('\n'));
@@ -1119,8 +1158,9 @@ export async function openContentTarget(target) {
       };
       syncViewerStore();
     } else {
-      const objectURL = URL.createObjectURL(blob);
       const pdfData = blobType === 'pdf' ? new Uint8Array(await blob.arrayBuffer()) : null;
+      if (requestID !== viewerRequestID) return;
+      const objectURL = URL.createObjectURL(blob);
       const viewerURL = buildViewerURL(objectURL, blobType, pageRange, sourceAPIPath);
       state.viewer = {
         type: blobType,
@@ -1148,6 +1188,7 @@ export async function openContentTarget(target) {
     const res = await fetch(target.url, { cache: 'no-store' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const text = await res.text();
+    if (requestID !== viewerRequestID) return;
     const lines = target.date
       ? extractMarkdownSectionForDate(text, target.date, target.section)
       : (target.section ? extractNumberedMarkdownSection(text, target.section) : text.split('\n'));
@@ -1439,12 +1480,15 @@ function currentTaskOptions() {
   return mergeTodayHubTasks([...dailyTasks, ...weeklyTasks, ...otherTasks]);
 }
 
-function mergeTodayHubTasks(tasks) {
-  const hubTasks = Array.isArray(state.todayHub?.tasks) ? state.todayHub.tasks : [];
-  const ownRecords = state.checkins.filter((item) => item.user_id === state.user?.id);
+export function mergeTodayHubTasks(
+  tasks,
+  hubTasks = Array.isArray(state.todayHub?.tasks) ? state.todayHub.tasks : [],
+  ownRecords = state.checkins.filter((item) => item.user_id === state.user?.id),
+) {
   return tasks.map((task) => {
     const hubTask = findTodayHubTask(task, hubTasks);
     const ownRecord = hubTask?.record || ownRecords.find((item) => checkinMatchesTask(item, task));
+    const title = hubTask?.title || task.title;
     return {
       ...task,
       taskID: Number(task.taskID || hubTask?.task_id || 0),
@@ -1453,6 +1497,8 @@ function mergeTodayHubTasks(tasks) {
       status: hubTask?.status || (ownRecord ? 'done' : 'pending'),
       completed: Boolean(hubTask?.completed || ownRecord),
       ownRecord,
+      title,
+      icon: task.type === 'weekly_book' && hubTask?.title ? shortTaskIcon(title) : task.icon,
       summary: hubTask?.summary || task.summary,
     };
   });
@@ -1889,24 +1935,35 @@ export async function openMemberCalendar(member, month = state.selectedDate.slic
 }
 
 export async function loadAdminData(force = false) {
-  if (!state.user?.current_group_id) return;
-  if (!force && state.adminDataGroupID === state.user.current_group_id && state.resourceLibrary) return;
+  const groupID = state.user?.current_group_id;
+  if (!groupID) return;
+  if (!force && state.adminDataGroupID === groupID && state.resourceLibrary) return;
+  const generation = sessionGeneration;
+  const requestID = ++adminRequestID;
+  const isCurrent = () => generation === sessionGeneration
+    && requestID === adminRequestID && groupID === state.user?.current_group_id;
   state.adminLoading = true;
   render();
   try {
     const [learning, library] = await Promise.all([
-      api('/admin/learning-config').catch(() => ({ settings: state.learningConfig || {} })),
-      api('/admin/resource-library').catch(() => ({ sections: [] })),
+      api('/admin/learning-config'),
+      api('/admin/resource-library'),
     ]);
+    if (!isCurrent()) return;
     state.learningConfig = learning.settings || state.learningConfig || {};
     state.resourceLibrary = library.sections || [];
-    state.adminDataGroupID = state.user.current_group_id;
+    state.adminDataGroupID = groupID;
     if (!state.weekDraft) state.weekDraft = weekDraftFromWeek(currentWeekForDraft() || currentCalendarWeekRange());
   } catch (error) {
-    toast(error.message);
+    if (isCurrent()) {
+      state.adminDataGroupID = 0;
+      toast(error.message);
+    }
   } finally {
-    state.adminLoading = false;
-    render();
+    if (isCurrent()) {
+      state.adminLoading = false;
+      render();
+    }
   }
 }
 
@@ -2394,6 +2451,11 @@ export async function logout(options = {}) {
     }).catch(() => {});
   }
   clearAccessToken();
+  sessionGeneration += 1;
+  closeViewer();
+  state.adminLoading = false;
+  state.adminDataGroupID = 0;
+  state.resourceLibrary = null;
   state.token = '';
   state.user = null;
   state.bootstrap = null;
@@ -2428,6 +2490,5 @@ export function disposeApp() {
     dashboardRefreshTimer = 0;
   }
   state.calendar = null;
-  state.viewer = null;
-  syncViewerStore();
+  closeViewer();
 }

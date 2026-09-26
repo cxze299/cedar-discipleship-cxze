@@ -17,6 +17,8 @@ type Repository interface {
 	ListMembershipGroups(ctx context.Context, userID uint64) ([]Group, error)
 	ListRoles(ctx context.Context, userID, groupID uint64) ([]string, error)
 	ListMembers(ctx context.Context, groupID uint64) ([]Member, error)
+	PersonalSettings(ctx context.Context, userID, groupID uint64) (PersonalSettings, error)
+	UpdatePersonalSettings(ctx context.Context, userID, groupID uint64, settings PersonalSettings, at time.Time) error
 	CreateMember(ctx context.Context, groupID, actorID uint64, input CreateMemberInput) (uint64, error)
 	AdminMember(ctx context.Context, groupID, memberID uint64) (*AdminMember, error)
 	RemoveMember(ctx context.Context, groupID, memberID, userID uint64, at time.Time) error

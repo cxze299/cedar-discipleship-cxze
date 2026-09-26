@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestServiceUploadDeletesStoredFileWhenMetadataCreateFails(t *testing.T) {
@@ -51,6 +52,50 @@ func TestServiceUploadDefaultsToAllGroupsVisibility(t *testing.T) {
 	}
 	if repo.created.Visibility != string(ShareScopeAllGroups) {
 		t.Fatalf("upload visibility = %q, want %q", repo.created.Visibility, ShareScopeAllGroups)
+	}
+}
+
+func TestServiceRenameNormalizesTitle(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeRepository{
+		find: &Asset{ID: 12, GroupID: 6, Title: "新名称"},
+	}
+	service := NewService(repo, &fakeStorage{}, "")
+	item, err := service.Rename(context.Background(), 6, 12, RenameInput{Title: "  新名称  "})
+	if err != nil {
+		t.Fatalf("Rename() error = %v", err)
+	}
+	if repo.renamedTitle != "新名称" {
+		t.Fatalf("repository title = %q, want %q", repo.renamedTitle, "新名称")
+	}
+	if item.ID != 12 || item.Title != "新名称" {
+		t.Fatalf("Rename() = %+v, want renamed asset", item)
+	}
+}
+
+func TestServiceRenameRejectsInvalidTitle(t *testing.T) {
+	t.Parallel()
+
+	tests := []string{
+		"",
+		" \t ",
+		"包含\n换行",
+		strings.Repeat("名", 256),
+	}
+	for _, title := range tests {
+		title := title
+		t.Run(strconv.Quote(title), func(t *testing.T) {
+			t.Parallel()
+			repo := &fakeRepository{}
+			service := NewService(repo, &fakeStorage{}, "")
+			if _, err := service.Rename(context.Background(), 6, 12, RenameInput{Title: title}); !errors.Is(err, ErrInvalidAssetTitle) {
+				t.Fatalf("Rename() error = %v, want %v", err, ErrInvalidAssetTitle)
+			}
+			if repo.renamedTitle != "" {
+				t.Fatalf("repository called with title %q", repo.renamedTitle)
+			}
+		})
 	}
 }
 
@@ -334,15 +379,20 @@ func TestResourceLibraryOrdersMentorBeforeOtherCategories(t *testing.T) {
 }
 
 type fakeRepository struct {
-	createErr error
-	created   Asset
-	list      []Asset
-	listErr   error
-	groupCode string
-	nextID    uint64
+	createErr    error
+	created      Asset
+	find         *Asset
+	list         []Asset
+	listErr      error
+	groupCode    string
+	nextID       uint64
+	renamedTitle string
 }
 
 func (r *fakeRepository) FindByID(context.Context, uint64, uint64) (*Asset, error) {
+	if r.find != nil {
+		return r.find, nil
+	}
 	return nil, errors.New("not implemented")
 }
 
@@ -372,6 +422,11 @@ func (r *fakeRepository) Create(_ context.Context, item *Asset, _ uint64) (uint6
 
 func (r *fakeRepository) Delete(context.Context, uint64, uint64) error {
 	return errors.New("not implemented")
+}
+
+func (r *fakeRepository) Rename(_ context.Context, _, _ uint64, title string, _ time.Time) error {
+	r.renamedTitle = title
+	return nil
 }
 
 type fakeStorage struct {

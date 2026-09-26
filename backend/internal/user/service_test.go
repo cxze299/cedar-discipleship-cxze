@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-sql-driver/mysql"
 )
@@ -17,6 +19,160 @@ type createMemberTestRepository struct {
 	createdInput CreateMemberInput
 	created      bool
 	createErr    error
+}
+
+type personalSettingsTestRepository struct {
+	Repository
+	user            *User
+	groups          []Group
+	settings        PersonalSettings
+	settingsErr     error
+	loadedUserID    uint64
+	loadedGroupID   uint64
+	updatedSettings PersonalSettings
+	updateAt        time.Time
+	updateErr       error
+}
+
+func (r *personalSettingsTestRepository) FindByID(context.Context, uint64) (*User, error) {
+	return r.user, nil
+}
+
+func (r *personalSettingsTestRepository) ListGroups(context.Context, uint64, bool) ([]Group, error) {
+	return r.groups, nil
+}
+
+func (r *personalSettingsTestRepository) ListRoles(context.Context, uint64, uint64) ([]string, error) {
+	return []string{RoleMember}, nil
+}
+
+func (r *personalSettingsTestRepository) PersonalSettings(
+	_ context.Context,
+	userID, groupID uint64,
+) (PersonalSettings, error) {
+	r.loadedUserID = userID
+	r.loadedGroupID = groupID
+	return r.settings, r.settingsErr
+}
+
+func (r *personalSettingsTestRepository) UpdatePersonalSettings(
+	_ context.Context,
+	userID, groupID uint64,
+	settings PersonalSettings,
+	at time.Time,
+) error {
+	r.loadedUserID = userID
+	r.loadedGroupID = groupID
+	r.updatedSettings = settings
+	r.updateAt = at
+	return r.updateErr
+}
+
+func TestServiceCurrentUserIncludesCurrentGroupPersonalSettings(t *testing.T) {
+	t.Parallel()
+
+	repo := &personalSettingsTestRepository{
+		user: &User{
+			ID:          23,
+			Username:    "account-name",
+			DisplayName: "全局名称",
+			Status:      1,
+		},
+		groups: []Group{{ID: 7, Code: "alpha", Name: "甲组"}},
+		settings: PersonalSettings{
+			MemberName:     "甲组名称",
+			MobileViewMode: MobileViewStacked,
+		},
+	}
+
+	got, err := NewService(repo).CurrentUser(context.Background(), 23, 7)
+	if err != nil {
+		t.Fatalf("CurrentUser() error = %v", err)
+	}
+	if got.Username != "account-name" || got.MemberName != "甲组名称" || got.MobileViewMode != MobileViewStacked {
+		t.Fatalf("CurrentUser() = %+v", got)
+	}
+	if repo.loadedUserID != 23 || repo.loadedGroupID != 7 {
+		t.Fatalf("settings scope = user %d group %d, want user 23 group 7", repo.loadedUserID, repo.loadedGroupID)
+	}
+}
+
+func TestServiceUpdatePersonalSettingsValidatesAndScopesInput(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		settings PersonalSettings
+		wantErr  error
+	}{
+		{
+			name: "blank member name",
+			settings: PersonalSettings{
+				MemberName:     "   ",
+				MobileViewMode: MobileViewMasonry,
+			},
+			wantErr: ErrMemberNameRequired,
+		},
+		{
+			name: "member name too long",
+			settings: PersonalSettings{
+				MemberName:     strings.Repeat("名", 129),
+				MobileViewMode: MobileViewMasonry,
+			},
+			wantErr: ErrMemberNameTooLong,
+		},
+		{
+			name: "unknown mobile view",
+			settings: PersonalSettings{
+				MemberName:     "组内名称",
+				MobileViewMode: "carousel",
+			},
+			wantErr: ErrInvalidMobileViewMode,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			repo := &personalSettingsTestRepository{}
+			_, err := NewService(repo).UpdatePersonalSettings(
+				context.Background(),
+				23,
+				7,
+				test.settings,
+				time.Now(),
+			)
+			if !errors.Is(err, test.wantErr) {
+				t.Fatalf("UpdatePersonalSettings() error = %v, want %v", err, test.wantErr)
+			}
+			if repo.loadedUserID != 0 {
+				t.Fatal("repository called for invalid settings")
+			}
+		})
+	}
+
+	repo := &personalSettingsTestRepository{}
+	at := time.Now()
+	got, err := NewService(repo).UpdatePersonalSettings(
+		context.Background(),
+		23,
+		7,
+		PersonalSettings{MemberName: "  组内名称  ", MobileViewMode: MobileViewStacked},
+		at,
+	)
+	if err != nil {
+		t.Fatalf("UpdatePersonalSettings() error = %v", err)
+	}
+	if got.MemberName != "组内名称" || got.MobileViewMode != MobileViewStacked {
+		t.Fatalf("UpdatePersonalSettings() = %+v", got)
+	}
+	if repo.loadedUserID != 23 || repo.loadedGroupID != 7 {
+		t.Fatalf("update scope = user %d group %d, want user 23 group 7", repo.loadedUserID, repo.loadedGroupID)
+	}
+	if repo.updatedSettings != got || !repo.updateAt.Equal(at) {
+		t.Fatalf("repository update = %+v at %v, want %+v at %v", repo.updatedSettings, repo.updateAt, got, at)
+	}
 }
 
 func (r *createMemberTestRepository) FindByUsername(context.Context, string) (*User, error) {

@@ -141,14 +141,14 @@ func TestCheckinSourceSnapshot(t *testing.T) {
 						"current_ta.asset_id=checked_ta.asset_id", "checked_ta.group_id=c.group_id",
 						"weekly_verse", "weekly_outline")
 				}
-				content, mediaType, mediaName := `{"book_name":"基督是一切"}`, "", ""
+				content, assetTitle, mediaType, mediaName := `{"book_name":"基督是一切"}`, "", "", ""
 				if tt.name == "weekly audio" {
 					content, mediaType, mediaName = "", "audio/mpeg", "lesson.mp3"
 				}
 				steps = append(steps, queryStep{
-					contains: fragments, args: args, columns: 8,
+					contains: append(fragments, "COALESCE(media_asset.title,'')"), args: args, columns: 9,
 					rows: [][]driver.Value{{
-						int64(42), int64(2), "张三", tt.taskType, "title", content, mediaType, mediaName,
+						int64(42), int64(2), "张三", tt.taskType, "title", content, assetTitle, mediaType, mediaName,
 					}},
 				})
 			}

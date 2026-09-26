@@ -8,6 +8,7 @@ func TestBotTaskTypeSupportsExistingCheckinTypes(t *testing.T) {
 		"每日读经":          "daily_scripture",
 		"daily_scripture": "daily_scripture",
 		"周任务":            "weekly_checkin",
+		"每周学习":           "weekly_checkin",
 		"weekly_checkin":  "weekly_checkin",
 		"weekly_book":     "weekly_book",
 	} {

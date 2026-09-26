@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -176,6 +177,31 @@ func TestPotatoListChats(t *testing.T) {
 	}
 }
 
+func TestPotatoListChatsRetriesEmptySuccessResponse(t *testing.T) {
+	t.Parallel()
+
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if requests.Add(1) == 1 {
+			return
+		}
+		_, _ = io.WriteString(w, `{"ok":true,"result":{"Groups":[],"SuperGroups":[]}}`)
+	}))
+	defer server.Close()
+
+	client, err := NewPotatoClient("123:secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.groupsEndpoint = server.URL + "/getGroups"
+	if _, err := client.ListChats(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := requests.Load(); got != 2 {
+		t.Fatalf("requests = %d, want 2", got)
+	}
+}
+
 func TestPotatoIdentity(t *testing.T) {
 	t.Parallel()
 
@@ -204,10 +230,37 @@ func TestPotatoIdentity(t *testing.T) {
 	}
 }
 
+func TestPotatoIdentityRetriesEmptySuccessResponse(t *testing.T) {
+	t.Parallel()
+
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if requests.Add(1) == 1 {
+			return
+		}
+		_, _ = io.WriteString(w, `{"ok":true,"result":{"id":10100427,"first_name":"Primary Bot","username":"primary_bot"}}`)
+	}))
+	defer server.Close()
+
+	client, err := NewPotatoClient("123:secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.identityEndpoint = server.URL + "/getMe"
+	if _, err := client.Identity(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := requests.Load(); got != 2 {
+		t.Fatalf("requests = %d, want 2", got)
+	}
+}
+
 func TestPotatoIdentityDoesNotLeakTokenOrResponse(t *testing.T) {
 	t.Parallel()
 
+	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
 		http.Error(w, "secret response", http.StatusUnauthorized)
 	}))
 	defer server.Close()
@@ -222,5 +275,30 @@ func TestPotatoIdentityDoesNotLeakTokenOrResponse(t *testing.T) {
 	}()
 	if err == nil || strings.Contains(err.Error(), "secret") {
 		t.Fatalf("Identity() error = %v", err)
+	}
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("requests = %d, want 1", got)
+	}
+}
+
+func TestPotatoIdentityStopsAfterEmptySuccessResponses(t *testing.T) {
+	t.Parallel()
+
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		requests.Add(1)
+	}))
+	defer server.Close()
+
+	client, err := NewPotatoClient("123:secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.identityEndpoint = server.URL + "/getMe"
+	if _, err := client.Identity(t.Context()); err == nil {
+		t.Fatal("Identity() error = nil")
+	}
+	if got := requests.Load(); got != potatoReadAttempts {
+		t.Fatalf("requests = %d, want %d", got, potatoReadAttempts)
 	}
 }

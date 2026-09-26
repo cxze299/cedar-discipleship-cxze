@@ -69,8 +69,8 @@ func (a *app) handleAssetPlayback(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "asset_not_found")
 		return
 	}
-	if !isStreamableAsset(file) {
-		writeError(w, http.StatusBadRequest, "asset_not_media")
+	if !isPlaybackMediaAsset(file) {
+		writeError(w, http.StatusBadRequest, "asset_not_video")
 		return
 	}
 	expiresAt := time.Now().Add(assetPlaybackTTL).Unix()
@@ -115,7 +115,7 @@ func (a *app) handleStreamAsset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	file, err := a.assets.DownloadFile(r.Context(), groupID, id)
-	if err != nil || !isStreamableAsset(file) {
+	if err != nil || !isPlaybackMediaAsset(file) {
 		writeError(w, http.StatusNotFound, "asset_not_found")
 		return
 	}
@@ -172,25 +172,46 @@ func (a *app) verifyAssetPlaybackSource(assetID, groupID uint64, expiresAt int64
 	return err == nil && hmac.Equal(expected, got)
 }
 
-func isStreamableAsset(file *assetdomain.DownloadFile) bool {
+func isVideoAsset(file *assetdomain.DownloadFile) bool {
 	if file == nil {
 		return false
 	}
-	mimeType := strings.ToLower(strings.TrimSpace(file.MimeType))
-	if strings.HasPrefix(mimeType, "video/") || strings.HasPrefix(mimeType, "audio/") {
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(file.MimeType)), "video/") {
 		return true
 	}
 	switch strings.ToLower(filepath.Ext(file.OriginalName)) {
-	case ".mp4", ".m4v", ".mov", ".webm", ".mp3", ".m4a", ".aac", ".ogg", ".opus", ".wav", ".flac", ".weba":
+	case ".mp4", ".m4v", ".mov", ".webm":
 		return true
 	default:
 		return false
 	}
 }
 
+func isAudioAsset(file *assetdomain.DownloadFile) bool {
+	if file == nil {
+		return false
+	}
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(file.MimeType)), "audio/") {
+		return true
+	}
+	switch strings.ToLower(filepath.Ext(file.OriginalName)) {
+	case ".aac", ".flac", ".m4a", ".ma4", ".mp3", ".ogg", ".opus", ".wav", ".weba":
+		return true
+	default:
+		return false
+	}
+}
+
+func isPlaybackMediaAsset(file *assetdomain.DownloadFile) bool {
+	return isVideoAsset(file) || isAudioAsset(file)
+}
+
 func playbackAssetFile(file *assetdomain.DownloadFile) *assetdomain.DownloadFile {
 	if file == nil {
 		return nil
+	}
+	if !isVideoAsset(file) {
+		return file
 	}
 	playbackPath := file.AbsolutePath + assetPlaybackSuffix
 	info, err := os.Stat(playbackPath)

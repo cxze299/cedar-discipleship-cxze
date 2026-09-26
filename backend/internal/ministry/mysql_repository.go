@@ -8,11 +8,16 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 )
 
 type MySQLRepository struct {
 	db *sql.DB
+}
+
+type rowQueryer interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
 func NewMySQLRepository(db *sql.DB) *MySQLRepository {
@@ -45,11 +50,33 @@ func (r *MySQLRepository) EnsureCatalog(ctx context.Context, studyGroupID uint64
 	if !autoSeed {
 		return nil
 	}
+	complete, err := catalogComplete(ctx, r.db, studyGroupID)
+	if err != nil {
+		return err
+	}
+	if complete {
+		return nil
+	}
+
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("beginning ministry catalog initialization: %w", err)
 	}
 	defer tx.Rollback()
+
+	if err := tx.QueryRowContext(ctx, `SELECT auto_seed_ministry_catalog FROM study_groups WHERE id=? FOR UPDATE`, studyGroupID).Scan(&autoSeed); err != nil {
+		return fmt.Errorf("locking ministry catalog initialization: %w", err)
+	}
+	if !autoSeed {
+		return tx.Commit()
+	}
+	complete, err = catalogComplete(ctx, tx, studyGroupID)
+	if err != nil {
+		return err
+	}
+	if complete {
+		return tx.Commit()
+	}
 
 	for _, item := range defaultCatalog {
 		_, err := tx.ExecContext(
@@ -71,6 +98,23 @@ func (r *MySQLRepository) EnsureCatalog(ctx context.Context, studyGroupID uint64
 		return fmt.Errorf("committing ministry catalog initialization: %w", err)
 	}
 	return nil
+}
+
+func catalogComplete(ctx context.Context, queryer rowQueryer, studyGroupID uint64) (bool, error) {
+	placeholders := make([]string, len(defaultCatalog))
+	args := make([]any, 1, len(defaultCatalog)+1)
+	args[0] = studyGroupID
+	for i, item := range defaultCatalog {
+		placeholders[i] = "?"
+		args = append(args, item.code)
+	}
+	var count int
+	query := `SELECT COUNT(DISTINCT code) FROM ministry_groups
+		WHERE study_group_id=? AND code IN (` + strings.Join(placeholders, ",") + `)`
+	if err := queryer.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
+		return false, fmt.Errorf("checking ministry catalog completeness: %w", err)
+	}
+	return count == len(defaultCatalog), nil
 }
 
 func (r *MySQLRepository) ListGroups(

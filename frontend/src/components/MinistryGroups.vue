@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import {
   Activity,
@@ -32,11 +32,12 @@ import { useStackGesture } from '../ui/useStackGesture';
 import { api, fetchWithAuth, openContentTarget, toast as showToast } from '../legacy-app';
 import { classifyAttachment, markdownToSafeHTML } from '../runtime/content';
 import { downloadErrorMessage } from '../runtime/downloads';
+import { normalizeMobileViewMode } from '../runtime/personalSettings';
 import CountingAttendance from './CountingAttendance.vue';
 
 const app = useAppStateStore();
 const downloadManager = useDownloadManagerStore();
-const { authenticated, currentGroupID, learningConfig, tab } = storeToRefs(app);
+const { authenticated, currentGroupID, learningConfig, tab, user } = storeToRefs(app);
 
 const groups = ref([]);
 const detail = ref(null);
@@ -66,9 +67,12 @@ const workspaceLoadedAt = ref(0);
 const detailCache = new Map();
 let workspaceLoadPromise = null;
 let workspaceWarmTimer = 0;
+let workspaceRequestID = 0;
 let detailRequestID = 0;
 
 const workspaceCacheTTL = 60_000;
+const ministryMobileQuery = typeof window === 'undefined' ? null : window.matchMedia('(max-width: 920px)');
+const ministryMobile = ref(ministryMobileQuery?.matches ?? false);
 const wheelPosition = ref(0);
 const wheelGesture = useStackGesture({
   position: wheelPosition,
@@ -79,6 +83,8 @@ const wheelGesture = useStackGesture({
 const { dragging: wheelDragging, animating: wheelAnimating, reducedMotion } = wheelGesture;
 
 const visible = computed(() => authenticated.value && currentGroupID.value > 0 && tab.value === 'groups');
+const mobileViewMode = computed(() => normalizeMobileViewMode(user.value?.mobile_view_mode));
+const ministryMasonry = computed(() => ministryMobile.value && mobileViewMode.value === 'masonry');
 const joinedGroups = computed(() => groups.value.filter((group) => group.joined));
 const selectedGroupIndex = computed(() => {
   const index = groups.value.findIndex((group) => Number(group.id) === Number(selectedGroupID.value));
@@ -110,6 +116,26 @@ const progressAttachments = computed(() => {
 const selectedAttachments = computed(() => progressAttachments.value.filter(attachmentSelected));
 
 watch(
+  [authenticated, currentGroupID],
+  () => {
+    workspaceRequestID += 1;
+    detailRequestID += 1;
+    workspaceLoadPromise = null;
+    workspaceGroupID.value = 0;
+    workspaceLoadedAt.value = 0;
+    groups.value = [];
+    detail.value = null;
+    notifications.value = [];
+    requests.value = [];
+    selectedGroupID.value = 0;
+    detailCache.clear();
+    loading.value = false;
+    detailLoading.value = false;
+  },
+  { flush: 'sync' },
+);
+
+watch(
   [visible, currentGroupID],
   async ([isVisible]) => {
     if (!isVisible) return;
@@ -136,6 +162,13 @@ watch(showRecycleBin, (isVisible) => {
 
 onBeforeUnmount(() => {
   window.clearTimeout(workspaceWarmTimer);
+  ministryMobileQuery?.removeEventListener('change', updateMinistryViewport);
+  workspaceRequestID += 1;
+  detailRequestID += 1;
+});
+
+onMounted(() => {
+  ministryMobileQuery?.addEventListener('change', updateMinistryViewport);
 });
 
 watch(
@@ -157,16 +190,20 @@ async function ensureWorkspace(preferredGroupID = selectedGroupID.value, options
     return;
   }
   if (!workspaceLoadPromise) {
-    workspaceLoadPromise = loadWorkspace(preferredGroupID, options)
+    const promise = loadWorkspace(preferredGroupID, options)
       .finally(() => {
-        workspaceLoadPromise = null;
+        if (workspaceLoadPromise === promise) workspaceLoadPromise = null;
       });
+    workspaceLoadPromise = promise;
   }
   await workspaceLoadPromise;
 }
 
 async function loadWorkspace(preferredGroupID = selectedGroupID.value, options = {}) {
   const groupID = Number(currentGroupID.value || 0);
+  const requestID = ++workspaceRequestID;
+  const isCurrent = () => requestID === workspaceRequestID
+    && authenticated.value && groupID === Number(currentGroupID.value);
   if (workspaceGroupID.value && workspaceGroupID.value !== groupID) {
     groups.value = [];
     detail.value = null;
@@ -181,6 +218,7 @@ async function loadWorkspace(preferredGroupID = selectedGroupID.value, options =
       api('/ministry-notifications'),
       api('/ministry-requests'),
     ]);
+    if (!isCurrent()) return;
     groups.value = groupResult.groups || [];
     if (groupID === Number(currentGroupID.value)) app.ministryGroupCount = groups.value.length;
     notifications.value = notificationResult.notifications || [];
@@ -192,9 +230,9 @@ async function loadWorkspace(preferredGroupID = selectedGroupID.value, options =
     workspaceLoadedAt.value = Date.now();
     if (nextID) await selectGroup(nextID, { preserveView: Boolean(options.preserveView), background: Boolean(options.background), preferCache: true });
   } catch (error) {
-    if (!options.background) showToast(error.message);
+    if (isCurrent() && !options.background) showToast(error.message);
   } finally {
-    loading.value = false;
+    if (isCurrent()) loading.value = false;
   }
 }
 
@@ -624,6 +662,10 @@ function groupRole(group) {
   return '';
 }
 
+function updateMinistryViewport(event) {
+  ministryMobile.value = event.matches;
+}
+
 function mod(value, divisor) {
   return ((value % divisor) + divisor) % divisor;
 }
@@ -772,10 +814,12 @@ function localDateTimeValue() {
         <aside class="ministry-directory">
           <div class="ministry-stack-heading">
             <span class="ministry-directory-label">专项小组</span>
-            <span v-if="groups.length" class="ministry-stack-count">{{ String(wheelSelectedIndex + 1).padStart(2, '0') }} / {{ String(groups.length).padStart(2, '0') }}</span>
+            <span v-if="groups.length" class="ministry-stack-count">
+              {{ !ministryMasonry ? `${String(wheelSelectedIndex + 1).padStart(2, '0')} / ${String(groups.length).padStart(2, '0')}` : `${groups.length} 组` }}
+            </span>
           </div>
 
-          <div v-if="groups.length" class="ministry-stack-selector">
+          <div v-if="groups.length && !ministryMasonry" class="ministry-stack-selector">
             <div
               class="ministry-stack-stage"
               :class="{ dragging: wheelDragging, 'has-multiple': groups.length > 1 }"
@@ -829,6 +873,46 @@ function localDateTimeValue() {
               </article>
             </div>
 
+          </div>
+          <div v-else-if="groups.length" class="ministry-masonry-selector" role="listbox" aria-label="选择专项小组">
+            <article
+              v-for="group in groups"
+              :key="group.id"
+              class="ministry-stack-card ministry-masonry-card"
+              :class="{
+                current: Number(group.id) === Number(selectedGroupID),
+                joined: group.joined,
+                available: !group.joined,
+              }"
+              role="option"
+              tabindex="0"
+              :aria-selected="Number(group.id) === Number(selectedGroupID)"
+              @click="selectGroup(group.id)"
+              @keydown.enter.prevent="selectGroup(group.id)"
+              @keydown.space.prevent="selectGroup(group.id)"
+            >
+              <div class="ministry-stack-card-head">
+                <span class="ministry-group-symbol" :class="{ quiet: !group.joined }">
+                  {{ group.name.slice(0, 2) }}
+                </span>
+                <span class="ministry-stack-status">{{ group.joined ? groupRole(group) : '未加入' }}</span>
+              </div>
+              <div class="ministry-stack-copy">
+                <b>{{ group.name }}</b>
+                <small>{{ group.member_count }} 人 · {{ group.joined ? groupRole(group) : '可申请加入' }}</small>
+              </div>
+              <button
+                v-if="!group.joined"
+                class="secondary ministry-join-button"
+                type="button"
+                :disabled="saving || group.request_status === 'pending'"
+                @click.stop="requestJoin(group)"
+              >
+                <UserPlus v-if="group.request_status !== 'pending'" :size="15" />
+                <Check v-else :size="15" />
+                {{ group.request_status === 'pending' ? '待审批' : '加入小组' }}
+              </button>
+            </article>
           </div>
           <div v-else class="ministry-directory-empty">暂无专项小组</div>
         </aside>
@@ -1274,5 +1358,32 @@ function localDateTimeValue() {
 
 .ministry-stack-stage.has-multiple .ministry-stack-card.current {
   touch-action: pan-x pinch-zoom;
+}
+
+.ministry-masonry-selector {
+  columns: 170px 2;
+  column-gap: 10px;
+}
+
+.ministry-stack-card.ministry-masonry-card {
+  position: relative;
+  inset: auto;
+  display: inline-grid;
+  width: 100%;
+  height: auto;
+  min-height: 150px;
+  margin-bottom: 10px;
+  break-inside: avoid;
+  transform: none;
+  opacity: 1;
+  filter: none;
+  cursor: pointer;
+  pointer-events: auto;
+  vertical-align: top;
+}
+
+.ministry-stack-card.ministry-masonry-card:focus-visible {
+  outline: 3px solid rgba(47, 107, 69, 0.2);
+  outline-offset: 2px;
 }
 </style>

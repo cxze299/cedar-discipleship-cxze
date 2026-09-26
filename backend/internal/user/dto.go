@@ -8,6 +8,8 @@ type UserVO struct {
 	DefaultGroupID     uint64   `json:"default_group_id"`
 	MustChangePassword bool     `json:"must_change_password"`
 	CurrentGroupID     uint64   `json:"current_group_id"`
+	MemberName         string   `json:"member_name"`
+	MobileViewMode     string   `json:"mobile_view_mode"`
 	Groups             []Group  `json:"study_groups"`
 	Roles              []string `json:"roles"`
 }

@@ -75,14 +75,25 @@ func (r *MySQLRepository) ListTasks(ctx context.Context, groupID, weekID uint64)
 		}
 		task.GroupID = groupID
 		task.WeekID = weekID
-		assets, err := r.taskAssets(ctx, groupID, task.ID)
-		if err != nil {
-			return nil, err
-		}
-		task.Assets = assets
 		tasks = append(tasks, task)
 	}
-	return tasks, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if len(tasks) == 0 {
+		return tasks, nil
+	}
+	assets, err := r.weekTaskAssets(ctx, groupID, weekID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range tasks {
+		tasks[i].Assets = assets[tasks[i].ID]
+	}
+	return tasks, nil
 }
 
 func (r *MySQLRepository) ListCompletionRecords(ctx context.Context, groupID, userID uint64, from, to string) ([]TodayRecord, error) {
@@ -281,23 +292,25 @@ func InsertWeekTx(ctx context.Context, tx *sql.Tx, groupID uint64, input WeekInp
 	return insertedID(res)
 }
 
-func (r *MySQLRepository) taskAssets(ctx context.Context, groupID, taskID uint64) ([]TaskAsset, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT a.id,a.category,a.title,a.original_name,a.mime_type,ta.usage_type
+func (r *MySQLRepository) weekTaskAssets(ctx context.Context, groupID, weekID uint64) (map[uint64][]TaskAsset, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT ta.task_id,a.id,a.category,a.title,a.original_name,a.mime_type,ta.usage_type
 		FROM task_assets ta JOIN assets a ON a.id=ta.asset_id
-		WHERE ta.group_id=? AND ta.task_id=? AND a.group_id=ta.group_id
-		ORDER BY ta.sort_order,ta.id`, groupID, taskID)
+		JOIN study_tasks t ON t.id=ta.task_id AND t.group_id=ta.group_id
+		WHERE ta.group_id=? AND t.week_id=? AND t.enabled=1 AND a.group_id=ta.group_id
+		ORDER BY ta.task_id,ta.sort_order,ta.id`, groupID, weekID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var assets []TaskAsset
+	assets := make(map[uint64][]TaskAsset)
 	for rows.Next() {
+		var taskID uint64
 		var asset TaskAsset
-		if err := rows.Scan(&asset.ID, &asset.Category, &asset.Title, &asset.OriginalName, &asset.MimeType, &asset.UsageType); err != nil {
+		if err := rows.Scan(&taskID, &asset.ID, &asset.Category, &asset.Title, &asset.OriginalName, &asset.MimeType, &asset.UsageType); err != nil {
 			return nil, err
 		}
-		assets = append(assets, asset)
+		assets[taskID] = append(assets[taskID], asset)
 	}
 	return assets, rows.Err()
 }

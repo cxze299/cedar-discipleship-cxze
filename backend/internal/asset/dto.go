@@ -52,3 +52,7 @@ type ShareInput struct {
 type ImportInput struct {
 	SourceAssetID uint64 `json:"source_asset_id"`
 }
+
+type RenameInput struct {
+	Title string `json:"title"`
+}

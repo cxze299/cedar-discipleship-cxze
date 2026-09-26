@@ -11,7 +11,6 @@ import (
 	"time"
 
 	checkindomain "agp/backend/internal/checkin"
-	learningdomain "agp/backend/internal/learning"
 	notificationdomain "agp/backend/internal/notification"
 	userdomain "agp/backend/internal/user"
 )
@@ -137,6 +136,9 @@ func (a *app) handleBotState(w http.ResponseWriter, r *http.Request) {
 	for _, record := range records {
 		item := map[string]any{"id": record.ID, "name": names[record.UserID], "logical_date": record.LogicalDate,
 			"checkin_time": record.CheckinTime, "is_retro": record.IsRetro, "daily": "", "book": "", "video": "", "verse": ""}
+		item["task_type"] = record.TaskType
+		item["task_id"] = record.TaskID
+		item["week_id"] = record.WeekID
 		switch record.TaskType {
 		case "daily_devotion":
 			item["daily"] = "done"
@@ -176,7 +178,7 @@ func (a *app) handleBotEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, err := a.db.QueryContext(r.Context(), `
-		SELECT c.id, COALESCE(NULLIF(m.member_name,''),u.display_name), c.logical_date,
+		SELECT c.id, COALESCE(c.task_id,0), COALESCE(c.week_id,0), COALESCE(NULLIF(m.member_name,''),u.display_name), c.logical_date,
 		       c.checkin_time, c.task_type, COALESCE(c.detail,''), COALESCE(c.part,''),
 		       COALESCE(st.title,''), c.is_retro, c.updated_at, c.deleted_at
 		FROM checkin_records c
@@ -193,12 +195,12 @@ func (a *app) handleBotEvents(w http.ResponseWriter, r *http.Request) {
 	events := make([]map[string]any, 0)
 	lastTime, lastID := updatedAt, afterID
 	for rows.Next() {
-		var id uint64
+		var id, taskID, weekID uint64
 		var name, taskType, detail, part, taskTitle string
 		var logicalDate, checkinTime, changedAt time.Time
 		var isRetro bool
 		var deletedAt sql.NullTime
-		if err := rows.Scan(&id, &name, &logicalDate, &checkinTime, &taskType, &detail, &part, &taskTitle, &isRetro, &changedAt, &deletedAt); err != nil {
+		if err := rows.Scan(&id, &taskID, &weekID, &name, &logicalDate, &checkinTime, &taskType, &detail, &part, &taskTitle, &isRetro, &changedAt, &deletedAt); err != nil {
 			writeError(w, http.StatusInternalServerError, "bot_events_failed")
 			return
 		}
@@ -208,7 +210,7 @@ func (a *app) handleBotEvents(w http.ResponseWriter, r *http.Request) {
 			action = "cancel"
 		}
 		events = append(events, map[string]any{
-			"id": id, "action": action, "name": strings.TrimSpace(name), "type": label, "task_type": taskType,
+			"id": id, "task_id": taskID, "week_id": weekID, "action": action, "name": strings.TrimSpace(name), "type": label, "task_type": taskType,
 			"logical_date": logicalDate.Format("2006-01-02"), "checkin_time": checkinTime.Format(time.RFC3339),
 			"changed_at": changedAt.UTC().Format(time.RFC3339Nano), "is_retro": isRetro,
 		})
@@ -284,7 +286,7 @@ func botTaskType(value string) string {
 		return "daily_devotion"
 	case "每日读经", "读经", "daily_scripture":
 		return "daily_scripture"
-	case "周任务", "每周打卡", "weekly_checkin":
+	case "周任务", "每周打卡", "每周学习", "周学习", "weekly_checkin":
 		return "weekly_checkin"
 	case "周读物", "读物", "weekly_book":
 		return "weekly_book"
@@ -377,18 +379,6 @@ func (a *app) handleBotCreateCheckin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "future_checkin_not_allowed")
 		return
 	}
-	if taskType == "daily_devotion" || taskType == "daily_scripture" {
-		settings, err := a.groupLearningConfig(r.Context(), group.ID)
-		if err != nil {
-			slog.ErrorContext(r.Context(), "bot checkin learning config lookup failed", "group_id", group.ID, "error", err)
-			writeError(w, http.StatusInternalServerError, "checkin_save_failed")
-			return
-		}
-		if !learningdomain.DailyTaskTypeEnabledOnDate(settings, taskType, req.LogicalDate) {
-			writeError(w, http.StatusBadRequest, "daily_task_disabled")
-			return
-		}
-	}
 	record := &checkindomain.Record{GroupID: group.ID, UserID: userID, LogicalDate: req.LogicalDate, TaskType: taskType, Detail: strings.TrimSpace(req.Detail), IsRetro: req.IsRetro}
 	if taskType != "daily_devotion" && taskType != "daily_scripture" {
 		weeks, loadErr := a.learning.ListWeeks(r.Context(), group.ID)
@@ -426,7 +416,16 @@ func (a *app) handleBotCreateCheckin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	id, existing, err := a.checkins.Create(r.Context(), record, userID)
+	id, existing, err := a.createAdmittedCheckin(r.Context(), record, userID)
+	if errors.Is(err, errDailyTaskDisabled) {
+		writeError(w, http.StatusBadRequest, "daily_task_disabled")
+		return
+	}
+	if errors.Is(err, errCheckinConfig) {
+		slog.ErrorContext(r.Context(), "bot checkin learning config lookup failed", "group_id", group.ID, "error", err)
+		writeError(w, http.StatusInternalServerError, "checkin_save_failed")
+		return
+	}
 	if errors.Is(err, checkindomain.ErrInvalidWeeklyTarget) {
 		writeError(w, http.StatusBadRequest, "invalid_checkin_target")
 		return

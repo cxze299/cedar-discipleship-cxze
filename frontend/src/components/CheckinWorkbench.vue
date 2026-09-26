@@ -380,7 +380,7 @@ async function exportStatsChart() {
         @today="chooseDate(maxDate)"
         @close="datePickerOpen = false"
       />
-      <VerseQuiz :open="Boolean(quizTask)" :task="quizTask" :scope="quizScope" :user-name="app.user?.display_name || app.user?.username || ''" :user-id="Number(app.user?.id || 0)" :members="app.members" :can-select-member="Boolean(app.user?.is_super_admin)" @close="quizTask = null" />
+      <VerseQuiz :open="Boolean(quizTask)" :task="quizTask" :scope="quizScope" :user-name="app.user?.member_name || app.user?.display_name || app.user?.username || ''" :user-id="Number(app.user?.id || 0)" :members="app.members" :can-select-member="Boolean(app.user?.is_super_admin)" @close="quizTask = null" />
 
       <!-- Optional Monthly Stats Section (below tasks) -->
       <section v-if="statsVisible" class="stats-section">
