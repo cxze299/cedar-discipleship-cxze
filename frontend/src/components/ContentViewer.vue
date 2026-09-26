@@ -592,6 +592,9 @@ function openAdjacentItem(item) {
   .viewer-related-mobile__item small { color: var(--cd-muted); }
   .viewer-related-mobile__item.active { background: var(--cd-primary-soft); color: var(--cd-primary); }
   .viewer-main { flex: 1 1 auto; }
+  .viewer-main-pdf { flex-direction: column; width: 100%; }
+  .viewer-main-pdf > .viewer-main-toolbar { flex: 0 0 auto; }
+  .viewer-main-pdf > :deep(.pdf-viewer) { flex: 1 1 auto; width: 100%; }
 }
 
 @media (max-width: 767px) {

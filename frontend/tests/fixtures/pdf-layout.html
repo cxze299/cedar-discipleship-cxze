@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body>
+  <div id="app"></div>
+  <script type="module">
+    import { createApp } from 'vue';
+    import { createPinia } from 'pinia';
+    import ContentViewer from '/src/components/ContentViewer.vue';
+    import { useContentViewerStore } from '/src/stores/contentViewer.js';
+    import '/src/styles.css';
+    import '/src/styles/tokens.css';
+    import '/src/styles/base.css';
+    import '/src/styles/layout.css';
+    import '/src/styles/composition.css';
+
+    const pinia = createPinia();
+    createApp(ContentViewer).use(pinia).mount('#app');
+    const item = { title: '阅读资料', type: 'pdf' };
+    useContentViewerStore(pinia).setViewer({
+      ...item,
+      url: '/tests/fixtures/pdf-layout.pdf',
+      relatedSections: [{ key: 'reading', label: '读物', actionLabel: '查看', items: [item] }],
+    });
+  </script>
+</body>
+</html>
