@@ -108,24 +108,11 @@ func (a *app) handleDashboardActiveRule(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "invalid_active_member_rule")
 		return
 	}
-	settings, err := a.groupLearningConfig(r.Context(), groupID)
-	if err != nil {
-		log.Printf(
-			"dashboard active rule load failed method=%s path=%s user_id=%d group_id=%d err=%v",
-			r.Method,
-			r.URL.Path,
-			u.ID,
-			groupID,
-			err,
-		)
-		writeError(w, http.StatusInternalServerError, "active_member_rule_failed")
-		return
-	}
-	settings["active_member_rule"] = map[string]any{
+	settings := map[string]any{
 		"mode":       rule.Mode,
 		"task_types": rule.TaskTypes,
 	}
-	if err := a.upsertGroupLearningConfig(r.Context(), groupID, settings); err != nil {
+	if err := a.learning.SaveActiveMemberRule(r.Context(), groupID, settings); err != nil {
 		log.Printf(
 			"dashboard active rule save failed method=%s path=%s user_id=%d group_id=%d err=%v",
 			r.Method,
@@ -137,6 +124,7 @@ func (a *app) handleDashboardActiveRule(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "active_member_rule_failed")
 		return
 	}
+	a.refreshTodayContent(groupID)
 	a.audit(
 		groupID,
 		u.ID,

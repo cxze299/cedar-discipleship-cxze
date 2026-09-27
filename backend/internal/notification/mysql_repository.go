@@ -213,6 +213,7 @@ func (s *CheckinSource) periodSnapshot(ctx context.Context, event Event, start, 
 	}
 	defer rows.Close()
 	var entries []Entry
+	var coveredRecordID uint64
 	for rows.Next() {
 		var entry Entry
 		var title, content, assetTitle, mediaType, mediaName string
@@ -232,6 +233,7 @@ func (s *CheckinSource) periodSnapshot(ctx context.Context, event Event, start, 
 		entry.BookName = notificationBookName(title, content, assetTitle)
 		entry.MediaKind = notificationMediaKind(mediaType, mediaName, content)
 		entries = append(entries, entry)
+		coveredRecordID = max(coveredRecordID, entry.RecordID)
 	}
 	if err := rows.Err(); err != nil {
 		return Snapshot{}, fmt.Errorf("read notification summary: %w", err)
@@ -241,10 +243,11 @@ func (s *CheckinSource) periodSnapshot(ctx context.Context, event Event, start, 
 		topic = "daily"
 	}
 	return Snapshot{
-		Text:      FormatCheckins(entries, event.RecordID, daily),
-		ExpiresAt: endDate.AddDate(0, 0, 1),
-		Topic:     topic,
-		Version:   topic + ":" + end,
+		Text:            FormatCheckins(entries, event.RecordID, daily),
+		ExpiresAt:       endDate.AddDate(0, 0, 1),
+		Topic:           topic,
+		Version:         topic + ":" + end,
+		CoveredRecordID: coveredRecordID,
 	}, nil
 }
 

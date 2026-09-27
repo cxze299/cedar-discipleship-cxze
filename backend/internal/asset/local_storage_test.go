@@ -2,6 +2,8 @@ package asset
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"io"
 	"os"
@@ -9,6 +11,47 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestLocalStorageLiteralObjectKeys(t *testing.T) {
+	for _, name := range []string{"lesson.pdf", "Lesson%20One.pdf", "Lesson%25One.pdf", "Lesson%2FOne.pdf", "100%.pdf"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			dir := "team-agp-resources/objects/0000000000000000000000000000000a"
+			key := dir + "/" + name
+			content := []byte("migrated literal file " + name)
+			if err := os.MkdirAll(filepath.Join(root, dir), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, key), content, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			storage := NewLocalStorage(root)
+			resolved, err := storage.Resolve(t.Context(), key)
+			if err != nil {
+				t.Fatalf("resolve migrated object: %v", err)
+			}
+			data, err := os.ReadFile(resolved.AbsolutePath)
+			if err != nil || string(data) != string(content) || resolved.OriginalName != name {
+				t.Fatalf("resolved wrong object: %+v bytes=%q err=%v", resolved, data, err)
+			}
+			stored, err := storage.Save(t.Context(), dir, name, strings.NewReader(string(content)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			sum := sha256.Sum256(content)
+			if stored.StoragePath != key || stored.ChecksumSHA256 != hex.EncodeToString(sum[:]) || stored.FileSize != uint64(len(content)) {
+				t.Fatalf("stored object metadata changed: %+v", stored)
+			}
+			if err := storage.Delete(t.Context(), key); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(filepath.Join(root, key)); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("literal object remains after delete: %v", err)
+			}
+		})
+	}
+}
 
 func TestLocalStorageSaveRemovesPartialFile(t *testing.T) {
 	root := t.TempDir()

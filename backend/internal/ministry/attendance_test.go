@@ -3,6 +3,7 @@ package ministry
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 )
@@ -103,6 +104,24 @@ func TestServiceAttendanceSheetBuildsRequiredDates(t *testing.T) {
 	}
 	if !sheet.CanMark || sheet.CanManage {
 		t.Fatalf("permissions = mark:%v manage:%v, want true,false", sheet.CanMark, sheet.CanManage)
+	}
+}
+
+func TestAttendanceExtraDatesIncludeLocalMonthBoundaries(t *testing.T) {
+	for _, month := range []string{"2026-09", "2024-02"} {
+		for _, offset := range []int{8, -7, 0} {
+			loc := time.FixedZone("local", offset*60*60)
+			start, end, err := attendanceMonthRange(month, loc)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := []string{start.Format("2006-01-02"), end.Format("2006-01-02")}
+			extra := append(slices.Clone(want), start.AddDate(0, 0, -1).Format("2006-01-02"), end.AddDate(0, 0, 1).Format("2006-01-02"))
+			got := attendanceDates(start, end, nil, extra)
+			if !slices.Equal(got, want) {
+				t.Errorf("month=%s offset=%d dates=%v want=%v", month, offset, got, want)
+			}
+		}
 	}
 }
 

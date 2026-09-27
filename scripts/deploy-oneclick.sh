@@ -77,13 +77,8 @@ TMP_INPUT_DIR=""
 MIGRATION_CONFIG_IN_CONTAINER=""
 MIGRATION_RECORDS_IN_CONTAINER=""
 
-rand_hex() {
-  LC_ALL=C tr -dc 'a-f0-9' </dev/urandom | head -c "${1:-32}"
-}
-
-rand_password() {
-  LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c "${1:-16}"
-}
+# shellcheck source=scripts/lib/random.sh
+. "$ROOT_DIR/scripts/lib/random.sh"
 
 log() {
   printf '\n[%s] %s\n' "$(date '+%F %T')" "$*"
@@ -275,7 +270,7 @@ fi
 trap cleanup EXIT
 
 if [ -z "${AGP_JWT_SECRET:-}" ]; then
-  AGP_JWT_SECRET="$(rand_hex 48)"
+  AGP_JWT_SECRET="$(rand_hex 24)"
   export AGP_JWT_SECRET
 fi
 

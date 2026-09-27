@@ -6,6 +6,7 @@ type Member struct {
 	Username    string   `json:"username"`
 	DisplayName string   `json:"display_name"`
 	NamePinyin  string   `json:"name_pinyin"`
+	MemberName  string   `json:"member_name,omitempty"`
 	Roles       []string `json:"roles"`
 }
 
@@ -72,16 +73,6 @@ type CheckinDetail struct {
 	Username    string
 	MemberName  string
 	IsRetro     bool
-}
-
-type DailySummary struct {
-	LogicalDate    string
-	TotalCheckins  int
-	CheckedMembers int
-	DevotionCount  int
-	BookCount      int
-	VideoCount     int
-	VerseCount     int
 }
 
 type FeedbackExport struct {

@@ -461,12 +461,20 @@ func (r *MySQLRepository) SetRole(ctx context.Context, groupID, userID uint64, r
 }
 
 func (r *MySQLRepository) ResetNonSuperPasswords(ctx context.Context, passwordHash string, at time.Time) (int64, error) {
-	res, err := r.db.ExecContext(ctx, `UPDATE users SET password_hash=?, must_change_password=1, updated_at=? WHERE is_super_admin=0`, passwordHash, at)
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
-	affected, _ := res.RowsAffected()
-	return affected, nil
+	defer tx.Rollback()
+	ids, err := passwordTargetsTx(ctx, tx, `SELECT id FROM users WHERE is_super_admin=0 ORDER BY id FOR UPDATE`)
+	if err != nil {
+		return 0, err
+	}
+	affected, err := resetPasswordsTx(ctx, tx, ids, passwordHash, at)
+	if err != nil {
+		return 0, err
+	}
+	return affected, tx.Commit()
 }
 
 func (r *MySQLRepository) SetGroupDefaultPassword(ctx context.Context, groupID uint64, passwordHash string, at time.Time) (int64, error) {
@@ -478,18 +486,65 @@ func (r *MySQLRepository) SetGroupDefaultPassword(ctx context.Context, groupID u
 	if _, err := tx.ExecContext(ctx, `UPDATE study_groups SET default_password_hash=?, updated_at=? WHERE id=?`, passwordHash, at, groupID); err != nil {
 		return 0, err
 	}
-	res, err := tx.ExecContext(ctx, `UPDATE users u
+	ids, err := passwordTargetsTx(ctx, tx, `SELECT u.id FROM users u
 		JOIN group_members m ON m.user_id=u.id AND m.group_id=? AND m.status=1
 		LEFT JOIN user_group_roles r ON r.user_id=u.id AND r.group_id=? AND r.role=?
-		SET u.password_hash=?, u.must_change_password=1, u.updated_at=?
 		WHERE u.is_super_admin=0
 		  AND r.id IS NULL
-		  AND (SELECT COUNT(*) FROM group_members gm WHERE gm.user_id=u.id AND gm.status=1)=1`, groupID, groupID, RoleGroupLeader, passwordHash, at)
+		  AND (SELECT COUNT(*) FROM group_members gm WHERE gm.user_id=u.id AND gm.status=1)=1
+		ORDER BY u.id FOR UPDATE`, groupID, groupID, RoleGroupLeader)
 	if err != nil {
 		return 0, err
 	}
-	affected, _ := res.RowsAffected()
+	affected, err := resetPasswordsTx(ctx, tx, ids, passwordHash, at)
+	if err != nil {
+		return 0, err
+	}
 	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return affected, nil
+}
+
+func passwordTargetsTx(ctx context.Context, tx *sql.Tx, query string, args ...any) ([]uint64, error) {
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []uint64
+	for rows.Next() {
+		var id uint64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// Callers lock the selected users before changing credentials or sessions.
+func resetPasswordsTx(ctx context.Context, tx *sql.Tx, ids []uint64, passwordHash string, at time.Time) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	marks := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	args := []any{passwordHash, at}
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	res, err := tx.ExecContext(ctx, `UPDATE users SET password_hash=?,must_change_password=1,updated_at=?
+		WHERE id IN (`+marks+`)`, args...)
+	if err != nil {
+		return 0, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	args[0] = at
+	if _, err := tx.ExecContext(ctx, `UPDATE refresh_sessions SET revoked_at=?,updated_at=?
+		WHERE revoked_at IS NULL AND user_id IN (`+marks+`)`, args...); err != nil {
 		return 0, err
 	}
 	return affected, nil
@@ -596,9 +651,29 @@ func (r *MySQLRepository) PasswordHash(ctx context.Context, userID uint64) (stri
 	return hash, err
 }
 
-func (r *MySQLRepository) UpdatePassword(ctx context.Context, userID uint64, passwordHash string, at time.Time) error {
-	_, err := r.db.ExecContext(ctx, `UPDATE users SET password_hash = ?, must_change_password = 0, updated_at = ? WHERE id = ?`, passwordHash, at, userID)
-	return err
+func (r *MySQLRepository) UpdatePassword(ctx context.Context, userID uint64, oldHash, passwordHash string, at time.Time) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx, `UPDATE users SET password_hash=?,must_change_password=0,updated_at=?
+		WHERE id=? AND BINARY password_hash=?`, passwordHash, at, userID, oldHash)
+	if err != nil {
+		return err
+	}
+	count, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return ErrPasswordChanged
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE refresh_sessions SET revoked_at=?,updated_at=?
+		WHERE user_id=? AND revoked_at IS NULL`, at, at, userID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (r *MySQLRepository) allGroups(ctx context.Context) ([]Group, error) {

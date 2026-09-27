@@ -111,21 +111,38 @@ export AGP_TOKEN_TTL=''
 
 如果部署机器无法访问 `proxy.golang.org` 或 `registry.npmjs.org`，镜像构建会在依赖下载阶段超时。NAS 或受限网络环境里，先设置 Go 模块代理和 npm registry 再执行部署：
 
-这些变量会透传到 `backend`/`frontend` 镜像构建，以及迁移脚本内部启动的 `golang:1.25-bookworm` 容器。
+这些变量会透传到 `backend`/`frontend` 镜像构建，以及迁移脚本内部启动的 Go 容器。后端镜像与 CI 使用 Go 1.27，源码最低要求为 Go 1.25。
 
 ### 2. 本地检查
 
 ```bash
 cd backend
-go test ./...
+go test -race -shuffle=on ./...
 
 cd ..
 cd frontend
-npm install
+npm ci
+npm test
+npm run typecheck
 npm run build
 
 cd ..
+python3 -m unittest discover -s scripts -p 'test_*.py'
 docker compose -f deploy/docker-compose.separated.yml config
+```
+
+PR 自动检查 Go race、MySQL 集成、静态分析、可达依赖漏洞、前端测试/类型/构建，以及 Python 和 Shell 脚本。
+
+数据库集成测试只允许显式指定本机隔离 MySQL；每个测试创建独立数据库并在结束时删除。不要指向日常开发或生产数据库。运行示例：
+
+```bash
+docker run --rm -d --name cedar-test-mysql \
+  -e MYSQL_ALLOW_EMPTY_PASSWORD=yes -e MYSQL_ROOT_HOST=% \
+  -p 127.0.0.1:33060:3306 mysql:8.0
+# 等待 mysqladmin ping 成功后运行：
+cd backend
+CEDAR_TEST_MYSQL_ADDR=127.0.0.1:33060 go test -race -shuffle=on -tags=integration -count=1 -timeout=120s ./...
+docker stop cedar-test-mysql
 ```
 
 ## 新环境一键部署

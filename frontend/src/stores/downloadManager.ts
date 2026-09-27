@@ -9,7 +9,8 @@ import {
   type DownloadResource,
   type DownloadResourceInput,
 } from '../runtime/downloads';
-import { csrfToken, getAccessToken, setAccessToken } from '../runtime/authSession';
+import { getAccessToken, refreshAccessSession } from '../runtime/authSession';
+import { saveBlob } from '../runtime/browserDownload';
 
 export type DownloadStatus = 'queued' | 'downloading' | 'paused' | 'failed';
 
@@ -37,6 +38,7 @@ const historyLimit = 100;
 const flushThresholdBytes = 1024 * 1024;
 const storage = new DownloadChunkStorage();
 const controllers = new Map<string, AbortController>();
+const completions = new Map<string, Promise<void>>();
 
 export const useDownloadManagerStore = defineStore('downloadManager', {
   state: () => ({
@@ -144,7 +146,6 @@ export const useDownloadManagerStore = defineStore('downloadManager', {
       if (!task || !['queued', 'downloading'].includes(task.status)) return;
       task.status = 'paused';
       controllers.get(taskID)?.abort();
-      controllers.delete(taskID);
       this.persist();
       this.pump();
     },
@@ -163,19 +164,19 @@ export const useDownloadManagerStore = defineStore('downloadManager', {
     },
 
     async cancel(taskID: string) {
+      const scope = this.scope;
       controllers.get(taskID)?.abort();
-      controllers.delete(taskID);
       this.tasks = this.tasks.filter((task) => task.id !== taskID);
+      await completions.get(taskID);
       await storage.clearChunks(taskID).catch(() => undefined);
+      if (this.scope !== scope) return;
       this.persist();
       this.pump();
     },
 
     async clearQueue() {
       const removable = this.tasks.filter((task) => task.status !== 'downloading');
-      await Promise.all(removable.map((task) => storage.clearChunks(task.id).catch(() => undefined)));
-      this.tasks = this.tasks.filter((task) => task.status === 'downloading');
-      this.persist();
+      await Promise.all(removable.map((task) => this.cancel(task.id)));
     },
 
     clearHistory() {
@@ -196,7 +197,7 @@ export const useDownloadManagerStore = defineStore('downloadManager', {
       let capacity = concurrentDownloads - this.tasks.filter((task) => task.status === 'downloading').length;
       for (const task of this.tasks) {
         if (capacity <= 0) break;
-        if (task.status !== 'queued') continue;
+        if (task.status !== 'queued' || controllers.has(task.id)) continue;
         task.status = 'downloading';
         task.error = '';
         capacity -= 1;
@@ -207,18 +208,27 @@ export const useDownloadManagerStore = defineStore('downloadManager', {
 
     async runTask(taskID: string) {
       const task = this.tasks.find((item) => item.id === taskID);
-      if (!task || task.status !== 'downloading') return;
+      if (!task || task.status !== 'downloading' || controllers.has(taskID)) return;
       const runScope = this.scope;
       const controller = new AbortController();
       controllers.set(taskID, controller);
+      let finish!: () => void;
+      completions.set(taskID, new Promise<void>((resolve) => { finish = resolve; }));
+      const isCurrent = () => (
+        this.scope === runScope && controllers.get(taskID) === controller
+        && !controller.signal.aborted && this.tasks.includes(task) && task.status === 'downloading'
+      );
+      let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
       try {
         let offset = await storage.chunkSize(taskID);
+        if (!isCurrent()) return;
         task.receivedBytes = offset;
         let response: Response | null = null;
 
         for (let attempt = 0; attempt < 2; attempt += 1) {
+          if (!isCurrent()) return;
           const headers: Record<string, string> = {};
-          const token = currentAuthToken();
+          const token = getAccessToken();
           if (task.resource.url.startsWith('/api/') && token) headers.Authorization = `Bearer ${token}`;
           if (offset > 0) headers.Range = `bytes=${offset}-`;
           response = await fetch(task.resource.url, {
@@ -227,13 +237,15 @@ export const useDownloadManagerStore = defineStore('downloadManager', {
             cache: 'no-store',
             signal: controller.signal,
           });
+          if (!isCurrent()) return;
 
           if (response.status === 401 && task.resource.url.startsWith('/api/') && attempt === 0) {
-            const refreshed = await refreshDownloadSession();
+            const refreshed = await refreshAccessSession();
             if (refreshed) continue;
           }
           if (response.status === 416 && offset > 0 && attempt === 0) {
             await storage.clearChunks(taskID);
+            if (!isCurrent()) return;
             offset = 0;
             task.receivedBytes = 0;
             continue;
@@ -244,6 +256,7 @@ export const useDownloadManagerStore = defineStore('downloadManager', {
             const range = parseContentRange(response.headers.get('Content-Range'));
             if (!range || range.start !== offset) {
               await storage.clearChunks(taskID);
+              if (!isCurrent()) return;
               offset = 0;
               task.receivedBytes = 0;
               if (attempt === 0) continue;
@@ -251,6 +264,7 @@ export const useDownloadManagerStore = defineStore('downloadManager', {
             }
           } else if (offset > 0 && response.status === 200) {
             await storage.clearChunks(taskID);
+            if (!isCurrent()) return;
             offset = 0;
             task.receivedBytes = 0;
           }
@@ -263,6 +277,7 @@ export const useDownloadManagerStore = defineStore('downloadManager', {
         const total = range?.total || (responseLength > 0 ? offset + responseLength : task.resource.size);
         if (total > MAX_MANAGED_DOWNLOAD_BYTES) throw new Error('download_file_too_large');
         await ensureStorageCapacity(Math.max(0, total - offset));
+        if (!isCurrent()) return;
 
         task.totalBytes = total;
         task.resumable = response.status === 206 || response.headers.get('Accept-Ranges')?.toLowerCase() === 'bytes';
@@ -274,22 +289,24 @@ export const useDownloadManagerStore = defineStore('downloadManager', {
         };
         this.persist();
 
-        const reader = response.body.getReader();
+        reader = response.body.getReader();
         const existingChunks = await storage.listChunks(taskID);
+        if (!isCurrent()) return;
         let chunkIndex = existingChunks.length;
         let pendingParts: ArrayBuffer[] = [];
         let pendingBytes = 0;
         const flush = async () => {
-          if (!pendingBytes) return;
+          if (!pendingBytes || !isCurrent()) return;
           await storage.putChunk(taskID, chunkIndex, new Blob(pendingParts));
           chunkIndex += 1;
           pendingParts = [];
           pendingBytes = 0;
-          this.persist();
+          if (isCurrent()) this.persist();
         };
 
         while (true) {
           const result = await reader.read();
+          if (!isCurrent()) return;
           if (result.done) break;
           const part = result.value.slice().buffer as ArrayBuffer;
           pendingParts.push(part);
@@ -299,10 +316,12 @@ export const useDownloadManagerStore = defineStore('downloadManager', {
           if (pendingBytes >= flushThresholdBytes) await flush();
         }
         await flush();
+        if (!isCurrent()) return;
 
         const chunks = await storage.listChunks(taskID);
+        if (!isCurrent()) return;
         const blob = new Blob(chunks, { type: task.resource.mimeType || 'application/octet-stream' });
-        triggerBrowserDownload(blob, task.resource.name);
+        saveBlob(blob, task.resource.name);
         this.history.unshift({
           id: task.id,
           resource: { ...task.resource, size: blob.size },
@@ -314,19 +333,25 @@ export const useDownloadManagerStore = defineStore('downloadManager', {
         this.notice = `${task.resource.name} 下载完成`;
         await storage.clearChunks(taskID);
       } catch (error) {
-        const current = this.tasks.find((item) => item.id === taskID);
-        if (current && current.status === 'downloading') {
+        if (isCurrent()) {
           const errorCode = error instanceof Error ? error.message : 'download_failed';
           if (errorCode === 'download_file_too_large') {
             await storage.clearChunks(taskID).catch(() => undefined);
-            current.receivedBytes = 0;
+            if (!isCurrent()) return;
+            task.receivedBytes = 0;
           }
-          current.status = 'failed';
-          current.error = errorCode;
-          this.notice = `${current.resource.name} 下载失败`;
+          task.status = 'failed';
+          task.error = errorCode;
+          this.notice = `${task.resource.name} 下载失败`;
         }
       } finally {
+        if (reader) {
+          await reader.cancel().catch(() => undefined);
+          reader.releaseLock();
+        }
         if (controllers.get(taskID) === controller) controllers.delete(taskID);
+        completions.delete(taskID);
+        finish();
         if (this.scope === runScope) {
           this.persist();
           this.pump();
@@ -336,7 +361,6 @@ export const useDownloadManagerStore = defineStore('downloadManager', {
 
     abortAll() {
       for (const controller of controllers.values()) controller.abort();
-      controllers.clear();
     },
 
     persist() {
@@ -412,36 +436,4 @@ async function ensureStorageCapacity(requiredBytes: number): Promise<void> {
   } catch (error) {
     if (error instanceof Error && error.message === 'download_storage_insufficient') throw error;
   }
-}
-
-function currentAuthToken(): string {
-  return getAccessToken();
-}
-
-async function refreshDownloadSession(): Promise<boolean> {
-  try {
-    const response = await fetch('/api/auth/refresh', {
-      method: 'POST',
-      headers: { 'X-CSRF-Token': csrfToken() },
-      credentials: 'same-origin',
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok || !data.token) return false;
-    setAccessToken(data.token);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function triggerBrowserDownload(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  link.rel = 'noopener';
-  document.body.append(link);
-  link.click();
-  link.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }

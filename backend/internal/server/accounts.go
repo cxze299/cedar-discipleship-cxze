@@ -264,7 +264,7 @@ type refreshSession struct {
 	ExpiresAt      time.Time
 }
 
-func (a *app) issueRefreshSession(ctx context.Context, w http.ResponseWriter, r *http.Request, userID, currentGroupID uint64) (uint64, error) {
+func (a *app) issueRefreshSession(ctx context.Context, w http.ResponseWriter, r *http.Request, userID, currentGroupID uint64, verifiedHash string) (uint64, error) {
 	refreshToken, err := randomURLToken(32)
 	if err != nil {
 		return 0, err
@@ -275,7 +275,19 @@ func (a *app) issueRefreshSession(ctx context.Context, w http.ResponseWriter, r 
 	}
 	now := time.Now().UTC()
 	expiresAt := now.Add(a.effectiveRefreshTTL())
-	res, err := a.db.ExecContext(ctx, `INSERT INTO refresh_sessions
+	tx, err := a.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	var currentHash string
+	if err := tx.QueryRowContext(ctx, `SELECT password_hash FROM users WHERE id=? AND status=1 FOR UPDATE`, userID).Scan(&currentHash); err != nil {
+		return 0, err
+	}
+	if !hmac.Equal([]byte(currentHash), []byte(verifiedHash)) {
+		return 0, userdomain.ErrPasswordChanged
+	}
+	res, err := tx.ExecContext(ctx, `INSERT INTO refresh_sessions
 		(user_id,token_hash,csrf_hash,current_group_id,expires_at,created_at,updated_at)
 		VALUES (?,?,?,?,?,?,?)`,
 		userID, tokenHash(refreshToken), tokenHash(csrfToken), nullableUint64SQL(currentGroupID), expiresAt, now, now)
@@ -286,16 +298,24 @@ func (a *app) issueRefreshSession(ctx context.Context, w http.ResponseWriter, r 
 	if err != nil {
 		return 0, err
 	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
 	setAuthCookies(w, r, refreshToken, csrfToken, expiresAt)
 	return sessionID, nil
 }
 
 func (a *app) refreshSession(ctx context.Context, token, csrf string) (refreshSession, error) {
 	var session refreshSession
+	tx, err := a.db.BeginTx(ctx, nil)
+	if err != nil {
+		return session, err
+	}
+	defer tx.Rollback()
 	now := time.Now().UTC()
-	err := a.db.QueryRowContext(ctx, `SELECT id,user_id,COALESCE(current_group_id,0),expires_at
+	err = tx.QueryRowContext(ctx, `SELECT id,user_id,COALESCE(current_group_id,0),expires_at
 		FROM refresh_sessions
-		WHERE token_hash=? AND csrf_hash=? AND revoked_at IS NULL AND expires_at>?`,
+		WHERE token_hash=? AND csrf_hash=? AND revoked_at IS NULL AND expires_at>? FOR UPDATE`,
 		tokenHash(token), tokenHash(csrf), now).Scan(&session.ID, &session.UserID, &session.CurrentGroupID, &session.ExpiresAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -304,12 +324,13 @@ func (a *app) refreshSession(ctx context.Context, token, csrf string) (refreshSe
 		return session, err
 	}
 	session.ExpiresAt = now.Add(a.effectiveRefreshTTL())
-	if _, err := a.db.ExecContext(ctx, `UPDATE refresh_sessions
+	_, err = tx.ExecContext(ctx, `UPDATE refresh_sessions
 		SET expires_at=?,last_used_at=?,updated_at=?
-		WHERE token_hash=? AND revoked_at IS NULL`, session.ExpiresAt, now, now, tokenHash(token)); err != nil {
+		WHERE id=? AND revoked_at IS NULL AND expires_at>?`, session.ExpiresAt, now, now, session.ID, now)
+	if err != nil {
 		return session, err
 	}
-	return session, nil
+	return session, tx.Commit()
 }
 
 func (a *app) activeRefreshSession(ctx context.Context, sessionID, userID uint64) (bool, error) {

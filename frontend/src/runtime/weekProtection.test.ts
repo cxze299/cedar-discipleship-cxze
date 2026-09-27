@@ -42,6 +42,33 @@ describe('saveWeekWithConfirmation', () => {
     await expect(saveWeekWithConfirmation(send, confirm)).rejects.toBe(error);
     expect(confirm).not.toHaveBeenCalled();
   });
+
+  it.each([false, true])('waits for the dialog before acting on %s', async (confirmed) => {
+    let resolveConfirmation!: (value: boolean) => void;
+    const decision = new Promise<boolean>((resolve) => { resolveConfirmation = resolve; });
+    const send = vi.fn()
+      .mockRejectedValueOnce(Object.assign(new Error(), { code: 'week_has_checkins' }))
+      .mockResolvedValue({ id: 7 });
+    const confirm = vi.fn(() => decision);
+    const pendingSave = saveWeekWithConfirmation(send, confirm);
+    await vi.waitFor(() => expect(confirm).toHaveBeenCalledOnce());
+    const callsBeforeDecision = [...send.mock.calls];
+    resolveConfirmation(confirmed);
+    await expect(pendingSave).resolves.toEqual(confirmed ? { id: 7 } : null);
+    expect(callsBeforeDecision).toEqual([[false]]);
+    expect(send.mock.calls).toEqual(confirmed ? [[false], [true]] : [[false]]);
+  });
+
+  it('propagates a failed forced save without prompting again', async () => {
+    const failure = new Error('save failed');
+    const send = vi.fn()
+      .mockRejectedValueOnce(Object.assign(new Error(), { code: 'week_has_checkins' }))
+      .mockRejectedValueOnce(failure);
+    const confirm = vi.fn().mockResolvedValue(true);
+    await expect(saveWeekWithConfirmation(send, confirm)).rejects.toBe(failure);
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(send.mock.calls).toEqual([[false], [true]]);
+  });
 });
 
 describe('nextReadingStartPage', () => {

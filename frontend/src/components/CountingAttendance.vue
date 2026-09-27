@@ -11,6 +11,7 @@ import {
 } from '@lucide/vue';
 import { api, fetchWithAuth, toast as showToast } from '../legacy-app';
 import DateField from './ui/DateField.vue';
+import { saveBlob } from '../runtime/browserDownload';
 
 const props = defineProps({
   groupId: {
@@ -141,21 +142,17 @@ async function toggleAttendance(member, date) {
 }
 
 async function exportAttendance() {
+  const groupID = props.groupId;
+  const exportMonth = month.value;
   try {
-    const response = await fetchWithAuth(`/api/ministry-groups/${props.groupId}/attendance/export?month=${month.value}`);
+    const response = await fetchWithAuth(`/api/ministry-groups/${groupID}/attendance/export?month=${exportMonth}`);
     if (!response.ok) {
       const body = await response.json().catch(() => ({}));
       throw new Error(body.error || `HTTP ${response.status}`);
     }
     const blob = await response.blob();
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `数点组考勤-${month.value}.csv`;
-    document.body.append(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    if (props.groupId !== groupID || month.value !== exportMonth) return;
+    saveBlob(blob, `数点组考勤-${exportMonth}.csv`);
   } catch (error) {
     showToast(error.message);
   }

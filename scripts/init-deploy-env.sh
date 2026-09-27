@@ -4,31 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${ENV_FILE:-$ROOT_DIR/.env}"
 
-rand_hex() {
-  local bytes="${1:-48}"
-  if command -v openssl >/dev/null 2>&1; then
-    openssl rand -hex "$bytes"
-    return
-  fi
-  local value=""
-  while [ "${#value}" -lt "$((bytes * 2))" ]; do
-    value="${value}$(od -An -N "$bytes" -tx1 /dev/urandom | tr -d ' \n')"
-  done
-  printf '%s\n' "${value:0:$((bytes * 2))}"
-}
-
-rand_password() {
-  local length="${1:-24}"
-  local value=""
-  while [ "${#value}" -lt "$length" ]; do
-    if command -v openssl >/dev/null 2>&1; then
-      value="${value}$(openssl rand -base64 "$length" | LC_ALL=C tr -dc 'A-Za-z0-9')"
-    else
-      value="${value}$(dd if=/dev/urandom bs=256 count=1 2>/dev/null | LC_ALL=C tr -dc 'A-Za-z0-9')"
-    fi
-  done
-  printf '%s\n' "${value:0:$length}"
-}
+# shellcheck source=scripts/lib/random.sh
+. "$ROOT_DIR/scripts/lib/random.sh"
 
 has_env_key() {
   local key="$1"

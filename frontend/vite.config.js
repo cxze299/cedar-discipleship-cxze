@@ -5,7 +5,7 @@ const buildVersion = process.env.APP_BUILD_VERSION || Date.now().toString(36);
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
-  const target = env.AGP_DEV_API_TARGET || process.env.AGP_DEV_API_TARGET || 'http://mouss.synology.me:5114';
+  const target = env.AGP_DEV_API_TARGET || process.env.AGP_DEV_API_TARGET || 'http://127.0.0.1:8080';
 
   return {
     define: {

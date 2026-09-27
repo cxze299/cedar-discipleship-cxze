@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -359,32 +358,37 @@ func (r *MySQLRepository) RequestJoin(
 	}
 	defer tx.Rollback()
 
-	var isMember int
-	if err := tx.QueryRowContext(
+	if _, err := lockGroupTx(ctx, tx, studyGroupID, groupID); err != nil {
+		return 0, err
+	}
+	var memberID uint64
+	err = tx.QueryRowContext(
 		ctx,
-		`SELECT COUNT(*) FROM ministry_group_members
-		  WHERE study_group_id=? AND ministry_group_id=? AND user_id=? AND status=1`,
+		`SELECT id FROM ministry_group_members
+		  WHERE study_group_id=? AND ministry_group_id=? AND user_id=? AND status=1 FOR UPDATE`,
 		studyGroupID,
 		groupID,
 		userID,
-	).Scan(&isMember); err != nil {
-		return 0, fmt.Errorf("checking ministry membership: %w", err)
-	}
-	if isMember > 0 {
+	).Scan(&memberID)
+	if err == nil {
 		return 0, ErrAlreadyMember
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return 0, fmt.Errorf("checking ministry membership: %w", err)
 	}
 
 	var requestID uint64
+	round := uint64(1)
 	var status Status
 	err = tx.QueryRowContext(
 		ctx,
-		`SELECT id,status FROM ministry_group_requests
+		`SELECT id,status,submission_round FROM ministry_group_requests
 		  WHERE study_group_id=? AND ministry_group_id=? AND user_id=? AND request_type='join'
 		  FOR UPDATE`,
 		studyGroupID,
 		groupID,
 		userID,
-	).Scan(&requestID, &status)
+	).Scan(&requestID, &status, &round)
 	switch {
 	case err == nil && status == StatusPending:
 		if !autoApprove {
@@ -394,10 +398,12 @@ func (r *MySQLRepository) RequestJoin(
 			return requestID, nil
 		}
 	case err == nil:
+		round++
 		_, err = tx.ExecContext(
 			ctx,
 			`UPDATE ministry_group_requests
-			    SET message=?,status='pending',reviewed_by=NULL,reviewed_at=NULL,created_at=?,updated_at=?
+			    SET message=?,status='pending',reviewed_by=NULL,reviewed_at=NULL,created_at=?,updated_at=?,
+			        submission_round=submission_round+1
 			  WHERE id=?`,
 			message,
 			at,
@@ -467,7 +473,7 @@ func (r *MySQLRepository) RequestJoin(
 			studyGroupID,
 			groupID,
 			userID,
-			fmt.Sprintf("join-auto-approved:%d", requestID),
+			fmt.Sprintf("join-auto-approved:%d:%d", requestID, round),
 			"join_decision",
 			"加入申请已通过",
 			"你已加入"+groupName,
@@ -489,7 +495,7 @@ func (r *MySQLRepository) RequestJoin(
 	if err != nil {
 		return 0, err
 	}
-	eventKey := "join-request:" + strconv.FormatUint(requestID, 10)
+	eventKey := fmt.Sprintf("join-request:%d:%d", requestID, round)
 	if err := notifyModeratorsTx(
 		ctx,
 		tx,
@@ -520,15 +526,9 @@ func (r *MySQLRepository) Leave(
 	}
 	defer tx.Rollback()
 
-	var leaderUserID uint64
-	if err := tx.QueryRowContext(
-		ctx,
-		`SELECT COALESCE(leader_user_id,0) FROM ministry_groups
-		  WHERE id=? AND study_group_id=? FOR UPDATE`,
-		groupID,
-		studyGroupID,
-	).Scan(&leaderUserID); err != nil {
-		return fmt.Errorf("locking ministry group: %w", err)
+	leaderUserID, err := lockGroupTx(ctx, tx, studyGroupID, groupID)
+	if err != nil {
+		return err
 	}
 	if leaderUserID == userID {
 		return ErrLeaderCannotLeave
@@ -639,6 +639,9 @@ func (r *MySQLRepository) UpdateSettings(
 	}
 	defer tx.Rollback()
 
+	if _, err := lockGroupTx(ctx, tx, studyGroupID, groupID); err != nil {
+		return err
+	}
 	if input.MemberVisibility != nil {
 		result, err := tx.ExecContext(
 			ctx,
@@ -791,15 +794,27 @@ func (r *MySQLRepository) DecideRequest(
 	defer tx.Rollback()
 
 	var groupID, userID uint64
+	// Resolve the immutable group identity before taking locks in group -> request order.
+	if err := tx.QueryRowContext(ctx, `SELECT ministry_group_id FROM ministry_group_requests
+		WHERE id=? AND study_group_id=?`, requestID, studyGroupID).Scan(&groupID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrRequestNotFound
+		}
+		return err
+	}
+	if _, err := lockGroupTx(ctx, tx, studyGroupID, groupID); err != nil {
+		return err
+	}
+	var round uint64
 	var status Status
 	if err := tx.QueryRowContext(
 		ctx,
-		`SELECT ministry_group_id,user_id,status
+		`SELECT ministry_group_id,user_id,status,submission_round
 		   FROM ministry_group_requests
 		  WHERE id=? AND study_group_id=? FOR UPDATE`,
 		requestID,
 		studyGroupID,
-	).Scan(&groupID, &userID, &status); err != nil {
+	).Scan(&groupID, &userID, &status, &round); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrRequestNotFound
 		}
@@ -859,7 +874,7 @@ func (r *MySQLRepository) DecideRequest(
 		studyGroupID,
 		groupID,
 		userID,
-		fmt.Sprintf("join-decision:%d:%s", requestID, decision),
+		fmt.Sprintf("join-decision:%d:%d:%s", requestID, round, decision),
 		"join_decision",
 		title,
 		body,
@@ -1083,11 +1098,16 @@ func (r *MySQLRepository) CreateShare(
 	status Status,
 	at time.Time,
 ) (uint64, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("beginning share creation: %w", err)
+	}
+	defer tx.Rollback()
 	var publishedAt any
 	if status == StatusPublished {
 		publishedAt = at
 	}
-	result, err := r.db.ExecContext(
+	result, err := tx.ExecContext(
 		ctx,
 		`INSERT INTO ministry_shares
 			(study_group_id,ministry_group_id,author_user_id,title,body_markdown,status,published_at,created_at,updated_at)
@@ -1110,11 +1130,12 @@ func (r *MySQLRepository) CreateShare(
 		return 0, err
 	}
 	if status == StatusPending {
-		if err := r.notifyModerators(
+		if err := notifyModeratorsTx(
 			ctx,
+			tx,
 			studyGroupID,
 			groupID,
-			"share-review:"+strconv.FormatUint(shareID, 10),
+			fmt.Sprintf("share-review:%d:1", shareID),
 			"share_review",
 			"有新的分享待审批",
 			input.Title,
@@ -1123,7 +1144,7 @@ func (r *MySQLRepository) CreateShare(
 			return 0, err
 		}
 	}
-	return shareID, nil
+	return shareID, tx.Commit()
 }
 
 func (r *MySQLRepository) UpdateShare(
@@ -1134,15 +1155,20 @@ func (r *MySQLRepository) UpdateShare(
 	canManage bool,
 	at time.Time,
 ) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("beginning share update: %w", err)
+	}
+	defer tx.Rollback()
 	var publishedAt any
 	if status == StatusPublished {
 		publishedAt = at
 	}
-	result, err := r.db.ExecContext(
+	result, err := tx.ExecContext(
 		ctx,
 		`UPDATE ministry_shares
 		    SET title=?,body_markdown=?,status=?,reviewed_by=NULL,reviewed_at=NULL,
-		        published_at=?,updated_at=?
+		        published_at=?,updated_at=?,submission_round=submission_round+1
 		  WHERE id=? AND study_group_id=? AND ministry_group_id=?
 		    AND NOT EXISTS (
 		      SELECT 1 FROM ministry_content_deletions d
@@ -1167,18 +1193,25 @@ func (r *MySQLRepository) UpdateShare(
 		return err
 	}
 	if status == StatusPending {
-		return r.notifyModerators(
+		var round uint64
+		if err := tx.QueryRowContext(ctx, `SELECT submission_round FROM ministry_shares WHERE id=?`, shareID).Scan(&round); err != nil {
+			return err
+		}
+		if err := notifyModeratorsTx(
 			ctx,
+			tx,
 			studyGroupID,
 			groupID,
-			fmt.Sprintf("share-review:%d:%d", shareID, at.UnixNano()),
+			fmt.Sprintf("share-review:%d:%d", shareID, round),
 			"share_review",
 			"分享修改待审批",
 			input.Title,
 			at,
-		)
+		); err != nil {
+			return err
+		}
 	}
-	return nil
+	return tx.Commit()
 }
 
 func (r *MySQLRepository) DecideShare(
@@ -1193,12 +1226,12 @@ func (r *MySQLRepository) DecideShare(
 	}
 	defer tx.Rollback()
 
-	var authorID uint64
+	var authorID, round uint64
 	var status Status
 	var title string
 	if err := tx.QueryRowContext(
 		ctx,
-		`SELECT ministry_group_id,author_user_id,title,status
+		`SELECT ministry_group_id,author_user_id,title,status,submission_round
 		   FROM ministry_shares
 		  WHERE id=? AND study_group_id=? AND ministry_group_id=?
 		    AND NOT EXISTS (
@@ -1209,7 +1242,7 @@ func (r *MySQLRepository) DecideShare(
 		shareID,
 		studyGroupID,
 		groupID,
-	).Scan(&groupID, &authorID, &title, &status); err != nil {
+	).Scan(&groupID, &authorID, &title, &status, &round); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrShareNotFound
 		}
@@ -1252,7 +1285,7 @@ func (r *MySQLRepository) DecideShare(
 		studyGroupID,
 		groupID,
 		authorID,
-		fmt.Sprintf("share-decision:%d:%s", shareID, decision),
+		fmt.Sprintf("share-decision:%d:%d:%s", shareID, round, decision),
 		"share_decision",
 		notificationTitle,
 		title,
@@ -1449,8 +1482,10 @@ func (r *MySQLRepository) loadProgressAttachments(
 		return items, nil
 	}
 	byID := make(map[uint64]int, len(items))
+	args := []any{studyGroupID, groupID}
 	for index := range items {
 		byID[items[index].ID] = index
+		args = append(args, items[index].ID)
 	}
 
 	assetRows, err := r.db.QueryContext(
@@ -1461,9 +1496,9 @@ func (r *MySQLRepository) loadProgressAttachments(
 		     ON p.id=pa.progress_id AND p.study_group_id=pa.study_group_id
 		   JOIN assets a ON a.id=pa.asset_id AND a.group_id=pa.study_group_id
 		  WHERE pa.study_group_id=? AND p.ministry_group_id=?
+		    AND pa.progress_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(items)), ",")+`)
 		  ORDER BY pa.progress_id,pa.sort_order,pa.id`,
-		studyGroupID,
-		groupID,
+		args...,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("listing ministry progress assets: %w", err)
@@ -1669,36 +1704,6 @@ func (r *MySQLRepository) CreateProgress(
 	return progressID, nil
 }
 
-func (r *MySQLRepository) notifyModerators(
-	ctx context.Context,
-	studyGroupID, groupID uint64,
-	eventKey, notificationType, title, body string,
-	at time.Time,
-) error {
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("beginning moderator notification: %w", err)
-	}
-	defer tx.Rollback()
-	if err := notifyModeratorsTx(
-		ctx,
-		tx,
-		studyGroupID,
-		groupID,
-		eventKey,
-		notificationType,
-		title,
-		body,
-		at,
-	); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("committing moderator notification: %w", err)
-	}
-	return nil
-}
-
 func notifyModeratorsTx(
 	ctx context.Context,
 	tx *sql.Tx,
@@ -1823,6 +1828,20 @@ func groupNameTx(
 		return "", fmt.Errorf("loading ministry group name: %w", err)
 	}
 	return name, nil
+}
+
+// Membership transitions take the group lock first, then current-read members/requests.
+func lockGroupTx(ctx context.Context, tx *sql.Tx, studyGroupID, groupID uint64) (uint64, error) {
+	var leaderID uint64
+	err := tx.QueryRowContext(ctx, `SELECT COALESCE(leader_user_id,0) FROM ministry_groups
+		WHERE id=? AND study_group_id=? FOR UPDATE`, groupID, studyGroupID).Scan(&leaderID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrGroupNotFound
+	}
+	if err != nil {
+		return 0, fmt.Errorf("locking ministry group: %w", err)
+	}
+	return leaderID, nil
 }
 
 func userDisplayNameTx(ctx context.Context, tx *sql.Tx, userID uint64) (string, error) {

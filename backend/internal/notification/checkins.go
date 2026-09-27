@@ -31,6 +31,8 @@ type Snapshot struct {
 	ExpiresAt time.Time
 	Topic     string
 	Version   string
+	// CoveredRecordID is the largest checkin ID included in this snapshot.
+	CoveredRecordID uint64
 }
 
 // Entries arrive in first-checkin order, independent of member names.

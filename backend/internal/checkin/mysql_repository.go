@@ -68,9 +68,13 @@ func validateWeeklyTarget(
 }
 
 func (r *MySQLRepository) FindExistingWeeklyBook(ctx context.Context, groupID, userID, taskID, weekID uint64, part, detail string) (uint64, error) {
+	return findExistingWeeklyBook(ctx, r.db, groupID, userID, taskID, weekID, part, detail)
+}
+
+func findExistingWeeklyBook(ctx context.Context, queryer queryRower, groupID, userID, taskID, weekID uint64, part, detail string) (uint64, error) {
 	if taskID > 0 {
 		var id uint64
-		err := r.db.QueryRowContext(ctx, `SELECT id FROM checkin_records
+		err := queryer.QueryRowContext(ctx, `SELECT id FROM checkin_records
 			WHERE group_id=? AND user_id=? AND task_id=? AND task_type='weekly_book' AND deleted_at IS NULL
 			ORDER BY logical_date,id LIMIT 1`, groupID, userID, taskID).Scan(&id)
 		if err == nil || !errors.Is(err, sql.ErrNoRows) {
@@ -85,11 +89,11 @@ func (r *MySQLRepository) FindExistingWeeklyBook(ctx context.Context, groupID, u
 		return 0, sql.ErrNoRows
 	}
 	var start, end time.Time
-	if err := r.db.QueryRowContext(ctx, `SELECT start_date,end_date FROM study_weeks WHERE group_id=? AND id=?`, groupID, weekID).Scan(&start, &end); err != nil {
+	if err := queryer.QueryRowContext(ctx, `SELECT start_date,end_date FROM study_weeks WHERE group_id=? AND id=?`, groupID, weekID).Scan(&start, &end); err != nil {
 		return 0, err
 	}
 	var id uint64
-	err := r.db.QueryRowContext(ctx, `SELECT id FROM checkin_records
+	err := queryer.QueryRowContext(ctx, `SELECT id FROM checkin_records
 		WHERE group_id=? AND user_id=? AND task_type='weekly_book'
 		  AND logical_date BETWEEN ? AND ? AND deleted_at IS NULL
 		  AND (part=? OR detail=?)
@@ -99,20 +103,24 @@ func (r *MySQLRepository) FindExistingWeeklyBook(ctx context.Context, groupID, u
 }
 
 func (r *MySQLRepository) FindExistingWeeklyTask(ctx context.Context, groupID, userID, taskID, weekID uint64, taskType string) (uint64, error) {
+	return findExistingWeeklyTask(ctx, r.db, groupID, userID, taskID, weekID, taskType)
+}
+
+func findExistingWeeklyTask(ctx context.Context, queryer queryRower, groupID, userID, taskID, weekID uint64, taskType string) (uint64, error) {
 	taskType = strings.TrimSpace(taskType)
 	if taskType == "" {
 		return 0, sql.ErrNoRows
 	}
 	if taskID > 0 {
 		var id uint64
-		err := r.db.QueryRowContext(ctx, `SELECT id FROM checkin_records
+		err := queryer.QueryRowContext(ctx, `SELECT id FROM checkin_records
 			WHERE group_id=? AND user_id=? AND task_id=? AND task_type=? AND deleted_at IS NULL
 			ORDER BY logical_date,id LIMIT 1`, groupID, userID, taskID, taskType).Scan(&id)
 		if err == nil || !errors.Is(err, sql.ErrNoRows) {
 			return id, err
 		}
 		if taskType == "weekly_video" {
-			err = r.db.QueryRowContext(ctx, `
+			err = queryer.QueryRowContext(ctx, `
 				SELECT c.id
 				FROM checkin_records c
 				JOIN task_assets checked_ta
@@ -140,7 +148,7 @@ func (r *MySQLRepository) FindExistingWeeklyTask(ctx context.Context, groupID, u
 		return 0, sql.ErrNoRows
 	}
 	var id uint64
-	err := r.db.QueryRowContext(ctx, `SELECT id FROM checkin_records
+	err := queryer.QueryRowContext(ctx, `SELECT id FROM checkin_records
 		WHERE group_id=? AND user_id=? AND week_id=? AND task_type=? AND deleted_at IS NULL
 		  AND (?<>'weekly_video' OR NOT EXISTS (
 		    SELECT 1 FROM task_assets ta JOIN assets a ON a.id=ta.asset_id AND a.group_id=ta.group_id
@@ -151,23 +159,30 @@ func (r *MySQLRepository) FindExistingWeeklyTask(ctx context.Context, groupID, u
 	return id, err
 }
 
-func (r *MySQLRepository) Create(ctx context.Context, record *Record, actorID uint64) (uint64, error) {
+func (r *MySQLRepository) Create(ctx context.Context, record *Record, actorID uint64) (uint64, bool, error) {
 	now := nowSQL()
 	if !isWeeklyTaskType(record.TaskType) {
-		return createRecord(ctx, r.db, record, actorID, now)
+		id, err := createRecord(ctx, r.db, record, actorID, now)
+		return id, false, err
 	}
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	defer tx.Rollback()
 	var lockedWeekID uint64
 	if err := tx.QueryRowContext(ctx, `SELECT id FROM study_weeks
 		WHERE id=? AND group_id=? FOR SHARE`, record.WeekID, record.GroupID).Scan(&lockedWeekID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return 0, ErrInvalidWeeklyTarget
+			return 0, false, ErrInvalidWeeklyTarget
 		}
-		return 0, err
+		return 0, false, err
+	}
+	// Serialize this member's weekly completions, including videos shared across weeks.
+	// No consistent read precedes this lock, so the lookup below sees the last writer.
+	var lockedUserID uint64
+	if err := tx.QueryRowContext(ctx, `SELECT id FROM users WHERE id=? FOR UPDATE`, record.UserID).Scan(&lockedUserID); err != nil {
+		return 0, false, err
 	}
 	if err := validateWeeklyTarget(
 		ctx,
@@ -179,18 +194,30 @@ func (r *MySQLRepository) Create(ctx context.Context, record *Record, actorID ui
 		record.LogicalDate,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return 0, ErrInvalidWeeklyTarget
+			return 0, false, ErrInvalidWeeklyTarget
 		}
-		return 0, err
+		return 0, false, err
+	}
+	var existingID uint64
+	if record.TaskType == "weekly_book" {
+		existingID, err = findExistingWeeklyBook(ctx, tx, record.GroupID, record.UserID, record.TaskID, record.WeekID, record.Part, record.Detail)
+	} else {
+		existingID, err = findExistingWeeklyTask(ctx, tx, record.GroupID, record.UserID, record.TaskID, record.WeekID, record.TaskType)
+	}
+	if err == nil {
+		return existingID, true, tx.Commit()
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return 0, false, err
 	}
 	id, err := createRecord(ctx, tx, record, actorID, now)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	if err := tx.Commit(); err != nil {
-		return 0, err
+		return 0, false, err
 	}
-	return id, nil
+	return id, false, nil
 }
 
 type recordExecer interface {

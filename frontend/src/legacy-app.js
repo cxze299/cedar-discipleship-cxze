@@ -1,3 +1,4 @@
+import { computed, shallowReactive } from 'vue';
 import { useContentViewerStore } from './stores/contentViewer';
 import { useCheckinWorkbenchStore } from './stores/checkinWorkbench';
 import { useDashboardStore } from './stores/dashboard';
@@ -39,9 +40,11 @@ import {
 import { pdfPageForDate, scriptureChaptersForDate } from './runtime/dailySchedule';
 import {
   authHeaders as sessionAuthHeaders,
+  authSessionGeneration,
   clearAccessToken,
   csrfToken,
   getAccessToken,
+  refreshAccessSession,
   setAccessToken,
 } from './runtime/authSession';
 import {
@@ -61,10 +64,14 @@ import {
   resolveEffectiveSchedule,
 } from './runtime/dailySchedule';
 import { nextReadingStartPage, saveWeekWithConfirmation } from './runtime/weekProtection';
+import { filenameFromDisposition } from './runtime/downloads';
+import { saveBlob } from './runtime/browserDownload';
+import { canManageStudyGroup } from './runtime/studyPermissions';
 
 export { enabledFlag, extractPdfPageRange };
 
-const state = {
+// Domain collections are replaced by actions; keep reader request identities intact.
+const state = shallowReactive({
   token: '',
   user: null,
   tab: 'home',
@@ -95,11 +102,20 @@ const state = {
   adminLoading: false,
   weekDraft: null,
   toast: '',
-};
+});
+
+const learningSettings = computed(() => deepMerge({
+  task_sections: state.siteConfig?.task_sections || {},
+  mounted_files: state.siteConfig?.mounted_files || {},
+}, state.learningConfig || {}));
+const displayedWeekDraft = computed(() => state.weekDraft || weekDraftFromWeek(currentWeekForDraft()));
 
 let sessionGeneration = 0;
 let adminRequestID = 0;
 let viewerRequestID = 0;
+let loadRequestID = 0;
+let rankingRequestID = 0;
+let switchRequestID = 0;
 
 function viewerStore() {
   return useContentViewerStore();
@@ -121,12 +137,8 @@ function syncViewerStore() {
   viewerStore().setViewer(state.viewer);
 }
 
-function clonePlain(value) {
-  return JSON.parse(JSON.stringify(value ?? null));
-}
-
 function canAdminAccess() {
-  return Boolean(state.user?.is_super_admin || state.user?.roles?.some((r) => ['group_admin', 'group_leader'].includes(r)));
+  return canManageStudyGroup(state.user);
 }
 
 function visibleNavItems() {
@@ -157,11 +169,11 @@ function appSnapshot() {
     canEditLearning: canEditLearning(),
     canEditStudyWeeks: canEditStudyWeeks(),
     adminLoading: state.adminLoading,
-    learningConfig: clonePlain(currentLearningSettings()) || {},
-    weekDraft: clonePlain(state.weekDraft || weekDraftFromWeek(currentWeekForDraft())),
-    weeks: clonePlain(state.weeks || []),
-    resourceLibrary: clonePlain(librarySections()),
-    calendar: clonePlain(state.calendar),
+    learningConfig: currentLearningSettings(),
+    weekDraft: displayedWeekDraft.value,
+    weeks: state.weeks,
+    resourceLibrary: librarySections(),
+    calendar: state.calendar,
   };
 }
 
@@ -307,11 +319,20 @@ const navItems = [
 const homeStatsMinistryCode = 'discipleship-counting';
 const homeStatsEligibilityTTL = 60_000;
 const dashboardRefreshInterval = 15_000;
-let refreshPromise = null;
 let dashboardRefreshPromise = null;
+let dashboardRefreshKey = '';
 let dashboardRefreshTimer = 0;
 
+function dataContextKey() {
+  return `${sessionGeneration}:${state.user?.current_group_id || 0}:${state.selectedDate}`;
+}
+
+function statisticsContextKey() {
+  return `${dataContextKey()}:${state.statsFrom}:${state.statsTo}`;
+}
+
 export async function api(path, options = {}) {
+  const generation = authSessionGeneration();
   const headers = { ...(options.headers || {}) };
   const token = getAccessToken();
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -320,7 +341,7 @@ export async function api(path, options = {}) {
   if (options.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
   const res = await fetch(`/api${path}`, { ...options, headers, credentials: 'same-origin' });
   const data = await res.json().catch(() => ({}));
-  if (res.status === 401 && path !== '/auth/refresh' && options.retryAuth !== false) {
+  if (res.status === 401 && generation === authSessionGeneration() && path !== '/auth/refresh' && options.retryAuth !== false) {
     const refreshed = await refreshSession();
     if (refreshed) return api(path, { ...options, retryAuth: false });
   }
@@ -335,27 +356,12 @@ export async function api(path, options = {}) {
 }
 
 async function refreshSession() {
-  if (refreshPromise) return refreshPromise;
-  refreshPromise = (async () => {
-    try {
-      const result = await api('/auth/refresh', {
-        method: 'POST',
-        headers: { 'X-CSRF-Token': csrfToken() },
-        retryAuth: false,
-      });
-      state.token = result.token || '';
-      setAccessToken(state.token);
-      state.user = result.user || null;
-      return Boolean(state.token && state.user);
-    } catch {
-      state.token = '';
-      clearAccessToken();
-      return false;
-    } finally {
-      refreshPromise = null;
-    }
-  })();
-  return refreshPromise;
+  const generation = authSessionGeneration();
+  const result = await refreshAccessSession();
+  if (generation !== authSessionGeneration()) return false;
+  state.token = result?.token || '';
+  if (result) state.user = result.user || null;
+  return Boolean(state.token && state.user);
 }
 
 function authHeaders(headers = {}) {
@@ -366,45 +372,30 @@ function authHeaders(headers = {}) {
 }
 
 export async function fetchWithAuth(url, options = {}) {
+  const generation = authSessionGeneration();
   const res = await fetch(url, {
     ...options,
     headers: authHeaders(options.headers || {}),
     credentials: 'same-origin',
   });
-  if (res.status === 401 && options.retryAuth !== false) {
+  if (res.status === 401 && generation === authSessionGeneration() && options.retryAuth !== false) {
     const refreshed = await refreshSession();
     if (refreshed) return fetchWithAuth(url, { ...options, retryAuth: false });
   }
   return res;
 }
 
-function parseDownloadName(res, fallbackName) {
-  const disposition = String(res.headers.get('Content-Disposition') || '');
-  const utf8 = disposition.match(/filename\*=UTF-8''([^;]+)/i);
-  if (utf8?.[1]) return decodeURIComponent(utf8[1]);
-  const plain = disposition.match(/filename="?([^"]+)"?/i);
-  return plain?.[1] || fallbackName;
-}
-
-function triggerDownload(blob, filename) {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  document.body.append(link);
-  link.click();
-  link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
 export async function downloadAdminExport(path, fallbackName, successMessage = '文件已开始下载') {
+  const context = dataContextKey();
   const res = await fetchWithAuth(`/api${path}`);
+  if (context !== dataContextKey()) return;
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     throw new Error(data.error || `HTTP ${res.status}`);
   }
   const blob = await res.blob();
-  triggerDownload(blob, parseDownloadName(res, fallbackName));
+  if (context !== dataContextKey()) return;
+  saveBlob(blob, filenameFromDisposition(res.headers.get('Content-Disposition'), fallbackName));
   toast(successMessage);
 }
 
@@ -466,14 +457,21 @@ export function toast(message) {
 }
 
 async function loadAll(options = {}) {
+  const requestID = ++loadRequestID;
+  const generation = sessionGeneration;
+  const selectedDate = state.selectedDate || todayString();
+  const isCurrent = () => requestID === loadRequestID
+    && generation === sessionGeneration && selectedDate === state.selectedDate;
   if (!state.token) {
     const restored = await refreshSession();
-    if (!restored) return;
+    if (!restored || !isCurrent()) return;
   }
   try {
     await loadSiteConfig();
+    if (!isCurrent()) return;
     if (!options.useExistingUser || !state.user) {
       const me = await api('/auth/me');
+      if (!isCurrent()) return;
       state.user = me.user;
     }
     if (state.tab === 'admin' && !canAdminAccess()) {
@@ -517,16 +515,15 @@ async function loadAll(options = {}) {
       state.homeStatsCheckedGroupID = 0;
       state.homeStatsCheckedAt = 0;
     }
-    const selectedDate = state.selectedDate || todayString();
     const bootstrap = await api(`/app/bootstrap?date=${selectedDate}`);
-    state.bootstrap = bootstrap;
-    state.learningConfig = bootstrap.learning_config || null;
-    state.members = bootstrap.members || [];
-    render();
+    if (!isCurrent()) return;
 
     const checkinFrom = bootstrap.current_week?.start || selectedDate;
     const checkinTo = bootstrap.current_week?.end || selectedDate;
     normalizeStatsRange();
+    const rankingContext = statisticsContextKey();
+    const loadRanking = state.tab === 'dashboard';
+    const rankingID = loadRanking ? ++rankingRequestID : rankingRequestID;
     const [checkins, weeks, assets, todayHub, taskCompletions, library, monthlyRanking] = await Promise.all([
       api(`/checkins?from=${checkinFrom}&to=${checkinTo}&page_size=1000`),
       api('/study-weeks'),
@@ -534,23 +531,31 @@ async function loadAll(options = {}) {
       api(`/today?date=${selectedDate}`),
       api(`/dashboard/task-completions?date=${selectedDate}`),
       api('/library').catch(() => ({ sections: [] })),
-      state.tab === 'dashboard'
+      loadRanking
         ? api(`/dashboard/monthly-ranking?from=${state.statsFrom}&to=${state.statsTo}`)
         : Promise.resolve(state.monthlyRanking),
     ]);
+    if (!isCurrent()) return;
+    state.bootstrap = bootstrap;
+    state.learningConfig = bootstrap.learning_config || null;
+    state.members = bootstrap.members || [];
     state.todayHub = todayHub;
     state.dashboardCompletions = taskCompletions.items || [];
-    state.monthlyRanking = monthlyRanking;
+    if (loadRanking && rankingContext === statisticsContextKey() && rankingID === rankingRequestID) {
+      state.monthlyRanking = monthlyRanking;
+    }
     state.checkins = checkins.items || [];
     state.weeks = weeks.weeks || [];
     state.resourceLibrary = library.sections || [];
     state.assets = mergeResourceAssets(assets.assets || [], state.resourceLibrary);
     render();
     refreshHomeStats().catch((error) => {
+      if (!isCurrent()) return;
       state.homeStatsLoading = false;
       toast(error.message);
     });
   } catch (error) {
+    if (!isCurrent()) return;
     if (String(error.message).includes('unauthorized')) {
       logout({ remote: false });
       return;
@@ -574,18 +579,37 @@ async function setDefaultGroup(groupID) {
 }
 
 export async function switchGroup(groupID) {
+  const requestID = ++switchRequestID;
+  const generation = ++sessionGeneration;
   const result = await api('/auth/switch-group', {
     method: 'POST',
     body: JSON.stringify({ group_id: Number(groupID) }),
   });
+  if (requestID !== switchRequestID || generation !== sessionGeneration) return;
   sessionGeneration += 1;
   closeViewer();
   state.adminLoading = false;
   state.adminDataGroupID = 0;
   state.resourceLibrary = null;
   state.weekDraft = null;
+  state.bootstrap = null;
+  state.todayHub = null;
+  state.learningConfig = null;
+  state.monthlyRanking = null;
+  state.dashboardCompletions = [];
+  state.members = [];
+  state.checkins = [];
+  state.weeks = [];
+  state.assets = [];
+  state.calendar = null;
+  state.homeStatsEligible = false;
+  state.homeStatsLoading = false;
+  state.homeStatsCheckedGroupID = 0;
+  state.homeStatsCheckedAt = 0;
   state.token = result.token;
+  state.user = result.user || { ...state.user, current_group_id: Number(groupID) };
   setAccessToken(state.token);
+  render();
   await loadAll();
   render();
 }
@@ -695,7 +719,9 @@ export async function setSelectedDate(date) {
   } else {
     state.selectedDate = date;
   }
+  state.bootstrap = null;
   state.todayHub = null;
+  state.checkins = [];
   state.dashboardCompletions = [];
   render();
   await loadAll();
@@ -759,29 +785,36 @@ export async function saveActiveMemberRule(rule) {
 
 async function loadMonthlyRanking() {
   normalizeStatsRange();
-  state.monthlyRanking = await api(`/dashboard/monthly-ranking?from=${state.statsFrom}&to=${state.statsTo}`);
+  const context = statisticsContextKey();
+  const requestID = ++rankingRequestID;
+  const result = await api(`/dashboard/monthly-ranking?from=${state.statsFrom}&to=${state.statsTo}`);
+  if (context !== statisticsContextKey() || requestID !== rankingRequestID) return;
+  state.monthlyRanking = result;
 }
 
 async function refreshDashboardData() {
   if (!state.token || !state.user?.current_group_id || state.tab !== 'dashboard') return;
-  if (dashboardRefreshPromise) return dashboardRefreshPromise;
-
   const selectedDate = state.selectedDate;
   normalizeStatsRange();
+  const context = statisticsContextKey();
+  if (dashboardRefreshPromise && dashboardRefreshKey === context) return dashboardRefreshPromise;
+  dashboardRefreshKey = context;
+  const requestID = ++rankingRequestID;
   const rankingFrom = state.statsFrom;
   const rankingTo = state.statsTo;
-  dashboardRefreshPromise = Promise.all([
+  const pending = Promise.all([
     api(`/dashboard/task-completions?date=${selectedDate}`),
     api(`/dashboard/monthly-ranking?from=${rankingFrom}&to=${rankingTo}`),
   ]).then(([taskCompletions, monthlyRanking]) => {
-    if (state.selectedDate !== selectedDate || state.tab !== 'dashboard') return;
+    if (context !== statisticsContextKey() || state.tab !== 'dashboard') return;
     state.dashboardCompletions = taskCompletions.items || [];
-    state.monthlyRanking = monthlyRanking;
+    if (requestID === rankingRequestID) state.monthlyRanking = monthlyRanking;
     render();
   }).finally(() => {
-    dashboardRefreshPromise = null;
+    if (dashboardRefreshPromise === pending) dashboardRefreshPromise = null;
   });
-  return dashboardRefreshPromise;
+  dashboardRefreshPromise = pending;
+  return pending;
 }
 
 function startDashboardRefresh() {
@@ -794,6 +827,7 @@ function startDashboardRefresh() {
 
 async function refreshHomeStats() {
   if (!state.token || !state.user?.current_group_id) return;
+  const context = dataContextKey();
   const groupID = Number(state.user.current_group_id || 0);
   const now = Date.now();
   const fresh = state.homeStatsCheckedGroupID === groupID && now - state.homeStatsCheckedAt < homeStatsEligibilityTTL;
@@ -803,6 +837,7 @@ async function refreshHomeStats() {
   render();
   try {
     const result = await api('/ministry-groups');
+    if (context !== dataContextKey()) return;
     const groups = Array.isArray(result.groups) ? result.groups : [];
     state.homeStatsEligible = groups.some((group) => (
       group.code === homeStatsMinistryCode && group.joined === true
@@ -813,8 +848,10 @@ async function refreshHomeStats() {
       await loadMonthlyRanking();
     }
   } finally {
-    state.homeStatsLoading = false;
-    render();
+    if (context === dataContextKey()) {
+      state.homeStatsLoading = false;
+      render();
+    }
   }
 }
 
@@ -1330,6 +1367,7 @@ export async function toggleCheckin(task, member) {
 }
 
 function currentTaskOptions() {
+  if (!state.bootstrap) return [];
   const week = state.bootstrap?.current_week || {};
   const configPlan = currentWeekConfigPlan();
   const serverTasks = state.bootstrap?.current_tasks || [];
@@ -1345,7 +1383,7 @@ function currentTaskOptions() {
   const dailyLabel = dailyTaskLabel();
   const dailyConfig = taskSectionsConfig().daily || {};
   const separateDailyCheckins = dailyConfig.checkin_mode === 'separate';
-  const customDevotion = dailyDevotionPlanMode(dailyConfig.devotion || {}) === 'custom';
+  const customDevotion = dailyDevotionPlanMode(dailyDevotionConfig()) === 'custom';
   const videoLinks = currentWeeklyVideoLinks(videoTasks, configPlan);
   const tasks = [];
   if (separateDailyCheckins) {
@@ -1709,10 +1747,7 @@ function shortTaskIcon(title) {
 }
 
 function currentLearningSettings() {
-  return deepMerge({
-    task_sections: state.siteConfig?.task_sections || {},
-    mounted_files: state.siteConfig?.mounted_files || {},
-  }, state.learningConfig || {});
+  return learningSettings.value;
 }
 
 function taskSectionsConfig() {
@@ -1750,8 +1785,8 @@ function configuredAssetForURL(value) {
 
 function getDailyDevotionPlan(date = state.selectedDate) {
   const daily = taskSectionsConfig().daily || {};
-  const devotion = daily.devotion || {};
-  if (devotion.enabled === false) return null;
+  const devotion = dailyDevotionConfig(date);
+  if (daily.devotion?.enabled === false || devotion.enabled === false) return null;
   const customPlan = dailyDevotionPlanForDate(devotion, date);
   if (dailyDevotionPlanMode(devotion) === 'custom') {
     if (!customPlan) return null;
@@ -1775,8 +1810,7 @@ function getDailyDevotionPlan(date = state.selectedDate) {
     };
   }
 
-  const cfg = dailyDevotionConfig(date);
-  if (cfg.enabled === false) return null;
+  const cfg = devotion;
   const title = toChineseMonthDay(date);
   const section = getDailyDevotionSectionNumber(date);
   const path = cfg.path || daily.path || '';
@@ -1968,17 +2002,11 @@ export async function loadAdminData(force = false) {
 }
 
 function canEditLearning() {
-  return Boolean(
-    state.user?.is_super_admin
-    || state.user?.roles?.some((role) => ['group_admin', 'group_leader'].includes(role)),
-  );
+  return canManageStudyGroup(state.user);
 }
 
 export function canEditStudyWeeks() {
-  return Boolean(
-    state.user?.is_super_admin
-    || state.user?.roles?.some((role) => ['group_admin', 'group_leader'].includes(role)),
-  );
+  return canManageStudyGroup(state.user);
 }
 
 export function updateLearningValue(path, value) {

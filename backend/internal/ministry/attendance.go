@@ -225,7 +225,7 @@ func attendanceDates(start, end time.Time, weekdays []int, extraDates []string) 
 		}
 	}
 	for _, value := range extraDates {
-		date, err := time.Parse("2006-01-02", value)
+		date, err := time.ParseInLocation("2006-01-02", value, start.Location())
 		if err == nil && !date.Before(start) && !date.After(end) {
 			seen[value] = true
 		}

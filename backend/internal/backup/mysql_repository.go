@@ -58,38 +58,6 @@ func (r *MySQLRepository) CheckinDetails(ctx context.Context, groupID uint64, lo
 	return items, rows.Err()
 }
 
-func (r *MySQLRepository) DailySummaries(ctx context.Context, groupID uint64) (int, []DailySummary, error) {
-	var activeMembers int
-	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM group_members WHERE group_id=? AND status=1`, groupID).Scan(&activeMembers); err != nil {
-		return 0, nil, err
-	}
-	rows, err := r.db.QueryContext(ctx, `SELECT logical_date,
-		COUNT(*) AS total_checkins,
-		COUNT(DISTINCT user_id) AS checked_members,
-		SUM(CASE WHEN task_type='daily_devotion' THEN 1 ELSE 0 END) AS devotion_count,
-		SUM(CASE WHEN task_type='weekly_book' THEN 1 ELSE 0 END) AS book_count,
-		SUM(CASE WHEN task_type='weekly_video' THEN 1 ELSE 0 END) AS video_count,
-		SUM(CASE WHEN task_type='weekly_verse' THEN 1 ELSE 0 END) AS verse_count
-		FROM checkin_records
-		WHERE group_id=? AND deleted_at IS NULL
-		GROUP BY logical_date
-		ORDER BY logical_date DESC`, groupID)
-	if err != nil {
-		return 0, nil, err
-	}
-	defer rows.Close()
-
-	var items []DailySummary
-	for rows.Next() {
-		var item DailySummary
-		if err := rows.Scan(&item.LogicalDate, &item.TotalCheckins, &item.CheckedMembers, &item.DevotionCount, &item.BookCount, &item.VideoCount, &item.VerseCount); err != nil {
-			return 0, nil, err
-		}
-		items = append(items, item)
-	}
-	return activeMembers, items, rows.Err()
-}
-
 func (r *MySQLRepository) FeedbackExports(ctx context.Context, groupID uint64, loc *time.Location) ([]FeedbackExport, error) {
 	rows, err := r.db.QueryContext(ctx, `SELECT f.created_at,COALESCE(u.username,''),f.name,f.contact,f.message,f.page,f.user_agent
 		FROM feedbacks f
@@ -130,7 +98,7 @@ func (r *MySQLRepository) BackupMembers(ctx context.Context, groupID uint64) ([]
 	if err != nil {
 		return nil, err
 	}
-	rows, err := r.db.QueryContext(ctx, `SELECT u.username,u.display_name,u.name_pinyin
+	rows, err := r.db.QueryContext(ctx, `SELECT u.username,u.display_name,u.name_pinyin,m.member_name
 		FROM group_members m JOIN users u ON u.id=m.user_id
 		WHERE m.group_id=? AND m.status=1
 		ORDER BY m.member_name,u.username`, groupID)
@@ -141,7 +109,7 @@ func (r *MySQLRepository) BackupMembers(ctx context.Context, groupID uint64) ([]
 	var items []Member
 	for rows.Next() {
 		var item Member
-		if err := rows.Scan(&item.Username, &item.DisplayName, &item.NamePinyin); err != nil {
+		if err := rows.Scan(&item.Username, &item.DisplayName, &item.NamePinyin, &item.MemberName); err != nil {
 			return nil, err
 		}
 		item.Roles = roleMap[item.Username]
@@ -205,7 +173,9 @@ func (r *MySQLRepository) BackupFeedbacks(ctx context.Context, groupID uint64) (
 }
 
 func (r *MySQLRepository) BackupAssets(ctx context.Context, groupID uint64) ([]Asset, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT id,category,title,original_name,storage_path,mime_type,file_size FROM assets WHERE group_id=? ORDER BY category,title,id`, groupID)
+	rows, err := r.db.QueryContext(ctx, `SELECT a.id,a.category,a.title,a.original_name,a.storage_path,a.mime_type,a.file_size
+		FROM assets a JOIN asset_bindings b ON b.asset_id=a.id AND b.group_id=a.group_id
+		WHERE a.group_id=? AND b.deleted_at IS NULL ORDER BY a.category,a.title,a.id`, groupID)
 	if err != nil {
 		return nil, err
 	}
@@ -255,6 +225,15 @@ func (r *MySQLRepository) ImportLocalBackup(ctx context.Context, groupID, actorI
 	if err := r.replaceRolesTx(ctx, tx, groupID, roleAssignments, now); err != nil {
 		return err
 	}
+	userIDs, err := backupUsernamesTx(ctx, tx, groupID)
+	if err != nil {
+		return err
+	}
+	for _, checkin := range payload.Checkins {
+		if userIDs[normalizeUsername(checkin.Username)] == 0 {
+			return fmt.Errorf("backup checkin user %q has no group identity", checkin.Username)
+		}
+	}
 	assetIDs, err := r.importBackupAssetsTx(ctx, tx, groupID, actorID, payload.Assets, now)
 	if err != nil {
 		return err
@@ -271,8 +250,9 @@ func (r *MySQLRepository) ImportLocalBackup(ctx context.Context, groupID, actorI
 	}
 	weekIDs := make(map[uint64]uint64, len(payload.Weeks))
 	taskIDs := make(map[uint64]uint64)
+	candidates := make(backupTaskAssetCandidates)
 	for _, originalWeek := range payload.Weeks {
-		week, err := r.remapWeekAssetsTx(ctx, tx, groupID, originalWeek, assetIDs)
+		week, err := r.remapWeekAssetsTx(ctx, tx, groupID, originalWeek, assetIDs, candidates)
 		if err != nil {
 			return err
 		}
@@ -289,10 +269,6 @@ func (r *MySQLRepository) ImportLocalBackup(ctx context.Context, groupID, actorI
 			return err
 		}
 		mapBackupTaskIDs(originalWeek, drafts, newTaskIDs, taskIDs)
-	}
-	userIDs, err := r.usernameMapFromRolesTx(ctx, tx, roleAssignments)
-	if err != nil {
-		return err
 	}
 	if err := r.replaceCheckinsTx(ctx, tx, groupID, actorID, userIDs, weekIDs, taskIDs, payload.Checkins, now); err != nil {
 		return err
@@ -623,6 +599,7 @@ func (r *MySQLRepository) remapWeekAssetsTx(
 	groupID uint64,
 	week learning.WeekInput,
 	assetIDs map[uint64]uint64,
+	candidates backupTaskAssetCandidates,
 ) (learning.WeekInput, error) {
 	for index := range week.Readings {
 		id, err := remapTaskBindingAssetIDTx(
@@ -634,6 +611,7 @@ func (r *MySQLRepository) remapWeekAssetsTx(
 			week.Readings[index].URL,
 			"book",
 			assetIDs,
+			candidates,
 		)
 		if err != nil {
 			return learning.WeekInput{}, err
@@ -650,6 +628,7 @@ func (r *MySQLRepository) remapWeekAssetsTx(
 			week.Videos[index].URL,
 			"video",
 			assetIDs,
+			candidates,
 		)
 		if err != nil {
 			return learning.WeekInput{}, err
@@ -665,6 +644,7 @@ func (r *MySQLRepository) remapWeekAssetsTx(
 		week.Outline.URL,
 		"outline",
 		assetIDs,
+		candidates,
 	)
 	if err != nil {
 		return learning.WeekInput{}, err
@@ -679,6 +659,7 @@ func remapTaskBindingAssetIDTx(
 	groupID, oldID uint64,
 	title, urlValue, preferredCategory string,
 	assetIDs map[uint64]uint64,
+	candidates backupTaskAssetCandidates,
 ) (uint64, error) {
 	for _, assetID := range []uint64{oldID, backupAssetIDFromDownloadURL(urlValue)} {
 		if assetID == 0 {
@@ -703,8 +684,16 @@ func remapTaskBindingAssetIDTx(
 		}
 	}
 
-	return findBackupTaskAssetByReferenceTx(ctx, tx, groupID, preferredCategory, backupTaskAssetRefs(title, urlValue))
+	return findBackupTaskAssetByReferenceTx(ctx, tx, groupID, preferredCategory, backupTaskAssetRefs(title, urlValue), candidates)
 }
+
+type backupTaskAssetCandidate struct {
+	id                  uint64
+	title, originalName string
+}
+
+// The cache belongs to one restore transaction, after all assets are restored.
+type backupTaskAssetCandidates map[string][]backupTaskAssetCandidate
 
 func findBackupTaskAssetByReferenceTx(
 	ctx context.Context,
@@ -712,19 +701,13 @@ func findBackupTaskAssetByReferenceTx(
 	groupID uint64,
 	preferredCategory string,
 	refs []string,
+	cache backupTaskAssetCandidates,
 ) (uint64, error) {
 	if len(refs) == 0 {
 		return 0, nil
 	}
-
-	matchedID := uint64(0)
-	matchedScore := 0
-	ambiguous := false
-	for _, ref := range refs {
-		refKey := normalizeBackupTaskAssetText(ref)
-		if refKey == "" {
-			continue
-		}
+	candidates, loaded := cache[preferredCategory]
+	if !loaded {
 		rows, err := tx.QueryContext(ctx, `SELECT a.id,a.title,a.original_name
 			FROM assets a
 			JOIN asset_bindings b ON b.asset_id=a.id AND b.group_id=a.group_id AND b.deleted_at IS NULL
@@ -734,23 +717,14 @@ func findBackupTaskAssetByReferenceTx(
 			return 0, err
 		}
 		for rows.Next() {
-			var id uint64
-			var title, originalName string
-			if err := rows.Scan(&id, &title, &originalName); err != nil {
+			var candidate backupTaskAssetCandidate
+			if err := rows.Scan(&candidate.id, &candidate.title, &candidate.originalName); err != nil {
 				_ = rows.Close()
 				return 0, err
 			}
-			score := maxInt(
-				backupTaskAssetMatchScore(refKey, normalizeBackupTaskAssetText(title)),
-				backupTaskAssetMatchScore(refKey, normalizeBackupTaskAssetText(originalName)),
-			)
-			if score > matchedScore {
-				matchedID = id
-				matchedScore = score
-				ambiguous = false
-			} else if score > 0 && score == matchedScore && id != matchedID {
-				ambiguous = true
-			}
+			candidate.title = normalizeBackupTaskAssetText(candidate.title)
+			candidate.originalName = normalizeBackupTaskAssetText(candidate.originalName)
+			candidates = append(candidates, candidate)
 		}
 		if err := rows.Err(); err != nil {
 			_ = rows.Close()
@@ -758,6 +732,29 @@ func findBackupTaskAssetByReferenceTx(
 		}
 		if err := rows.Close(); err != nil {
 			return 0, err
+		}
+		cache[preferredCategory] = candidates
+	}
+	matchedID := uint64(0)
+	matchedScore := 0
+	ambiguous := false
+	for _, ref := range refs {
+		refKey := normalizeBackupTaskAssetText(ref)
+		if refKey == "" {
+			continue
+		}
+		for _, candidate := range candidates {
+			score := maxInt(
+				backupTaskAssetMatchScore(refKey, candidate.title),
+				backupTaskAssetMatchScore(refKey, candidate.originalName),
+			)
+			if score > matchedScore {
+				matchedID = candidate.id
+				matchedScore = score
+				ambiguous = false
+			} else if score > 0 && score == matchedScore && candidate.id != matchedID {
+				ambiguous = true
+			}
 		}
 	}
 	if ambiguous || matchedScore == 0 {
@@ -808,6 +805,11 @@ func backupTaskAssetMatchScore(refKey, candidateKey string) int {
 	}
 }
 
+var (
+	backupPageRangePattern = regexp.MustCompile(`[0-9]{1,4}\s*(?:[-~—–至到]\s*[0-9]{1,4})?\s*页`)
+	backupDatePattern      = regexp.MustCompile(`[12][0-9]{5,7}`)
+)
+
 func normalizeBackupTaskAssetText(value string) string {
 	text := strings.TrimSpace(value)
 	if text == "" {
@@ -818,8 +820,8 @@ func normalizeBackupTaskAssetText(value string) string {
 	}
 	text = path.Base(strings.ReplaceAll(text, "\\", "/"))
 	text = strings.TrimSuffix(text, path.Ext(text))
-	text = regexp.MustCompile(`[0-9]{1,4}\s*(?:[-~—–至到]\s*[0-9]{1,4})?\s*页`).ReplaceAllString(text, "")
-	text = regexp.MustCompile(`[12][0-9]{5,7}`).ReplaceAllString(text, "")
+	text = backupPageRangePattern.ReplaceAllString(text, "")
+	text = backupDatePattern.ReplaceAllString(text, "")
 
 	var builder strings.Builder
 	for _, r := range text {
@@ -836,7 +838,7 @@ func canonicalBackupAssetTitle(category, title, originalName string) string {
 	default:
 		return title
 	}
-	if !regexp.MustCompile(`[0-9]{1,4}\s*(?:[-~—–至到]\s*[0-9]{1,4})?\s*页`).MatchString(title) {
+	if !backupPageRangePattern.MatchString(title) {
 		return title
 	}
 	baseTitle := strings.TrimSpace(strings.TrimSuffix(path.Base(originalName), path.Ext(originalName)))
@@ -915,10 +917,8 @@ func ensureGroupMemberUserTx(ctx context.Context, tx *sql.Tx, groupID uint64, me
 	} else if err != nil {
 		return 0, err
 	}
-	if err := addMemberTx(ctx, tx, groupID, userID, displayName, actorID); err != nil {
-		return 0, err
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE users SET display_name=?, name_pinyin=?, updated_at=? WHERE id=?`, displayName, namePinyin, nowSQL(), userID); err != nil {
+	memberName := firstNonEmpty(member.MemberName, displayName)
+	if err := addMemberTx(ctx, tx, groupID, userID, memberName, actorID); err != nil {
 		return 0, err
 	}
 	return userID, nil
@@ -942,17 +942,24 @@ func (r *MySQLRepository) replaceRolesTx(ctx context.Context, tx *sql.Tx, groupI
 	return nil
 }
 
-func (r *MySQLRepository) usernameMapFromRolesTx(ctx context.Context, tx *sql.Tx, roleAssignments map[uint64][]string) (map[string]uint64, error) {
+// Historical membership resolves checkin authors without reactivating them.
+func backupUsernamesTx(ctx context.Context, tx *sql.Tx, groupID uint64) (map[string]uint64, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT u.username,u.id
+		FROM group_members m JOIN users u ON u.id=m.user_id WHERE m.group_id=?`, groupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
 	userIDs := map[string]uint64{}
-	for userID := range roleAssignments {
+	for rows.Next() {
 		var username string
-		if err := tx.QueryRowContext(ctx, `SELECT username FROM users WHERE id=?`, userID).Scan(&username); err == nil {
-			userIDs[username] = userID
-		} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		var userID uint64
+		if err := rows.Scan(&username, &userID); err != nil {
 			return nil, err
 		}
+		userIDs[normalizeUsername(username)] = userID
 	}
-	return userIDs, nil
+	return userIDs, rows.Err()
 }
 
 func (r *MySQLRepository) replaceCheckinsTx(
@@ -971,7 +978,7 @@ func (r *MySQLRepository) replaceCheckinsTx(
 	for _, checkin := range checkins {
 		userID := userIDs[normalizeUsername(checkin.Username)]
 		if userID == 0 {
-			continue
+			return fmt.Errorf("backup checkin user %q has no group identity", checkin.Username)
 		}
 		logicalDate, err := normalizeBackupLogicalDate(checkin.LogicalDate)
 		if err != nil {
@@ -1103,7 +1110,7 @@ func groupDefaultPasswordHashTx(ctx context.Context, tx *sql.Tx, groupID uint64)
 }
 
 func addMemberTx(ctx context.Context, tx *sql.Tx, groupID, userID uint64, memberName string, actorID uint64) error {
-	_, err := tx.ExecContext(ctx, `INSERT INTO group_members (group_id,user_id,member_name,joined_at,created_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE status=1, updated_at=VALUES(updated_at)`, groupID, userID, memberName, nowSQL(), actorID, nowSQL(), nowSQL())
+	_, err := tx.ExecContext(ctx, `INSERT INTO group_members (group_id,user_id,member_name,joined_at,created_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE status=1, member_name=VALUES(member_name), updated_at=VALUES(updated_at)`, groupID, userID, memberName, nowSQL(), actorID, nowSQL(), nowSQL())
 	return err
 }
 

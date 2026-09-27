@@ -27,6 +27,42 @@ type serviceTestRepository struct {
 	deleteCanManage  bool
 }
 
+type pendingAccessRepository struct {
+	Repository
+	calls map[uint64]int
+}
+
+func (r *pendingAccessRepository) ListPendingRequests(context.Context, uint64) ([]Request, error) {
+	return []Request{{ID: 1, GroupID: 1}, {ID: 2, GroupID: 2}, {ID: 3, GroupID: 1}, {ID: 4, GroupID: 3}, {ID: 5, GroupID: 3}}, nil
+}
+
+func (r *pendingAccessRepository) Access(_ context.Context, studyGroupID, groupID, userID uint64) (Access, error) {
+	r.calls[groupID]++
+	if studyGroupID != 10 || userID != 20 {
+		return Access{}, ErrForbidden
+	}
+	if groupID == 3 {
+		return Access{}, ErrGroupNotFound
+	}
+	return Access{IsAdmin: groupID == 1}, nil
+}
+
+func TestPendingRequestsChecksPermissionOncePerGroup(t *testing.T) {
+	repo := &pendingAccessRepository{calls: map[uint64]int{}}
+	items, err := NewService(repo).PendingRequests(t.Context(), 10, Actor{UserID: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 || items[0].ID != 1 || items[1].ID != 3 {
+		t.Fatalf("permission-filtered requests=%+v", items)
+	}
+	for group := uint64(1); group <= 3; group++ {
+		if repo.calls[group] != 1 {
+			t.Errorf("group %d permission calls=%d", group, repo.calls[group])
+		}
+	}
+}
+
 func (r *serviceTestRepository) EnsureCatalog(context.Context, uint64, time.Time) error {
 	return nil
 }

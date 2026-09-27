@@ -1,5 +1,5 @@
 type SaveWeekRequest<T> = (force: boolean) => Promise<T>;
-type ConfirmForce = () => boolean;
+type ConfirmForce = () => boolean | Promise<boolean>;
 
 export function nextReadingStartPage(previousEnd: unknown): string {
   const page = Number(String(previousEnd ?? '').trim());
@@ -20,7 +20,7 @@ export async function saveWeekWithConfirmation<T>(
     return await send(false);
   } catch (error) {
     if (errorCode(error) !== 'week_has_checkins') throw error;
-    if (!confirmForce()) return null;
+    if (!(await confirmForce())) return null;
     return send(true);
   }
 }

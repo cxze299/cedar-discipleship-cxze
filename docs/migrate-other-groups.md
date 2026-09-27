@@ -53,7 +53,7 @@ data/migration-reports/
 
 - 小组名称和内部编码正确。
 - 成员、周任务、打卡记录数量符合旧项目。
-- `warnings` 和 `failures` 为空或已确认。
+- `warnings` 已确认，`failures` 必须为空。存在失败时 dry-run 返回非零，阻止后续正式迁移。
 - 资源文件 dry-run 中的 `imported_files` 和 `would import` 与预期一致。
 
 ## 正式迁移
@@ -75,6 +75,10 @@ EXECUTE_IMPORT=true \
 2. 写入新学习小组、成员、周任务、资源引用和打卡记录。
 3. 资源文件 dry-run。
 4. 复制本组独有资料文件。
+
+正式数据导入只在报告无失败时提交；任何失败都会回滚本轮数据库变更，并返回非零。报告中的 `outcome` 区分 `planned`、`blocked`、`rolled_back`、`committed`，计数表示该轮尝试的操作，只有 `committed` 表示已保存。
+
+使用 `--force-overwrite` 替换周配置时，已被历史签到引用的任务会脱离原周并停用，保留任务及资源关联，确保历史记录和同视频跨周完成继承不丢失。
 
 ## 可选参数
 

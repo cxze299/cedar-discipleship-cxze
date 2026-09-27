@@ -28,7 +28,7 @@ export function buildWeeklyVerseContentLink(verseRef: unknown, reciteText: unkno
   return target ? { label: '查看原文', title, type: 'iframe' as const, url: target } : null;
 }
 
-const bibleBookReferences: Array<[string, string, number, string[]]> = [
+export const bibleBookReferences: ReadonlyArray<readonly [string, string, number, readonly string[]]> = [
   ['创世记', '1', 50, ['创']], ['出埃及记', '2', 40, ['出']], ['利未记', '3', 27, ['利']],
   ['民数记', '4', 36, ['民']], ['申命记', '5', 34, ['申']], ['约书亚记', '6', 24, ['书']],
   ['士师记', '7', 21, ['士']], ['路得记', '8', 4, ['得']], ['撒母耳记上', '9', 31, ['撒上']],

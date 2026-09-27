@@ -12,9 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"agp/backend/internal/checkin"
-	"agp/backend/internal/progress"
 )
 
 var (
@@ -25,13 +22,11 @@ var (
 var taskBindingPageRangePattern = regexp.MustCompile(`([0-9]{1,4})\s*(?:[-~—–至到]\s*([0-9]{1,4}))?\s*页`)
 
 type Service struct {
-	repo     Repository
-	progress *progress.Service
-	checkins *checkin.Service
+	repo Repository
 }
 
-func NewService(repo Repository, progressSvc *progress.Service, checkinSvc *checkin.Service) *Service {
-	return &Service{repo: repo, progress: progressSvc, checkins: checkinSvc}
+func NewService(repo Repository) *Service {
+	return &Service{repo: repo}
 }
 
 func (s *Service) ListWeeks(ctx context.Context, groupID uint64) ([]WeekVO, error) {
@@ -39,16 +34,37 @@ func (s *Service) ListWeeks(ctx context.Context, groupID uint64) ([]WeekVO, erro
 	if err != nil {
 		return nil, err
 	}
+	tasksByWeek, err := s.tasksByWeek(ctx, groupID, weeks)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]WeekVO, 0, len(weeks))
 	for _, week := range weeks {
-		tasks, err := s.repo.ListTasks(ctx, groupID, week.ID)
-		if err != nil {
-			return nil, err
-		}
-		readings, videos, outline := SplitWeekTaskBindings(TaskMaps(tasks))
+		tasks := tasksByWeek[week.ID]
+		readings, videos, outline := SplitWeekTaskBindings(tasks)
 		vo := weekVO(week, readings, videos, outline)
-		vo.WeeklyCheckin = hasAggregateWeeklyTask(TaskMaps(tasks))
+		vo.WeeklyCheckin = hasAggregateWeeklyTask(tasks)
 		out = append(out, vo)
+	}
+	return out, nil
+}
+
+func (s *Service) tasksByWeek(ctx context.Context, groupID uint64, weeks []Week) (map[uint64][]map[string]any, error) {
+	ids := make([]uint64, 0, len(weeks))
+	for _, week := range weeks {
+		ids = append(ids, week.ID)
+	}
+	tasks, err := s.repo.ListTasksForWeeks(ctx, groupID, ids)
+	if err != nil {
+		return nil, err
+	}
+	models := make(map[uint64][]Task)
+	for _, task := range tasks {
+		models[task.WeekID] = append(models[task.WeekID], task)
+	}
+	out := make(map[uint64][]map[string]any, len(models))
+	for weekID, tasks := range models {
+		out[weekID] = TaskMaps(tasks)
 	}
 	return out, nil
 }
@@ -215,6 +231,10 @@ func (s *Service) GroupTaskCompletionsFromContent(
 
 func (s *Service) LearningConfig(ctx context.Context, groupID uint64) (map[string]any, error) {
 	return s.repo.LearningConfig(ctx, groupID)
+}
+
+func (s *Service) SaveActiveMemberRule(ctx context.Context, groupID uint64, rule map[string]any) error {
+	return s.repo.SaveActiveMemberRule(ctx, groupID, rule)
 }
 
 func (s *Service) SaveLearningConfig(ctx context.Context, groupID uint64, settings map[string]any) error {

@@ -145,7 +145,7 @@ func TestQueueRetryFreezesNewMarker(t *testing.T) {
 	}
 	queue.processNext(t.Context(), now)
 	target := queue.targets[event.GroupID][0]
-	if _, err := os.Stat(queue.sent.path(target, "daily")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(queue.sent.path(event.GroupID, target, "daily")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("failed delivery advanced sent state: %v", err)
 	}
 	source.snapshot.Text = "1 张三 视频 2 李四 【新】基督"
@@ -342,6 +342,7 @@ func TestQueueSkipsOlderNotificationVersion(t *testing.T) {
 	queue, source, sender, event, now := queueFixture(t)
 	target := queue.targets[event.GroupID][0]
 	if err := queue.sent.Record(sentState{
+		GroupID: event.GroupID,
 		Target:  target,
 		Topic:   "daily",
 		Version: "daily:2026-09-10",
@@ -366,7 +367,7 @@ func TestQueueRechecksSentStateAfterReadFailure(t *testing.T) {
 	t.Parallel()
 	queue, source, sender, event, now := queueFixture(t)
 	target := queue.targets[event.GroupID][0]
-	statePath := queue.sent.path(target, "daily")
+	statePath := queue.sent.path(event.GroupID, target, "daily")
 	if err := os.WriteFile(statePath, []byte("{"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -379,6 +380,7 @@ func TestQueueRechecksSentStateAfterReadFailure(t *testing.T) {
 	}
 	content := canonicalNotificationContent(source.snapshot.Text)
 	if err := queue.sent.Record(sentState{
+		GroupID: event.GroupID,
 		Target:  target,
 		Topic:   "daily",
 		Version: source.snapshot.Version,

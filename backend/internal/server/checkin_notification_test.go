@@ -32,8 +32,8 @@ func (r *notificationCheckinRepository) FindExistingWeeklyTask(context.Context, 
 	return 0, sql.ErrNoRows
 }
 
-func (r *notificationCheckinRepository) Create(context.Context, *checkindomain.Record, uint64) (uint64, error) {
-	return 42, r.saveErr
+func (r *notificationCheckinRepository) Create(context.Context, *checkindomain.Record, uint64) (uint64, bool, error) {
+	return 42, false, r.saveErr
 }
 
 type notificationAuditRepository struct{ auditdomain.Repository }

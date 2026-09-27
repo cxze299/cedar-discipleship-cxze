@@ -19,10 +19,6 @@ func (s *Service) CheckinDetails(ctx context.Context, groupID uint64, loc *time.
 	return s.repo.CheckinDetails(ctx, groupID, loc)
 }
 
-func (s *Service) DailySummaries(ctx context.Context, groupID uint64) (int, []DailySummary, error) {
-	return s.repo.DailySummaries(ctx, groupID)
-}
-
 func (s *Service) FeedbackExports(ctx context.Context, groupID uint64, loc *time.Location) ([]FeedbackExport, error) {
 	return s.repo.FeedbackExports(ctx, groupID, loc)
 }

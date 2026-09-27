@@ -32,6 +32,10 @@ func TestWebAndBotDailyAdmission(t *testing.T) {
 		{"combined scripture remains available", `{"checkin_mode":"combined","devotion":{"enabled":true,"plan_mode":"custom","plans":[]},"scripture":{"enabled":true}}`, "daily_devotion", http.StatusCreated},
 		{"separate scripture", `{"checkin_mode":"separate","devotion":{"enabled":false},"scripture":{"enabled":true,"type":"checkin"}}`, "daily_scripture", http.StatusCreated},
 		{"combined rejects separate scripture", `{}`, "daily_scripture", http.StatusBadRequest},
+		{"historical combined devotion", `{"devotion":{"numbered_start_date":"2026-09-24","schedule_history":[{"numbered_start_date":"2026-05-27"}]},"scripture":{"enabled":false}}`, "daily_devotion", http.StatusCreated},
+		{"historical separate devotion", `{"checkin_mode":"separate","devotion":{"numbered_start_date":"2026-09-24","schedule_history":[{"numbered_start_date":"2026-05-27"}]},"scripture":{"enabled":false}}`, "daily_devotion", http.StatusCreated},
+		{"historical scripture", `{"checkin_mode":"separate","devotion":{"enabled":false},"scripture":{"start_date":"2026-09-24","schedule_history":[{"start_date":"2026-05-27"}]}}`, "daily_scripture", http.StatusCreated},
+		{"before earliest schedule", `{"devotion":{"numbered_start_date":"2026-09-25","schedule_history":[{"numbered_start_date":"2026-09-24"}]},"scripture":{"enabled":false}}`, "daily_devotion", http.StatusBadRequest},
 	}
 	for _, tt := range tests {
 		for _, transport := range []string{"web", "bot"} {
@@ -49,7 +53,7 @@ func TestWebAndBotDailyAdmission(t *testing.T) {
 				a := &app{
 					location: time.UTC, db: db,
 					users:    user.NewService(user.NewMySQLRepository(db)),
-					learning: learning.NewService(learning.NewMySQLRepository(db), nil, checkins),
+					learning: learning.NewService(learning.NewMySQLRepository(db)),
 					checkins: checkins, audits: audit.NewService(audit.NewMySQLRepository(db)),
 				}
 				for attempt := 0; attempt < 2; attempt++ {

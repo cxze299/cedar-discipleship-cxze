@@ -2,12 +2,60 @@ package learning
 
 import (
 	"encoding/json"
+	"maps"
 	"sort"
 	"strings"
 	"time"
 )
 
 const scheduleHistoryKey = "schedule_history"
+
+func effectiveDailyComponent(settings map[string]any, component, date string) (map[string]any, bool) {
+	config, ok := nestedMap(settings, "task_sections", "daily", component)
+	if !ok || date == "" {
+		return config, ok
+	}
+	keys := []string{"start_date"}
+	if component == "devotion" {
+		keys = []string{"numbered_start_date", "start_date"}
+	}
+	var selected, earliest map[string]any
+	var selectedStart, earliestStart string
+	consider := func(version map[string]any) {
+		start := scheduleStartDate(version, keys)
+		if start == "" {
+			return
+		}
+		if earliest == nil || start < earliestStart {
+			earliest, earliestStart = version, start
+		}
+		if start <= date && (selected == nil || start >= selectedStart) {
+			selected, selectedStart = version, start
+		}
+	}
+	switch history := config[scheduleHistoryKey].(type) {
+	case []any:
+		for _, value := range history {
+			if version, ok := value.(map[string]any); ok {
+				consider(version)
+			}
+		}
+	case []map[string]any:
+		for _, version := range history {
+			consider(version)
+		}
+	}
+	consider(config)
+	if selected == nil {
+		selected = earliest
+	}
+	if selected == nil {
+		return config, true
+	}
+	effective := maps.Clone(config)
+	maps.Copy(effective, selected)
+	return effective, true
+}
 
 func preserveDailyScheduleHistory(existing, next map[string]any) error {
 	existingDaily, existingOK := nestedMap(existing, "task_sections", "daily")

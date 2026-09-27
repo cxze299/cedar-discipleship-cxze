@@ -21,10 +21,9 @@ import { useAppStateStore } from '../stores/appState';
 import { useDownloadManagerStore } from '../stores/downloadManager';
 import { downloadErrorMessage } from '../runtime/downloads';
 import { filterSharedResources } from '../runtime/resourceGovernance';
+import { studyRoleLabel as roleLabel } from '../runtime/studyPermissions';
 import {
   normalizeResourceCategory,
-  resourceCategoryGroupKey,
-  resourceCategoryGroups,
   resourceCategoryLabel,
   resourceCategorySort,
 } from '../runtime/resources';
@@ -72,7 +71,6 @@ const {
 const loginUsername = ref('');
 const loginPassword = ref('');
 const selectedResourceKeys = ref(new Set());
-const collapsedResourceSections = ref(new Set());
 const resourceSearchQuery = ref('');
 const resourceTypeFilter = ref('');
 const resourceDateFilter = ref('');
@@ -120,38 +118,9 @@ const resourcePrimaryCategory = computed(() => {
   if (isMentorResource(first)) return '导读';
   return resourceCategoryLabel(first?.category) || '资料归档';
 });
-const groupedResources = computed(() => {
-  const buckets = resourceCategoryGroups();
-  const map = Object.fromEntries(buckets.map((bucket) => [bucket.key, bucket]));
-
-  for (const asset of filteredResources.value) {
-    const key = isMentorResource(asset) ? 'mentor' : resourceCategoryGroupKey(asset.category);
-    (map[key] || map.other).items.push(asset);
-  }
-
-  return buckets.filter((bucket) => bucket.items.length);
-});
-
 const isLoggingIn = ref(false);
 const loginError = ref('');
 const showMobileMoreMenu = ref(false);
-
-function resourceSectionKey(section) {
-  return String(section.key || section.label);
-}
-
-function resourceSectionCollapsed(section) {
-  return collapsedResourceSections.value.has(resourceSectionKey(section));
-}
-
-function toggleResourceSection(section) {
-  const state = collapsedResourceSections;
-  const next = new Set(state.value);
-  const key = resourceSectionKey(section);
-  if (next.has(key)) next.delete(key);
-  else next.add(key);
-  state.value = next;
-}
 
 async function submitLogin() {
   if (isLoggingIn.value) return;
@@ -264,13 +233,6 @@ function isMentorResource(asset) {
     text.includes('导读') ||
     text.includes('内容概要') ||
     text.includes('圣经纵览的目的与价值');
-}
-
-function roleLabel(member) {
-  if (member.is_super_admin) return '超级管理员';
-  if (member.roles?.includes('group_leader')) return '组长';
-  if (member.roles?.includes('group_admin')) return '小组管理员';
-  return '';
 }
 
 const calendarCounts = computed(() => {
