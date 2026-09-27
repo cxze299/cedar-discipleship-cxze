@@ -9,6 +9,7 @@ import (
 )
 
 var ErrUserNotFound = errors.New("user_not_found")
+var ErrPasswordChanged = errors.New("password_changed")
 var ErrUsernameDisplayNameRequired = errors.New("username_display_name_required")
 var ErrUserIDRequired = errors.New("user_id_required")
 var ErrMemberNotFound = errors.New("member_not_found")
@@ -351,8 +352,8 @@ func (s *Service) PasswordHash(ctx context.Context, userID uint64) (string, erro
 	return s.repo.PasswordHash(ctx, userID)
 }
 
-func (s *Service) UpdatePassword(ctx context.Context, userID uint64, passwordHash string, at time.Time) error {
-	return s.repo.UpdatePassword(ctx, userID, passwordHash, at)
+func (s *Service) UpdatePassword(ctx context.Context, userID uint64, oldHash, passwordHash string, at time.Time) error {
+	return s.repo.UpdatePassword(ctx, userID, oldHash, passwordHash, at)
 }
 
 func ContainsGroup(groups []Group, id uint64) bool {

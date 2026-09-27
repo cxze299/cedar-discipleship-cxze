@@ -129,18 +129,22 @@ func (a *app) handleAdminExportDailySummaryCSV(w http.ResponseWriter, r *http.Re
 	if groupID == 0 {
 		return
 	}
-	activeMembers, items, err := a.backups.DailySummaries(r.Context(), groupID)
+	activeMembers, items, err := a.statistics.DailySummaries(r.Context(), groupID, a.learning)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "export_daily_summary_failed")
 		return
 	}
 	var buf bytes.Buffer
 	writer := csv.NewWriter(&buf)
-	_ = writer.Write([]string{"日期", "组内活跃人数", "当日打卡人数", "总打卡数", "灵修数", "读物数", "视频数", "背经数", "完成率"})
+	_ = writer.Write([]string{
+		"日期", "组内有效成员数", "当日打卡人数", "总打卡数",
+		"灵修数", "读经数", "整周签到数", "读物数", "视频数", "背经数", "提纲数",
+		"当前成员应完成任务数", "当前成员已完成任务数", "完成率",
+	})
 	for _, item := range items {
 		rate := 0.0
-		if activeMembers > 0 {
-			rate = float64(item.TotalCheckins) / float64(activeMembers*4) * 100
+		if item.ExpectedTasks > 0 {
+			rate = float64(item.CompletedTasks) / float64(item.ExpectedTasks) * 100
 		}
 		_ = writer.Write([]string{
 			item.LogicalDate,
@@ -148,9 +152,14 @@ func (a *app) handleAdminExportDailySummaryCSV(w http.ResponseWriter, r *http.Re
 			strconv.Itoa(item.CheckedMembers),
 			strconv.Itoa(item.TotalCheckins),
 			strconv.Itoa(item.DevotionCount),
+			strconv.Itoa(item.ScriptureCount),
+			strconv.Itoa(item.WeeklyCount),
 			strconv.Itoa(item.BookCount),
 			strconv.Itoa(item.VideoCount),
 			strconv.Itoa(item.VerseCount),
+			strconv.Itoa(item.OutlineCount),
+			strconv.Itoa(item.ExpectedTasks),
+			strconv.Itoa(item.CompletedTasks),
 			fmt.Sprintf("%.2f%%", rate),
 		})
 	}
@@ -175,8 +184,9 @@ func (a *app) handleAdminExportStudyWeeksExcel(w http.ResponseWriter, r *http.Re
 		return
 	}
 	file := excelize.NewFile()
+	defer file.Close()
 	file.SetSheetName("Sheet1", "Weeks")
-	_ = file.SetSheetRow("Weeks", "A1", &[]string{"开始日期", "结束日期", "标题", "背经经文", "默写原文", "显示读物", "显示视频", "显示背经", "显示提纲"})
+	_ = file.SetSheetRow("Weeks", "A1", &[]string{"开始日期", "结束日期", "标题", "背经经文", "默写原文", "显示读物", "显示视频", "显示背经", "显示提纲", "整周签到"})
 	_, _ = file.NewSheet("Readings")
 	_ = file.SetSheetRow("Readings", "A1", &[]string{"开始日期", "结束日期", "排序", "标题", "URL", "资产ID"})
 	_, _ = file.NewSheet("Videos")
@@ -195,6 +205,7 @@ func (a *app) handleAdminExportStudyWeeksExcel(w http.ResponseWriter, r *http.Re
 			week.VideoEnabled,
 			week.VerseEnabled,
 			week.OutlineEnabled,
+			week.WeeklyCheckin,
 		})
 		weekRow++
 		for index, reading := range week.Readings {
@@ -264,7 +275,7 @@ func (a *app) handleAdminImportStudyWeeksExcel(w http.ResponseWriter, r *http.Re
 	defer func() { _ = xlsx.Close() }()
 	weeksMap := map[string]*studyWeekInput{}
 	var order []string
-	if rows, err := xlsx.GetRows("Weeks"); err == nil {
+	if rows, err := xlsx.GetRows("Weeks"); err == nil && len(rows) > 0 {
 		for _, row := range rows[1:] {
 			startDate := excelCell(row, 0)
 			endDate := excelCell(row, 1)
@@ -282,6 +293,7 @@ func (a *app) handleAdminImportStudyWeeksExcel(w http.ResponseWriter, r *http.Re
 				VideoEnabled:   parseFlexibleBool(excelCell(row, 6), true),
 				VerseEnabled:   parseFlexibleBool(excelCell(row, 7), true),
 				OutlineEnabled: parseFlexibleBool(excelCell(row, 8), true),
+				WeeklyCheckin:  parseFlexibleBool(excelCell(row, 9), false),
 				Readings:       []weekTaskBinding{},
 				Videos:         []weekTaskBinding{},
 				Outline:        weekTaskBinding{Type: "image"},
@@ -293,7 +305,7 @@ func (a *app) handleAdminImportStudyWeeksExcel(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusBadRequest, "weeks_sheet_required")
 		return
 	}
-	if rows, err := xlsx.GetRows("Readings"); err == nil {
+	if rows, err := xlsx.GetRows("Readings"); err == nil && len(rows) > 0 {
 		for _, row := range rows[1:] {
 			key := weekKey(excelCell(row, 0), excelCell(row, 1))
 			week := weeksMap[key]
@@ -312,7 +324,7 @@ func (a *app) handleAdminImportStudyWeeksExcel(w http.ResponseWriter, r *http.Re
 			})
 		}
 	}
-	if rows, err := xlsx.GetRows("Videos"); err == nil {
+	if rows, err := xlsx.GetRows("Videos"); err == nil && len(rows) > 0 {
 		for _, row := range rows[1:] {
 			key := weekKey(excelCell(row, 0), excelCell(row, 1))
 			week := weeksMap[key]
@@ -331,7 +343,7 @@ func (a *app) handleAdminImportStudyWeeksExcel(w http.ResponseWriter, r *http.Re
 			})
 		}
 	}
-	if rows, err := xlsx.GetRows("Outlines"); err == nil {
+	if rows, err := xlsx.GetRows("Outlines"); err == nil && len(rows) > 0 {
 		for _, row := range rows[1:] {
 			key := weekKey(excelCell(row, 0), excelCell(row, 1))
 			week := weeksMap[key]

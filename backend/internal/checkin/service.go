@@ -29,6 +29,9 @@ func (s *Service) Create(ctx context.Context, record *Record, actorID uint64) (u
 			return 0, false, err
 		}
 	case "weekly_book":
+		// Web and Bot both resolve the book title into detail; use it for the
+		// legacy title partition when a caller omits part.
+		record.Part = firstNonEmpty(record.Part, record.Detail)
 		if err := s.validateWeeklyTarget(ctx, record); err != nil {
 			return 0, false, err
 		}
@@ -51,7 +54,7 @@ func (s *Service) Create(ctx context.Context, record *Record, actorID uint64) (u
 			return 0, false, err
 		}
 	}
-	id, err := s.repo.Create(ctx, record, actorID)
+	id, existing, err := s.repo.Create(ctx, record, actorID)
 	if err != nil {
 		var mysqlErr *mysql.MySQLError
 		if errors.As(err, &mysqlErr) && mysqlErr.Number == 1062 {
@@ -68,7 +71,7 @@ func (s *Service) Create(ctx context.Context, record *Record, actorID uint64) (u
 			}
 		}
 	}
-	return id, false, err
+	return id, existing, err
 }
 
 func (s *Service) validateWeeklyTarget(ctx context.Context, record *Record) error {

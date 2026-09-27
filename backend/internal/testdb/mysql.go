@@ -71,3 +71,30 @@ func Exec(t *testing.T, db *sql.DB, query string, args ...any) {
 		t.Fatal(err)
 	}
 }
+
+// WaitForLockWait waits until another connection is blocked in this test's schema.
+func WaitForLockWait(t *testing.T, db *sql.DB) {
+	t.Helper()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	deadline := time.NewTimer(3 * time.Second)
+	defer deadline.Stop()
+	for {
+		var count int
+		err := db.QueryRowContext(t.Context(), `SELECT COUNT(*)
+			FROM performance_schema.data_lock_waits w
+			JOIN performance_schema.data_locks l ON l.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
+			WHERE l.OBJECT_SCHEMA=DATABASE()`).Scan(&count)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if count > 0 {
+			return
+		}
+		select {
+		case <-ticker.C:
+		case <-deadline.C:
+			t.Fatal("no database lock wait observed")
+		}
+	}
+}

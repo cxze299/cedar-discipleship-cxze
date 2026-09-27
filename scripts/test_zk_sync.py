@@ -2,10 +2,11 @@ import sys
 import types
 import unittest
 from datetime import date
+from unittest.mock import MagicMock, patch
 
 sys.modules.setdefault("pymysql", types.ModuleType("pymysql"))
 
-from zk_sync import content_hash, logical_date, resolve_weekly, slots, source_owned, target_key, task_key
+from zk_sync import content_hash, logical_date, resolve_weekly, slots, source_owned, sync_records, target_key, task_key
 
 
 class ZKSyncPlanningTests(unittest.TestCase):
@@ -48,6 +49,54 @@ class ZKSyncPlanningTests(unittest.TestCase):
         self.assertTrue(source_owned("zk_sync"))
         self.assertTrue(source_owned("json_migration"))
         self.assertFalse(source_owned("web"))
+
+    def test_empty_snapshot_preserves_existing_mappings(self):
+        for size in (1, 40, 50, 51):
+            for dry_run in (False, True):
+                with self.subTest(size=size, dry_run=dry_run):
+                    mappings = [{"source_id": i, "source_slot": "daily", "target_record_id": i,
+                                 "content_hash": "old", "owned": True} for i in range(1, size + 1)]
+                    connection, cursor = self.connection(mappings)
+                    with patch("zk_sync.ensure_table"), patch("zk_sync.load_context", return_value=(1, {}, [], {})):
+                        report = sync_records(connection, [], dry_run)
+                    writes = [call for call in cursor.execute.call_args_list
+                              if call.args[0].lstrip().startswith(("DELETE", "UPDATE", "INSERT"))]
+                    self.assertEqual(writes, [])
+                    self.assertEqual(report["deleted"], 0)
+                    self.assertIn({"reason": "empty_snapshot_held", "count": size}, report["skipped"])
+
+    def test_nonempty_snapshot_propagates_retraction_only_to_owned_rows(self):
+        for owned in (False, True):
+            with self.subTest(owned=owned):
+                mappings = [{"source_id": 1, "source_slot": "daily", "target_record_id": 1,
+                             "content_hash": "old", "owned": owned}]
+                connection, cursor = self.connection(mappings)
+                with patch("zk_sync.ensure_table"), patch("zk_sync.load_context", return_value=(1, {}, [], {})):
+                    report = sync_records(connection, [{"id": 1, "logical_date": "2026-09-22"}])
+                self.assertEqual(report["deleted"], int(owned))
+                updates = [call for call in cursor.execute.call_args_list
+                           if call.args[0].lstrip().startswith("UPDATE")]
+                self.assertEqual(len(updates), int(owned))
+                connection.commit.assert_called_once_with()
+
+    def test_first_empty_snapshot_is_valid(self):
+        connection, _ = self.connection([])
+        with patch("zk_sync.ensure_table"), patch("zk_sync.load_context", return_value=(1, {}, [], {})):
+            report = sync_records(connection, [])
+        self.assertEqual(report["skipped"], [])
+        self.assertEqual(report["deleted"], 0)
+
+    def connection(self, mappings):
+        connection = MagicMock(spec=["cursor", "commit", "rollback"])
+        cursor = MagicMock(spec=["__enter__", "__exit__", "execute", "fetchall"])
+        cursor.__enter__.return_value = cursor
+        connection.cursor.return_value = cursor
+        cursor.fetchall.side_effect = [mappings, [
+            {"id": row["target_record_id"], "user_id": 1, "task_id": None,
+             "logical_date": date(2026, 9, 22), "task_type": "daily_devotion", "part": "", "source": "zk_sync"}
+            for row in mappings
+        ]]
+        return connection, cursor
 
 
 if __name__ == "__main__":

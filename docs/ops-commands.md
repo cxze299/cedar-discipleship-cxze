@@ -38,13 +38,15 @@ cd /volume2/docker/cedar-discipleship
 sudo /usr/local/bin/docker login ghcr.io -u <github-user>
 ```
 
-脚本会使用 `/tmp/cedar-prebuilt-deploy.lock` 防止重复发布并发执行。需要回滚时指定目标提交：
+脚本会使用 `/tmp/cedar-prebuilt-deploy.lock` 防止并发发布，获取最新 `origin/master` 后校验目标提交已合入。镜像必须带有与目标提交一致的 `org.opencontainers.image.revision` 标签；校验后以实际镜像 ID 启动，避免标签变化导致版本漂移。自定义镜像名或标签同样接受校验；旧的无版本标签镜像需由 CI 重新构建。
+
+默认部署 `origin/master`。如需指定已合入的发布提交：
 
 ```bash
 AGP_GIT_REF=<commit-sha> ./scripts/nas-deploy-prebuilt.sh
 ```
 
-本地开发和应急发布仍可继续使用 `docker compose ... up -d --build`。
+代码回滚也须通过功能分支、PR 和必需 CI 合入后再发布。手动在非 `master` 分支运行镜像工作流只发布提交标签，不更新 `master` 镜像标签。
 
 ## 启动与停止
 

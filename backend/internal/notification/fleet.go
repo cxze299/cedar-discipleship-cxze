@@ -63,10 +63,13 @@ type RobotStatus struct {
 }
 
 type fleetRobot struct {
-	config  RobotConfig
-	client  *PotatoClient
-	manager *Manager
-	running bool
+	config   RobotConfig
+	client   *PotatoClient
+	manager  *Manager
+	running  bool
+	removing bool
+	cancel   context.CancelFunc
+	done     chan struct{}
 }
 
 type Fleet struct {
@@ -360,15 +363,25 @@ func (f *Fleet) Run(ctx context.Context) {
 	}
 	f.mu.Unlock()
 	<-ctx.Done()
+	f.mu.Lock()
+	f.runCtx = nil
+	f.mu.Unlock()
 	f.workers.Wait()
 }
 
 func (f *Fleet) startRobotLocked(robot *fleetRobot) {
-	if robot == nil || robot.running || f.runCtx == nil || f.runCtx.Err() != nil {
+	if robot == nil || robot.running || robot.removing || f.runCtx == nil || f.runCtx.Err() != nil {
 		return
 	}
 	robot.running = true
-	f.workers.Go(func() { robot.manager.Run(f.runCtx) })
+	ctx, cancel := context.WithCancel(f.runCtx)
+	robot.cancel = cancel
+	robot.done = make(chan struct{})
+	f.workers.Go(func() {
+		defer close(robot.done)
+		defer cancel()
+		robot.manager.Run(ctx)
+	})
 }
 
 func (f *Fleet) robotList() []*fleetRobot {
@@ -376,7 +389,9 @@ func (f *Fleet) robotList() []*fleetRobot {
 	defer f.mu.RUnlock()
 	robots := make([]*fleetRobot, 0, len(f.order))
 	for _, id := range f.order {
-		robots = append(robots, f.robots[id])
+		if robot := f.robots[id]; !robot.removing {
+			robots = append(robots, robot)
+		}
 	}
 	return robots
 }
@@ -499,6 +514,9 @@ func (f *Fleet) Assign(
 	}
 	f.mu.RLock()
 	robot, ok := f.robots[robotID]
+	if ok && robot.removing {
+		ok = false
+	}
 	f.mu.RUnlock()
 	if !ok {
 		return ErrRobotNotFound
@@ -546,30 +564,6 @@ func (f *Fleet) Register(ctx context.Context, req RobotRegistration) (RobotStatu
 	if err != nil {
 		return RobotStatus{}, err
 	}
-	f.mu.RLock()
-	if len(f.robots) >= maxRobots {
-		f.mu.RUnlock()
-		return RobotStatus{}, ErrRobotLimitExceeded
-	}
-	if _, exists := f.robots[config.ID]; exists {
-		f.mu.RUnlock()
-		return RobotStatus{}, ErrRobotAlreadyExists
-	}
-	for _, existing := range f.robots {
-		if existing.config.Token == config.Token {
-			f.mu.RUnlock()
-			return RobotStatus{}, ErrRobotTokenExists
-		}
-	}
-	f.mu.RUnlock()
-
-	robot, err := newFleetRobot(f.dir, f.source, config)
-	if err != nil {
-		return RobotStatus{}, err
-	}
-	robot.client = client
-	robot.manager.client = client
-
 	f.mu.Lock()
 	if len(f.robots) >= maxRobots {
 		f.mu.Unlock()
@@ -585,6 +579,15 @@ func (f *Fleet) Register(ctx context.Context, req RobotRegistration) (RobotStatu
 			return RobotStatus{}, ErrRobotTokenExists
 		}
 	}
+	// Reserve the ID before opening its queue directory.
+	robot, err := newFleetRobot(f.dir, f.source, config)
+	if err != nil {
+		f.mu.Unlock()
+		return RobotStatus{}, err
+	}
+	robot.client = client
+	robot.manager.client = client
+	robot.manager.queue.sender = client
 	nextRegistered := make(map[string]RobotConfig, len(f.registered)+1)
 	for id, registered := range f.registered {
 		nextRegistered[id] = registered
@@ -606,16 +609,46 @@ func (f *Fleet) Register(ctx context.Context, req RobotRegistration) (RobotStatu
 // Remove unregisters a robot added through the admin API.
 func (f *Fleet) Remove(id string) error {
 	id = strings.TrimSpace(id)
-	if id == "" || id == defaultRobotID { return ErrRobotCannotRemove }
+	if id == "" || id == defaultRobotID {
+		return ErrRobotCannotRemove
+	}
+	f.mu.Lock()
+	robot, ok := f.robots[id]
+	if !ok || robot.removing {
+		f.mu.Unlock()
+		return ErrRobotNotFound
+	}
+	next := make(map[string]RobotConfig, len(f.registered))
+	for key, config := range f.registered {
+		if key != id {
+			next[key] = config
+		}
+	}
+	if err := f.store.Save(configsFromMap(next)); err != nil {
+		f.mu.Unlock()
+		return err
+	}
+	f.registered = next
+	robot.removing = true
+	if robot.cancel != nil {
+		robot.cancel()
+	}
+	done := robot.done
+	f.mu.Unlock()
+
+	robot.manager.close()
+	if done != nil {
+		<-done
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if _, ok := f.robots[id]; !ok { return ErrRobotNotFound }
-	next := make(map[string]RobotConfig, len(f.registered))
-	for key, config := range f.registered { if key != id { next[key] = config } }
-	if err := f.store.Save(configsFromMap(next)); err != nil { return err }
-	f.registered = next
 	delete(f.robots, id)
-	for i, key := range f.order { if key == id { f.order = append(f.order[:i], f.order[i+1:]...); break } }
+	for i, key := range f.order {
+		if key == id {
+			f.order = append(f.order[:i], f.order[i+1:]...)
+			break
+		}
+	}
 	return nil
 }
 

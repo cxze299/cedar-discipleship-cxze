@@ -291,18 +291,6 @@
 .app-more-dialog__danger { margin-top: 10px; }
 .app-dialog-full-button { width: 100%; }
 
-.app-calendar-dialog { max-width: 500px; }
-.app-calendar-dialog__icon { color: var(--cd-primary); }
-.app-calendar-dialog__body { padding: 20px; }
-.app-calendar-dialog__nav { margin-bottom: 16px; }
-.app-calendar-dialog__nav-button { height: 32px; padding: 0 10px; }
-.app-calendar-dialog__month { font-size: 16px; font-variant-numeric: tabular-nums; }
-.app-calendar-dialog__weekdays { display: grid; grid-template-columns: repeat(7, 1fr); margin-bottom: 8px; color: var(--cd-muted); font-size: 12px; font-weight: 500; text-align: center; }
-.app-calendar-dialog__days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
-.app-calendar-dialog .calendar-day { display: flex; height: 48px; min-width: 0; padding: 2px; align-items: center; justify-content: center; flex-direction: column; border: 1px solid var(--cd-border); border-radius: var(--cd-radius-base); background: var(--cd-surface); }
-.app-calendar-dialog__day-number { font-size: 13px; font-weight: 500; }
-.app-calendar-dialog__day-count { color: var(--cd-primary); font-size: 10px; font-weight: 600; }
-
 .app-resource-grid--mobile { display: none; }
 .cd-resource-card.app-resource-stack-card { container: resource-card / inline-size; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; height: 100%; padding: 16px; }
 .app-resource-stack-card .tile { width: 28px; height: 28px; min-width: 28px; flex: 0 0 28px; }
@@ -360,8 +348,7 @@
   .app-resource-card__download { grid-column: auto !important; }
 
   .cd-dialog-backdrop { padding: 12px; }
-  .app-more-dialog,
-  .app-calendar-dialog { max-width: min(100%, 500px); }
+  .app-more-dialog { max-width: min(100%, 500px); }
 }
 
 /* iPad and other touch tablets: keep the compact sidebar while giving forms
@@ -388,7 +375,4 @@
   .app-page-header { padding-inline: 16px; }
   .app-resource-card__cta { display: none; }
   .cd-resource-card { grid-template-columns: 40px minmax(0, 1fr); }
-  .app-calendar-dialog__body { padding: 16px 12px; }
-  .app-calendar-dialog__days { gap: 3px; }
-  .app-calendar-dialog .calendar-day { height: 44px; }
 }

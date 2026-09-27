@@ -269,7 +269,9 @@ def sync_records(connection, records, dry_run=False):
                 mappings[key] = {"target_record_id": target_id, "content_hash": fingerprint, "owned": owned}
 
         missing = [key for key in mappings if key not in seen]
-        if len(missing) > 50 and len(missing) > len(mappings) // 10:
+        if mappings and not records:
+            report["skipped"].append({"reason": "empty_snapshot_held", "count": len(missing)})
+        elif len(missing) > 50 and len(missing) > len(mappings) // 10:
             report["skipped"].append({"reason": "mass_deletion_held", "count": len(missing)})
         else:
             live_targets = {item["target_record_id"] for key, item in mappings.items() if key in seen}

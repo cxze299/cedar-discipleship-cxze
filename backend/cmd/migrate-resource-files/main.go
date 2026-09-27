@@ -2131,6 +2131,7 @@ type cleanupAssetCandidate struct {
 	ChecksumSHA256 string
 	AssetKind      string
 	SourceAssetID  uint64
+	HasDependents  bool
 }
 
 type duplicateAssetBinding struct {
@@ -2140,7 +2141,8 @@ type duplicateAssetBinding struct {
 }
 
 func cleanupDuplicateResourceBindings(ctx context.Context, db *sql.DB, groupID uint64, dryRun bool) (int, error) {
-	rows, err := db.QueryContext(ctx, `SELECT a.id,a.category,a.title,a.original_name,a.file_size,a.checksum_sha256,b.asset_kind,COALESCE(b.source_asset_id,0)
+	rows, err := db.QueryContext(ctx, `SELECT a.id,a.category,a.title,a.original_name,a.file_size,a.checksum_sha256,b.asset_kind,COALESCE(b.source_asset_id,0),
+		EXISTS(SELECT 1 FROM asset_dependencies d WHERE d.provider_asset_id=a.id AND d.status='active')
 		FROM assets a
 		JOIN asset_bindings b ON b.asset_id=a.id AND b.group_id=a.group_id AND b.deleted_at IS NULL
 		WHERE a.group_id=? AND a.storage_path LIKE 'team-%-resources/objects/%'
@@ -2163,6 +2165,7 @@ func cleanupDuplicateResourceBindings(ctx context.Context, db *sql.DB, groupID u
 			&item.ChecksumSHA256,
 			&item.AssetKind,
 			&item.SourceAssetID,
+			&item.HasDependents,
 		); err != nil {
 			return 0, err
 		}
@@ -2191,6 +2194,10 @@ func cleanupDuplicateResourceBindings(ctx context.Context, db *sql.DB, groupID u
 			if item.ID == canonical.ID {
 				continue
 			}
+			if item.HasDependents {
+				fmt.Fprintf(os.Stderr, "skip duplicate asset %d: active consumers retain its source identity\n", item.ID)
+				continue
+			}
 			duplicates = append(duplicates, duplicateAssetBinding{
 				AssetID:          item.ID,
 				CanonicalAssetID: canonical.ID,
@@ -2209,6 +2216,9 @@ func cleanupDuplicateResourceBindings(ctx context.Context, db *sql.DB, groupID u
 	defer tx.Rollback()
 	now := time.Now().UTC()
 	for _, duplicate := range duplicates {
+		if err := ensureAssetHasNoDependents(ctx, tx, duplicate.AssetID); err != nil {
+			return 0, err
+		}
 		if _, err := tx.ExecContext(ctx, `INSERT IGNORE INTO task_assets
 			(group_id,task_id,asset_id,usage_type,sort_order,created_at)
 			SELECT group_id,task_id,?,usage_type,sort_order,created_at
@@ -2221,8 +2231,8 @@ func cleanupDuplicateResourceBindings(ctx context.Context, db *sql.DB, groupID u
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE asset_dependencies
 			SET status='removed',updated_at=?
-			WHERE status='active' AND (consumer_asset_id=? OR provider_asset_id=?)`,
-			now, duplicate.AssetID, duplicate.AssetID); err != nil {
+			WHERE status='active' AND consumer_asset_id=?`,
+			now, duplicate.AssetID); err != nil {
 			return 0, err
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE asset_share_grants

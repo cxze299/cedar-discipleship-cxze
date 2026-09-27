@@ -1,4 +1,7 @@
 let accessToken = '';
+let sessionGeneration = 0;
+type RefreshedSession = { token: string; user?: unknown };
+let refreshPromise: Promise<RefreshedSession | null> | null = null;
 
 export function getAccessToken() {
   return accessToken;
@@ -6,10 +9,45 @@ export function getAccessToken() {
 
 export function setAccessToken(token?: string) {
   accessToken = String(token || '');
+  sessionGeneration += 1;
+  refreshPromise = null;
 }
 
 export function clearAccessToken() {
-  accessToken = '';
+  setAccessToken('');
+}
+
+export function authSessionGeneration(): number {
+  return sessionGeneration;
+}
+
+export function refreshAccessSession(): Promise<RefreshedSession | null> {
+  if (refreshPromise) return refreshPromise;
+  const generation = sessionGeneration;
+  const pending = Promise.resolve().then(async () => {
+    try {
+      const response = await fetch('/api/auth/refresh', {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': csrfToken() },
+        credentials: 'same-origin',
+      });
+      const data = await response.json().catch(() => ({}));
+      if (generation !== sessionGeneration) return null;
+      if (!response.ok || !data.token) {
+        accessToken = '';
+        return null;
+      }
+      accessToken = String(data.token);
+      return { ...data, token: accessToken } as RefreshedSession;
+    } catch {
+      if (generation === sessionGeneration) accessToken = '';
+      return null;
+    } finally {
+      if (refreshPromise === pending) refreshPromise = null;
+    }
+  });
+  refreshPromise = pending;
+  return pending;
 }
 
 export function authHeaders(headers: Record<string, string> = {}) {

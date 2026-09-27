@@ -70,9 +70,8 @@ usage() {
 EOF
 }
 
-rand_password() {
-  LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c "${1:-12}"
-}
+# shellcheck source=scripts/lib/random.sh
+. "$ROOT_DIR/scripts/lib/random.sh"
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -159,7 +158,7 @@ run_cli() {
     docker_run_args+=(--env-file "$ENV_FILE")
   fi
   docker run "${docker_run_args[@]}" \
-    "${docker_env_args[@]}" \
+    ${docker_env_args[@]+"${docker_env_args[@]}"} \
     -v "$ROOT_DIR:/workspace" \
     -w /workspace/backend \
     golang:1.25-bookworm \

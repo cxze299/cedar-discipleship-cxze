@@ -51,7 +51,11 @@ func (a *app) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.loginLimiter.success(remote, username)
-	sessionID, err := a.issueRefreshSession(r.Context(), w, r, user.ID, currentGroupID)
+	sessionID, err := a.issueRefreshSession(r.Context(), w, r, user.ID, currentGroupID, user.PasswordHash)
+	if errors.Is(err, userdomain.ErrPasswordChanged) {
+		writeError(w, http.StatusUnauthorized, "invalid_username_or_password")
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "session_failed")
 		return
@@ -237,10 +241,15 @@ func (a *app) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "password_failed")
 		return
 	}
-	if err := a.users.UpdatePassword(r.Context(), u.ID, hash, time.Now().UTC()); err != nil {
+	if err := a.users.UpdatePassword(r.Context(), u.ID, oldHash, hash, time.Now().UTC()); err != nil {
+		if errors.Is(err, userdomain.ErrPasswordChanged) {
+			writeError(w, http.StatusUnauthorized, "invalid_password")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "password_save_failed")
 		return
 	}
+	clearAuthCookies(w, r)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 

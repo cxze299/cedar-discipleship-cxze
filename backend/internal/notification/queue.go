@@ -50,6 +50,8 @@ type job struct {
 	ContentVersion   string    `json:"content_version,omitempty"`
 	ContentHash      string    `json:"content_hash,omitempty"`
 	CanonicalContent string    `json:"canonical_content,omitempty"`
+	CoveredRecordID  uint64    `json:"covered_record_id,omitempty"`
+	SentAt           time.Time `json:"sent_at,omitempty"`
 }
 
 func NewQueue(dir string, targets map[uint64][]Target, source SnapshotSource, sender TextSender) (*Queue, error) {
@@ -189,6 +191,12 @@ func (q *Queue) rearmInitial(name string, now time.Time) error {
 	item.NextTry = time.Time{}
 	item.Status = "pending"
 	item.ErrorCode = ""
+	item.Topic = ""
+	item.ContentVersion = ""
+	item.ContentHash = ""
+	item.CanonicalContent = ""
+	item.CoveredRecordID = 0
+	item.SentAt = time.Time{}
 	pending := filepath.Join(q.dir, "pending", name)
 	if err := writeJob(pending, item); err != nil {
 		return err
@@ -300,7 +308,8 @@ func (q *Queue) process(ctx context.Context, path string, item *job, now time.Ti
 		q.finish(ctx, path, item, start)
 		return
 	}
-	if err == nil && len(item.Messages) == 0 {
+	freshSnapshot := len(item.Messages) == 0
+	if err == nil && freshSnapshot {
 		if item.Event.Initial != "" {
 			item.Event.OccurredAt = now
 		}
@@ -325,34 +334,36 @@ func (q *Queue) process(ctx context.Context, path string, item *job, now time.Ti
 			}
 			item.CanonicalContent = canonicalNotificationContent(snapshot.Text)
 			item.ContentHash = contentHash(item.CanonicalContent)
-			needsSend, stateErr := q.sent.NeedsSend(
-				item.Target, item.Topic, item.ContentVersion, item.ContentHash,
-			)
-			if stateErr != nil {
-				err = &deliveryError{code: "sent_state_read_failed", retry: true}
+			item.CoveredRecordID = snapshot.CoveredRecordID
+		} else {
+			err = &deliveryError{code: "summary_read_failed", retry: true}
+		}
+	}
+	if err == nil {
+		// A full snapshot can supersede an event even between its message parts.
+		needsSend, stateErr := q.sent.NeedsSend(stateFromJob(*item), item.Event.RecordID)
+		if stateErr != nil {
+			err = &deliveryError{code: "sent_state_read_failed", retry: true}
+			if freshSnapshot {
 				item.Messages = nil
 				item.ExpiresAt = time.Time{}
 				item.Topic = ""
 				item.ContentVersion = ""
 				item.ContentHash = ""
 				item.CanonicalContent = ""
-			} else if !needsSend {
-				item.Status, item.ErrorCode = "skipped", "content_not_updated"
-				q.finish(ctx, path, item, start)
-				return
+				item.CoveredRecordID = 0
 			}
-			// Freeze the exact body before making a non-idempotent external call.
-			if err == nil {
-				err = writeJob(path, *item)
-			}
-			if err != nil {
-				slog.ErrorContext(ctx, "checkin notification snapshot save failed", "error", err)
-				if _, ok := err.(*deliveryError); !ok {
-					return
-				}
-			}
-		} else {
-			err = &deliveryError{code: "summary_read_failed", retry: true}
+		} else if !needsSend {
+			item.Status, item.ErrorCode = "skipped", "content_not_updated"
+			q.finish(ctx, path, item, start)
+			return
+		}
+	}
+	// Freeze the exact body before making a non-idempotent external call.
+	if err == nil && freshSnapshot {
+		if err := writeJob(path, *item); err != nil {
+			slog.ErrorContext(ctx, "checkin notification snapshot save failed", "error", err)
+			return
 		}
 	}
 	if err == nil && !now.Before(item.ExpiresAt) {
@@ -442,13 +453,15 @@ func (q *Queue) finish(ctx context.Context, path string, item *job, start time.T
 	if item.ErrorCode == "" {
 		item.Attempts = 0
 	}
+	if item.Status == "sent" && item.SentAt.IsZero() {
+		item.SentAt = time.Now().UTC()
+	}
 	if err := writeJob(path, *item); err != nil {
 		slog.ErrorContext(ctx, "checkin notification state save failed", "record_id", item.Event.RecordID, "error", err)
 		return
 	}
 	if item.Status == "sent" {
 		state := stateFromJob(*item)
-		state.SentAt = time.Now().UTC()
 		if err := q.sent.Record(state); err != nil {
 			slog.ErrorContext(ctx, "sent notification state save failed",
 				"record_id", item.Event.RecordID, "group_id", item.Event.GroupID,
@@ -478,32 +491,8 @@ func writeJob(path string, item job) error {
 	if err != nil {
 		return fmt.Errorf("encode notification job: %w", err)
 	}
-	file, err := os.CreateTemp(filepath.Dir(path), ".notification-*")
-	if err != nil {
-		return fmt.Errorf("create notification job: %w", err)
-	}
-	defer os.Remove(file.Name())
-	if _, err := file.Write(data); err != nil {
-		file.Close()
+	if err := writeAtomic(path, data); err != nil {
 		return fmt.Errorf("write notification job: %w", err)
-	}
-	if err := file.Sync(); err != nil {
-		file.Close()
-		return fmt.Errorf("sync notification job: %w", err)
-	}
-	if err := file.Close(); err != nil {
-		return fmt.Errorf("close notification job: %w", err)
-	}
-	if err := os.Rename(file.Name(), path); err != nil {
-		return fmt.Errorf("publish notification job: %w", err)
-	}
-	dir, err := os.Open(filepath.Dir(path))
-	if err != nil {
-		return fmt.Errorf("open notification directory: %w", err)
-	}
-	defer dir.Close()
-	if err := dir.Sync(); err != nil {
-		return fmt.Errorf("sync notification directory: %w", err)
 	}
 	return nil
 }

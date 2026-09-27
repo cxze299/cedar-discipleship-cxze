@@ -15,6 +15,36 @@ func NewMySQLRepository(db *sql.DB) *MySQLRepository {
 	return &MySQLRepository{db: db}
 }
 
+// DailyEvents preserves all non-deleted historical events, including former
+// members. Expected/completed tasks have a separate current-member scope.
+func (r *MySQLRepository) DailyEvents(ctx context.Context, groupID uint64) ([]DailySummary, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT logical_date,COUNT(*),COUNT(DISTINCT user_id),
+		SUM(task_type='daily_devotion'),SUM(task_type='daily_scripture'),SUM(task_type='weekly_checkin'),
+		SUM(task_type='weekly_book'),SUM(task_type='weekly_video'),SUM(task_type='weekly_verse'),
+		SUM(task_type='weekly_outline')
+		FROM checkin_records WHERE group_id=? AND deleted_at IS NULL
+		GROUP BY logical_date ORDER BY logical_date DESC`, groupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]DailySummary, 0)
+	for rows.Next() {
+		var item DailySummary
+		var date time.Time
+		if err := rows.Scan(
+			&date, &item.TotalCheckins, &item.CheckedMembers,
+			&item.DevotionCount, &item.ScriptureCount, &item.WeeklyCount,
+			&item.BookCount, &item.VideoCount, &item.VerseCount, &item.OutlineCount,
+		); err != nil {
+			return nil, err
+		}
+		item.LogicalDate = date.Format("2006-01-02")
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (r *MySQLRepository) DailySummary(ctx context.Context, groupID uint64, from, to string) (map[string]int, error) {
 	rows, err := r.db.QueryContext(ctx, `SELECT task_type, COUNT(*) FROM checkin_records WHERE group_id=? AND logical_date BETWEEN ? AND ? AND deleted_at IS NULL AND status='done' GROUP BY task_type`, groupID, from, to)
 	if err != nil {
@@ -168,10 +198,6 @@ func (r *MySQLRepository) MemberCalendar(ctx context.Context, groupID, userID ui
 		items = append(items, item)
 	}
 	return items, rows.Err()
-}
-
-func (r *MySQLRepository) LearningTotals(ctx context.Context, groupID, userID uint64) (*LearningTotals, error) {
-	return &LearningTotals{}, nil
 }
 
 func firstNonEmpty(values ...string) string {

@@ -254,6 +254,7 @@ func snapshotWithText(snapshot Snapshot, text string) Snapshot {
 func stateForSnapshot(target Target, snapshot Snapshot, sentAt time.Time) *sentState {
 	content := canonicalNotificationContent(snapshot.Text)
 	return &sentState{
+		GroupID: 1,
 		Target:  target,
 		Topic:   snapshot.Topic,
 		Version: snapshot.Version,
@@ -275,6 +276,7 @@ func TestInitialSnapshot(t *testing.T) {
 		dbError     bool
 		want        string
 		wantVersion string
+		wantCovered uint64
 	}{
 		{
 			name: "daily includes existing people", kind: "daily",
@@ -282,7 +284,7 @@ func TestInitialSnapshot(t *testing.T) {
 				{int64(1), int64(1), "张三", "daily_devotion", "", "", "", "", ""},
 				{int64(2), int64(2), "李四", "daily_devotion", "", "", "", "", ""},
 			},
-			want: "每日灵修\n1 张三\n2 李四", wantVersion: "daily:2026-09-09",
+			want: "每日灵修\n1 张三\n2 李四", wantVersion: "daily:2026-09-09", wantCovered: 2,
 		},
 		{
 			name: "weekly groups books and video", kind: "weekly",
@@ -291,7 +293,7 @@ func TestInitialSnapshot(t *testing.T) {
 				{int64(2), int64(1), "张三", "weekly_video", "", "", "", "video/mp4", "lesson.mp4"},
 				{int64(3), int64(2), "李四", "weekly_book", "史剧", "", "", "", ""},
 			},
-			want: "本周任务\n1 张三 基督 视频\n2 李四 史剧", wantVersion: "weekly:2026-09-13",
+			want: "本周任务\n1 张三 基督 视频\n2 李四 史剧", wantVersion: "weekly:2026-09-13", wantCovered: 3,
 		},
 		{
 			name: "carried video and repeated completion merge", kind: "weekly",
@@ -299,7 +301,7 @@ func TestInitialSnapshot(t *testing.T) {
 				{int64(1), int64(1), "张三", "weekly_video", "", "", "", "video/mp4", "lesson.mp4"},
 				{int64(2), int64(1), "张三", "weekly_video", "", "", "", "video/mp4", "lesson.mp4"},
 			},
-			want: "本周任务\n1 张三 视频", wantVersion: "weekly:2026-09-13",
+			want: "本周任务\n1 张三 视频", wantVersion: "weekly:2026-09-13", wantCovered: 2,
 		},
 		{name: "empty daily", kind: "daily", want: "每日灵修\n暂无打卡记录", wantVersion: "daily:2026-09-09"},
 		{name: "empty weekly", kind: "weekly", want: "本周任务\n暂无打卡记录", wantVersion: "weekly:2026-09-13"},
@@ -351,6 +353,9 @@ func TestInitialSnapshot(t *testing.T) {
 			}
 			if strings.Contains(snapshot.Text, "【新】") {
 				t.Fatal("initial progress must not mark historical checkins as new")
+			}
+			if snapshot.CoveredRecordID != tt.wantCovered {
+				t.Fatalf("snapshot coverage=%d, want %d", snapshot.CoveredRecordID, tt.wantCovered)
 			}
 			if !tt.dbError && (snapshot.Topic != tt.kind || snapshot.Version != tt.wantVersion) {
 				t.Fatalf("topic/version = %q/%q, want %q/%q",

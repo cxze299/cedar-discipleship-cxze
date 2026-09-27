@@ -9,6 +9,7 @@ import (
 )
 
 type saveWeekTestRepository struct {
+	Repository
 	force   bool
 	saveErr error
 }
@@ -68,7 +69,7 @@ func TestServiceSaveWeekPassesForcePolicy(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &saveWeekTestRepository{}
-			service := NewService(repo, nil, nil)
+			service := NewService(repo)
 
 			_, err := service.SaveWeek(context.Background(), 1, 7, WeekInput{}, tt.force, time.Time{})
 			if err != nil {
@@ -83,7 +84,7 @@ func TestServiceSaveWeekPassesForcePolicy(t *testing.T) {
 
 func TestServiceSaveWeekReturnsCheckinConflict(t *testing.T) {
 	repo := &saveWeekTestRepository{saveErr: ErrWeekHasCheckins}
-	service := NewService(repo, nil, nil)
+	service := NewService(repo)
 
 	_, err := service.SaveWeek(context.Background(), 1, 7, WeekInput{}, false, time.Time{})
 	if !errors.Is(err, ErrWeekHasCheckins) {

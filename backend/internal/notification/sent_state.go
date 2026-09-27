@@ -14,12 +14,14 @@ import (
 )
 
 type sentState struct {
-	Target  Target    `json:"target"`
-	Topic   string    `json:"topic"`
-	Version string    `json:"version"`
-	Hash    string    `json:"hash"`
-	Content string    `json:"content"`
-	SentAt  time.Time `json:"sent_at"`
+	GroupID         uint64    `json:"group_id"`
+	Target          Target    `json:"target"`
+	Topic           string    `json:"topic"`
+	Version         string    `json:"version"`
+	Hash            string    `json:"hash"`
+	Content         string    `json:"content"`
+	SentAt          time.Time `json:"sent_at"`
+	CoveredRecordID uint64    `json:"covered_record_id,omitempty"`
 }
 
 type sentStateStore struct {
@@ -38,24 +40,35 @@ func newSentStateStore(queueDir string) (*sentStateStore, error) {
 	return store, nil
 }
 
-func (s *sentStateStore) NeedsSend(target Target, topic, version, hash string) (bool, error) {
-	if !validTopic(topic) || version == "" || hash == "" {
+func (s *sentStateStore) NeedsSend(candidate sentState, recordID uint64) (bool, error) {
+	if candidate.GroupID == 0 || !validTopic(candidate.Topic) || candidate.Version == "" || candidate.Hash == "" {
 		return false, errors.New("invalid notification content state")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	state, err := s.readLocked(target, topic)
+	state, err := s.readLocked(candidate.GroupID, candidate.Target, candidate.Topic)
 	if errors.Is(err, os.ErrNotExist) {
 		return true, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	if state.Version == version {
-		return state.Hash != hash, nil
+	if state.Version == candidate.Version {
+		if recordID > 0 && recordID <= state.CoveredRecordID {
+			return false, nil
+		}
+		if state.Hash == candidate.Hash {
+			// Identical content is already delivered; retain its wider coverage.
+			if candidate.CoveredRecordID > state.CoveredRecordID {
+				state.CoveredRecordID = candidate.CoveredRecordID
+				return false, s.writeLocked(state)
+			}
+			return false, nil
+		}
+		return true, nil
 	}
-	currentPeriod, currentOK := notificationVersionDate(topic, version)
-	previousPeriod, previousOK := notificationVersionDate(topic, state.Version)
+	currentPeriod, currentOK := notificationVersionDate(candidate.Topic, candidate.Version)
+	previousPeriod, previousOK := notificationVersionDate(candidate.Topic, state.Version)
 	if currentOK && previousOK && currentPeriod.Before(previousPeriod) {
 		return false, nil
 	}
@@ -63,11 +76,15 @@ func (s *sentStateStore) NeedsSend(target Target, topic, version, hash string) (
 }
 
 func (s *sentStateStore) Record(state sentState) error {
-	if !validTopic(state.Topic) || state.Version == "" || state.Hash == "" {
+	if state.GroupID == 0 || !validTopic(state.Topic) || state.Version == "" || state.Hash == "" {
 		return errors.New("invalid sent notification state")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	previous, err := s.readLocked(state.GroupID, state.Target, state.Topic)
+	if err == nil && previous.Version == state.Version {
+		state.CoveredRecordID = max(state.CoveredRecordID, previous.CoveredRecordID)
+	}
 	return s.writeLocked(state)
 }
 
@@ -90,16 +107,16 @@ func (s *sentStateStore) bootstrap(completedDir string) error {
 			continue
 		}
 		state := stateFromJob(item)
-		if !validTopic(state.Topic) || state.Hash == "" {
+		if state.GroupID == 0 || !validTopic(state.Topic) || state.Hash == "" {
 			continue
 		}
-		key := sentStateKey(state.Target, state.Topic)
+		key := s.path(state.GroupID, state.Target, state.Topic)
 		if previous, exists := latest[key]; !exists || previous.SentAt.Before(state.SentAt) {
 			latest[key] = state
 		}
 	}
 	for _, state := range latest {
-		path := s.path(state.Target, state.Topic)
+		path := s.path(state.GroupID, state.Target, state.Topic)
 		if _, err := os.Stat(path); err == nil {
 			continue
 		} else if !errors.Is(err, os.ErrNotExist) {
@@ -112,8 +129,8 @@ func (s *sentStateStore) bootstrap(completedDir string) error {
 	return nil
 }
 
-func (s *sentStateStore) readLocked(target Target, topic string) (sentState, error) {
-	data, err := os.ReadFile(s.path(target, topic))
+func (s *sentStateStore) readLocked(groupID uint64, target Target, topic string) (sentState, error) {
+	data, err := os.ReadFile(s.path(groupID, target, topic))
 	if err != nil {
 		return sentState{}, err
 	}
@@ -121,7 +138,7 @@ func (s *sentStateStore) readLocked(target Target, topic string) (sentState, err
 	if err := json.Unmarshal(data, &state); err != nil {
 		return sentState{}, fmt.Errorf("decode sent notification state: %w", err)
 	}
-	if state.Target != target || state.Topic != topic || state.Version == "" || state.Hash == "" {
+	if state.GroupID != groupID || state.Target != target || state.Topic != topic || state.Version == "" || state.Hash == "" {
 		return sentState{}, errors.New("invalid sent notification state")
 	}
 	return state, nil
@@ -132,14 +149,14 @@ func (s *sentStateStore) writeLocked(state sentState) error {
 	if err != nil {
 		return fmt.Errorf("encode sent notification state: %w", err)
 	}
-	if err := writeAtomic(s.path(state.Target, state.Topic), data); err != nil {
+	if err := writeAtomic(s.path(state.GroupID, state.Target, state.Topic), data); err != nil {
 		return fmt.Errorf("write sent notification state: %w", err)
 	}
 	return nil
 }
 
-func (s *sentStateStore) path(target Target, topic string) string {
-	return filepath.Join(s.dir, fmt.Sprintf("%020d-%d-%s.json", target.ChatID, target.ChatType, topic))
+func (s *sentStateStore) path(groupID uint64, target Target, topic string) string {
+	return filepath.Join(s.dir, fmt.Sprintf("%020d-%020d-%d-%s.json", groupID, target.ChatID, target.ChatType, topic))
 }
 
 func stateFromJob(item job) sentState {
@@ -159,13 +176,19 @@ func stateFromJob(item job) sentState {
 	if version == "" {
 		version = legacyContentVersion(item, topic)
 	}
+	sentAt := item.SentAt
+	if sentAt.IsZero() {
+		sentAt = item.Event.OccurredAt
+	}
 	return sentState{
-		Target:  item.Target,
-		Topic:   topic,
-		Version: version,
-		Hash:    hash,
-		Content: content,
-		SentAt:  item.Event.OccurredAt,
+		GroupID:         item.Event.GroupID,
+		Target:          item.Target,
+		Topic:           topic,
+		Version:         version,
+		Hash:            hash,
+		Content:         content,
+		SentAt:          sentAt,
+		CoveredRecordID: max(item.CoveredRecordID, item.Event.RecordID),
 	}
 }
 
@@ -223,8 +246,4 @@ func notificationVersionDate(topic, version string) (time.Time, bool) {
 	value = strings.TrimPrefix(value, "none:")
 	period, err := time.Parse("2006-01-02", value)
 	return period, err == nil
-}
-
-func sentStateKey(target Target, topic string) string {
-	return fmt.Sprintf("%d:%d:%s", target.ChatID, target.ChatType, topic)
 }

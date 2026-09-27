@@ -9,13 +9,6 @@ type Summary struct {
 	ActiveUsers    int
 }
 
-type LearningTotals struct {
-	ReadPages      int
-	WatchedMinutes int
-	CompletedDays  int
-	StreakDays     int
-}
-
 type Member struct {
 	MemberID    uint64
 	UserID      uint64

@@ -61,7 +61,7 @@ func TestServiceCreateDailyPreservesStorageErrors(t *testing.T) {
 func TestServiceCreateVideoConcurrentRetry(t *testing.T) {
 	repo := &fakeRepository{
 		existingWeeklyTaskErr: sql.ErrNoRows,
-		createErr:            &mysql.MySQLError{Number: 1062},
+		createErr:             &mysql.MySQLError{Number: 1062},
 	}
 	repo.onCreate = func() {
 		repo.existingWeeklyTaskErr = nil
@@ -227,12 +227,12 @@ func (r *fakeRepository) FindExistingWeeklyTask(ctx context.Context, groupID, us
 	return r.existingWeeklyTaskID, nil
 }
 
-func (r *fakeRepository) Create(ctx context.Context, record *Record, actorID uint64) (uint64, error) {
+func (r *fakeRepository) Create(ctx context.Context, record *Record, actorID uint64) (uint64, bool, error) {
 	r.createCalled = true
 	if r.onCreate != nil {
 		r.onCreate()
 	}
-	return r.createID, r.createErr
+	return r.createID, false, r.createErr
 }
 
 func (r *fakeRepository) DeleteOwn(ctx context.Context, groupID, userID, recordID uint64) error {

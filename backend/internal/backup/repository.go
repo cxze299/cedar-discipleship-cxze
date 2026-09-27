@@ -9,7 +9,6 @@ import (
 
 type Repository interface {
 	CheckinDetails(ctx context.Context, groupID uint64, loc *time.Location) ([]CheckinDetail, error)
-	DailySummaries(ctx context.Context, groupID uint64) (int, []DailySummary, error)
 	FeedbackExports(ctx context.Context, groupID uint64, loc *time.Location) ([]FeedbackExport, error)
 	GroupInfo(ctx context.Context, groupID uint64) (*GroupInfo, error)
 	BackupMembers(ctx context.Context, groupID uint64) ([]Member, error)

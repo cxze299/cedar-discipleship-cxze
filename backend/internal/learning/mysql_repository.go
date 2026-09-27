@@ -60,8 +60,21 @@ func (r *MySQLRepository) ListWeeks(ctx context.Context, groupID uint64) ([]Week
 }
 
 func (r *MySQLRepository) ListTasks(ctx context.Context, groupID, weekID uint64) ([]Task, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT id,task_type,title,COALESCE(content,''),required,enabled
-		FROM study_tasks WHERE group_id=? AND week_id=? AND enabled=1 ORDER BY sort_order,id`, groupID, weekID)
+	return r.ListTasksForWeeks(ctx, groupID, []uint64{weekID})
+}
+
+func (r *MySQLRepository) ListTasksForWeeks(ctx context.Context, groupID uint64, weekIDs []uint64) ([]Task, error) {
+	if len(weekIDs) == 0 {
+		return []Task{}, nil
+	}
+	args := []any{groupID}
+	for _, id := range weekIDs {
+		args = append(args, id)
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(weekIDs)), ",")
+	rows, err := r.db.QueryContext(ctx, `SELECT id,week_id,task_type,title,COALESCE(content,''),required,enabled
+		FROM study_tasks WHERE group_id=? AND week_id IN (`+placeholders+`)
+		AND enabled=1 ORDER BY week_id,sort_order,id`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -70,11 +83,10 @@ func (r *MySQLRepository) ListTasks(ctx context.Context, groupID, weekID uint64)
 	var tasks []Task
 	for rows.Next() {
 		var task Task
-		if err := rows.Scan(&task.ID, &task.TaskType, &task.Title, &task.Content, &task.Required, &task.Enabled); err != nil {
+		if err := rows.Scan(&task.ID, &task.WeekID, &task.TaskType, &task.Title, &task.Content, &task.Required, &task.Enabled); err != nil {
 			return nil, err
 		}
 		task.GroupID = groupID
-		task.WeekID = weekID
 		tasks = append(tasks, task)
 	}
 	if err := rows.Err(); err != nil {
@@ -86,7 +98,7 @@ func (r *MySQLRepository) ListTasks(ctx context.Context, groupID, weekID uint64)
 	if len(tasks) == 0 {
 		return tasks, nil
 	}
-	assets, err := r.weekTaskAssets(ctx, groupID, weekID)
+	assets, err := r.weekTaskAssets(ctx, groupID, weekIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -203,6 +215,21 @@ func (r *MySQLRepository) SaveLearningConfig(ctx context.Context, groupID uint64
 	return UpsertLearningConfigTx(ctx, r.db, groupID, settings)
 }
 
+func (r *MySQLRepository) SaveActiveMemberRule(ctx context.Context, groupID uint64, rule map[string]any) error {
+	payload, err := json.Marshal(map[string]any{"active_member_rule": rule})
+	if err != nil {
+		return err
+	}
+	now := nowSQL()
+	_, err = r.db.ExecContext(ctx, `INSERT INTO group_settings(group_id,settings,created_at,updated_at)
+		VALUES (?,?,?,?)
+		ON DUPLICATE KEY UPDATE
+		  settings=JSON_SET(IF(JSON_TYPE(settings)='OBJECT',settings,JSON_OBJECT()),'$.active_member_rule',
+		    JSON_EXTRACT(VALUES(settings),'$.active_member_rule')),
+		  updated_at=VALUES(updated_at)`, groupID, string(payload), now, now)
+	return err
+}
+
 func (r *MySQLRepository) ExistingTaskTitle(ctx context.Context, groupID, weekID uint64, taskType string) (string, error) {
 	var title sql.NullString
 	err := r.db.QueryRowContext(ctx, `SELECT title FROM study_tasks WHERE group_id=? AND week_id=? AND task_type=? ORDER BY sort_order,id LIMIT 1`, groupID, weekID, taskType).Scan(&title)
@@ -292,12 +319,17 @@ func InsertWeekTx(ctx context.Context, tx *sql.Tx, groupID uint64, input WeekInp
 	return insertedID(res)
 }
 
-func (r *MySQLRepository) weekTaskAssets(ctx context.Context, groupID, weekID uint64) (map[uint64][]TaskAsset, error) {
+func (r *MySQLRepository) weekTaskAssets(ctx context.Context, groupID uint64, weekIDs []uint64) (map[uint64][]TaskAsset, error) {
+	args := []any{groupID}
+	for _, id := range weekIDs {
+		args = append(args, id)
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(weekIDs)), ",")
 	rows, err := r.db.QueryContext(ctx, `SELECT ta.task_id,a.id,a.category,a.title,a.original_name,a.mime_type,ta.usage_type
 		FROM task_assets ta JOIN assets a ON a.id=ta.asset_id
 		JOIN study_tasks t ON t.id=ta.task_id AND t.group_id=ta.group_id
-		WHERE ta.group_id=? AND t.week_id=? AND t.enabled=1 AND a.group_id=ta.group_id
-		ORDER BY ta.task_id,ta.sort_order,ta.id`, groupID, weekID)
+		WHERE ta.group_id=? AND t.week_id IN (`+placeholders+`) AND t.enabled=1 AND a.group_id=ta.group_id
+		ORDER BY ta.task_id,ta.sort_order,ta.id`, args...)
 	if err != nil {
 		return nil, err
 	}

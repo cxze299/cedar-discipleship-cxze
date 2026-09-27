@@ -1,0 +1,164 @@
+//go:build integration
+
+package backup
+
+import (
+	"testing"
+	"time"
+
+	"agp/backend/internal/testdb"
+)
+
+func TestImportLocalBackupIntegrity(t *testing.T) {
+	t.Run("existing global profiles and group names", func(t *testing.T) {
+		db := testdb.Open(t)
+		testdb.Exec(t, db, `INSERT INTO study_groups(id,code,name,created_at,updated_at)
+			VALUES (1,'a','A',NOW(),NOW()),(2,'b','B',NOW(),NOW());
+			INSERT INTO users(id,username,display_name,name_pinyin,is_super_admin,created_at,updated_at)
+			VALUES (1,'same','Same','same',0,NOW(),NOW()),
+			       (2,'other','Other','other',0,NOW(),NOW()),
+			       (3,'super','Super','super',1,NOW(),NOW());
+			INSERT INTO group_members(group_id,user_id,member_name,joined_at,created_at,updated_at)
+			VALUES (1,1,'Same',NOW(),NOW(),NOW()),(2,2,'Other group',NOW(),NOW(),NOW())`)
+		payload := Payload{Members: []Member{
+			{Username: "same", DisplayName: "Local same", NamePinyin: "changed"},
+			{Username: "other", DisplayName: "Local other", NamePinyin: "changed"},
+			{Username: "super", DisplayName: "Local super", NamePinyin: "changed"},
+			{Username: "new", DisplayName: "New", NamePinyin: "new"},
+		}}
+		repo := NewMySQLRepository(db)
+		if err := repo.ImportLocalBackup(t.Context(), 1, 3, payload, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []struct{ username, global, pinyin, local string }{
+			{"same", "Same", "same", "Local same"},
+			{"other", "Other", "other", "Local other"},
+			{"super", "Super", "super", "Local super"},
+			{"new", "New", "new", "New"},
+		} {
+			var global, pinyin, local string
+			if err := db.QueryRow(`SELECT u.display_name,u.name_pinyin,m.member_name
+				FROM users u JOIN group_members m ON m.user_id=u.id
+				WHERE u.username=? AND m.group_id=1`, want.username).Scan(&global, &pinyin, &local); err != nil {
+				t.Fatal(err)
+			}
+			if global != want.global || pinyin != want.pinyin || local != want.local {
+				t.Errorf("%s profile=%q/%q local=%q, want %+v", want.username, global, pinyin, local, want)
+			}
+		}
+		// A second export/import must also preserve the distinct group name.
+		members, err := repo.BackupMembers(t.Context(), 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := repo.ImportLocalBackup(t.Context(), 1, 3, Payload{Members: members}, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		var local string
+		if err := db.QueryRow(`SELECT member_name FROM group_members WHERE group_id=1 AND user_id=2`).Scan(&local); err != nil {
+			t.Fatal(err)
+		}
+		if local != "Local other" {
+			t.Errorf("group name lost on round trip: %q", local)
+		}
+	})
+	t.Run("former member history round trip", func(t *testing.T) {
+		db := testdb.Open(t)
+		testdb.Exec(t, db, `INSERT INTO study_groups(id,code,name,created_at,updated_at)
+			VALUES (1,'a','A',NOW(),NOW());
+			INSERT INTO users(id,username,display_name,name_pinyin,created_at,updated_at)
+			VALUES (1,'former','Former','former',NOW(),NOW());
+			INSERT INTO group_members(group_id,user_id,member_name,status,joined_at,created_at,updated_at)
+			VALUES (1,1,'Former',0,NOW(),NOW(),NOW());
+			INSERT INTO checkin_records(group_id,user_id,logical_date,checkin_time,task_type,detail,note,created_by,created_at,updated_at)
+			VALUES (1,1,'2026-09-01',NOW(),'daily_devotion','History','Keep me',1,NOW(),NOW())`)
+		repo := NewMySQLRepository(db)
+		payload, err := NewService(repo).LocalBackup(t.Context(), 1, nil, nil, time.Now().Format(time.RFC3339))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(payload.Members) != 0 || len(payload.Checkins) != 1 {
+			t.Fatalf("invalid fixture export: %+v", payload)
+		}
+		if err := repo.ImportLocalBackup(t.Context(), 1, 1, payload, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		checkins, err := repo.BackupCheckins(t.Context(), 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(checkins) != 1 || checkins[0].Username != "former" || checkins[0].Note != "Keep me" {
+			t.Fatalf("history lost: %+v", checkins)
+		}
+		var status int
+		if err := db.QueryRow(`SELECT status FROM group_members WHERE group_id=1 AND user_id=1`).Scan(&status); err != nil {
+			t.Fatal(err)
+		}
+		if status != 0 {
+			t.Fatal("historical identity was reactivated")
+		}
+	})
+	t.Run("unresolved identity rolls back entire restore", func(t *testing.T) {
+		db := testdb.Open(t)
+		testdb.Exec(t, db, `INSERT INTO study_groups(id,code,name,created_at,updated_at)
+			VALUES (1,'a','A',NOW(),NOW());
+			INSERT INTO users(id,username,display_name,name_pinyin,created_at,updated_at)
+			VALUES (1,'admin','Admin','admin',NOW(),NOW()),(2,'unrelated','Unrelated','unrelated',NOW(),NOW());
+			INSERT INTO group_members(group_id,user_id,member_name,joined_at,created_at,updated_at)
+			VALUES (1,1,'Admin',NOW(),NOW(),NOW());
+			INSERT INTO checkin_records(group_id,user_id,logical_date,checkin_time,task_type,detail,created_by,created_at,updated_at)
+			VALUES (1,1,'2026-09-01',NOW(),'daily_devotion','Original',1,NOW(),NOW())`)
+		repo := NewMySQLRepository(db)
+		for _, username := range []string{"missing", "unrelated"} {
+			payload := Payload{
+				Members:  []Member{{Username: "admin", DisplayName: "Changed"}},
+				Checkins: []Checkin{{Username: username, LogicalDate: "2026-09-01", TaskType: "daily_devotion"}},
+			}
+			if err := repo.ImportLocalBackup(t.Context(), 1, 1, payload, time.Now()); err == nil {
+				t.Errorf("accepted unresolved identity %q", username)
+			}
+			checkins, err := repo.BackupCheckins(t.Context(), 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(checkins) != 1 || checkins[0].Detail != "Original" {
+				t.Fatalf("failed import changed history: %+v", checkins)
+			}
+			var local string
+			if err := db.QueryRow(`SELECT member_name FROM group_members WHERE group_id=1 AND user_id=1`).Scan(&local); err != nil {
+				t.Fatal(err)
+			}
+			if local != "Admin" {
+				t.Fatalf("member change escaped rollback: %q", local)
+			}
+		}
+	})
+}
+
+func TestBackupAssetsExcludesDeletedBindings(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Exec(t, db, `INSERT INTO assets(id,group_id,category,title,original_name,storage_path,created_by,created_at,updated_at)
+		VALUES (1,1,'video','Active','a.mp4','team-a-resources/objects/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/a.mp4',1,NOW(),NOW()),
+		       (2,1,'video','Deleted','b.mp4','team-a-resources/objects/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/b.mp4',1,NOW(),NOW());
+		INSERT INTO asset_bindings(asset_id,group_id,resource_key,asset_kind,deleted_at,created_at,updated_at)
+		VALUES (1,1,'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','owned',NULL,NOW(),NOW()),
+		       (2,1,'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb','owned',NOW(),NOW(),NOW())`)
+	repo := NewMySQLRepository(db)
+	assets, err := repo.BackupAssets(t.Context(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(assets) != 1 || assets[0].ID != 1 {
+		t.Errorf("backup contains inactive resources: %+v", assets)
+	}
+	if err := repo.ImportLocalBackup(t.Context(), 1, 1, Payload{Assets: assets}, time.Now()); err != nil {
+		t.Fatalf("unchanged export cannot be restored: %v", err)
+	}
+	var deleted bool
+	if err := db.QueryRow(`SELECT deleted_at IS NOT NULL FROM asset_bindings WHERE asset_id=2`).Scan(&deleted); err != nil {
+		t.Fatal(err)
+	}
+	if !deleted {
+		t.Fatal("restore revived deleted resource")
+	}
+}

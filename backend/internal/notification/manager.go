@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -13,6 +14,8 @@ type Manager struct {
 	client *PotatoClient
 	store  *BindingStore
 	queue  *Queue
+	mu     sync.Mutex
+	closed bool
 }
 
 func NewManager(
@@ -37,15 +40,36 @@ func (m *Manager) Run(ctx context.Context) {
 }
 
 func (m *Manager) Enqueue(event Event) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		return nil
+	}
 	return m.queue.Enqueue(event)
 }
 
 func (m *Manager) EnqueueInitial(now time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		return nil
+	}
 	return m.queue.EnqueueInitial(now)
 }
 
 func (m *Manager) WakeInitial(groupID uint64, now time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		return nil
+	}
 	return m.queue.WakeInitial(groupID, now)
+}
+
+func (m *Manager) close() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.closed = true
 }
 
 func (m *Manager) Chats(ctx context.Context) ([]Chat, error) {
@@ -76,6 +100,11 @@ func (m *Manager) Assign(ctx context.Context, target Target, groupID uint64, now
 		if !found {
 			return ErrChatNotFound
 		}
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		return ErrRobotNotFound
 	}
 	if err := m.store.Assign(target, groupID); err != nil {
 		return err

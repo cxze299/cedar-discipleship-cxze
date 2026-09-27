@@ -16,7 +16,9 @@ import (
 
 func TestVideoReplacementAndSingleConnectionTasks(t *testing.T) {
 	db := testdb.Open(t)
-	testdb.Exec(t, db, `INSERT INTO study_weeks(id,group_id,start_date,end_date,created_at,updated_at)
+	testdb.Exec(t, db, `INSERT INTO users(id,username,display_name,name_pinyin,created_at,updated_at)
+		VALUES (1,'first','First','first',NOW(),NOW()),(2,'second','Second','second',NOW(),NOW());
+		INSERT INTO study_weeks(id,group_id,start_date,end_date,created_at,updated_at)
 		VALUES (1,1,'2026-09-21','2026-09-27',NOW(),NOW()),(2,1,'2026-09-28','2026-10-04',NOW(),NOW());
 		INSERT INTO study_tasks(id,group_id,week_id,task_type,title,created_at,updated_at)
 		VALUES (1,1,1,'weekly_video','A',NOW(),NOW()),(2,1,1,'weekly_video','B',NOW(),NOW()),
@@ -29,7 +31,7 @@ func TestVideoReplacementAndSingleConnectionTasks(t *testing.T) {
 		       (1,2,3,'video',1,NOW())`)
 	repo := checkin.NewMySQLRepository(db)
 	service := checkin.NewService(repo)
-	learningService := learning.NewService(learning.NewMySQLRepository(db), nil, service)
+	learningService := learning.NewService(learning.NewMySQLRepository(db))
 	for i, date := range []string{"2026-09-22", "2026-09-23"} {
 		t.Run(date, func(t *testing.T) {
 			userID := uint64(i + 1)

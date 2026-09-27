@@ -8,6 +8,7 @@ import (
 )
 
 type serviceTestRepository struct {
+	Repository
 	members     []Member
 	counts      []TaskCount
 	videoCounts []TaskCount
@@ -37,10 +38,6 @@ func (r *serviceTestRepository) MonthlyVideoCompletionCounts(_ context.Context, 
 }
 
 func (r *serviceTestRepository) MemberCalendar(context.Context, uint64, uint64, string, string) ([]CalendarItem, error) {
-	return nil, nil
-}
-
-func (r *serviceTestRepository) LearningTotals(context.Context, uint64, uint64) (*LearningTotals, error) {
 	return nil, nil
 }
 

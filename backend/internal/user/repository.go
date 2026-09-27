@@ -34,5 +34,5 @@ type Repository interface {
 	CreateLoginLog(ctx context.Context, log LoginLog, at time.Time) error
 	UpdateDefaultGroup(ctx context.Context, userID uint64, groupID uint64, updatedAt time.Time) error
 	PasswordHash(ctx context.Context, userID uint64) (string, error)
-	UpdatePassword(ctx context.Context, userID uint64, passwordHash string, updatedAt time.Time) error
+	UpdatePassword(ctx context.Context, userID uint64, oldHash, passwordHash string, updatedAt time.Time) error
 }

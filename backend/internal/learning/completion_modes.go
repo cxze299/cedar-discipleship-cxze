@@ -34,9 +34,12 @@ func dailyComponentEnabledOnDate(settings map[string]any, taskType, date string)
 	} else if taskType == "daily_scripture" {
 		component = "scripture"
 	}
-	config, exists := nestedMap(settings, "task_sections", "daily", component)
+	config, exists := effectiveDailyComponent(settings, component, date)
 	if !exists || date == "" {
 		return true
+	}
+	if !mapBool(config, "enabled", true) {
+		return false
 	}
 	start := asString(config["start_date"])
 	if component == "devotion" {
@@ -65,13 +68,10 @@ func dailyComponentEnabled(settings map[string]any, taskType string) bool {
 }
 
 func dailyDevotionEnabledOnDate(settings map[string]any, date string) bool {
-	config, exists := nestedMap(settings, "task_sections", "daily", "devotion")
-	if exists && !mapBool(config, "enabled", true) {
-		return false
-	}
 	if !dailyComponentEnabledOnDate(settings, "daily_devotion", date) {
 		return false
 	}
+	config, exists := effectiveDailyComponent(settings, "devotion", date)
 	if !exists || asString(config["plan_mode"]) != "custom" || date == "" {
 		return true
 	}
@@ -116,7 +116,7 @@ func dailyTasks(date string, settings map[string]any) []TodayTaskVO {
 			summary = title
 		}
 		if taskType == "daily_devotion" {
-			if config, ok := nestedMap(settings, "task_sections", "daily", "devotion"); ok {
+			if config, ok := effectiveDailyComponent(settings, "devotion", date); ok {
 				if plan, found := customDailyDevotionPlan(config, date); found {
 					title = firstNonEmpty(asString(plan["title"]), title)
 					summary = title

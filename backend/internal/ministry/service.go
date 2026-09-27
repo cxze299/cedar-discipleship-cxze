@@ -274,9 +274,15 @@ func (s *Service) PendingRequests(ctx context.Context, studyGroupID uint64, acto
 		return nil, err
 	}
 	out := make([]RequestVO, 0, len(items))
+	permissions := make(map[uint64]bool)
 	for _, item := range items {
-		access, accessErr := s.repo.Access(ctx, studyGroupID, item.GroupID, actor.UserID)
-		if accessErr != nil || !canReviewShares(actor, access) {
+		allowed, checked := permissions[item.GroupID]
+		if !checked {
+			access, accessErr := s.repo.Access(ctx, studyGroupID, item.GroupID, actor.UserID)
+			allowed = accessErr == nil && canReviewShares(actor, access)
+			permissions[item.GroupID] = allowed
+		}
+		if !allowed {
 			continue
 		}
 		out = append(out, requestVO(item))

@@ -56,9 +56,13 @@ if ! mkdir "$LOCK_DIR" 2>/dev/null; then
 fi
 
 IMAGE_ENV=""
+IMAGE_COMPOSE=""
 cleanup() {
   if [ -n "$IMAGE_ENV" ] && [ -f "$IMAGE_ENV" ]; then
     rm -f "$IMAGE_ENV"
+  fi
+  if [ -n "$IMAGE_COMPOSE" ] && [ -f "$IMAGE_COMPOSE" ]; then
+    rm -f "$IMAGE_COMPOSE"
   fi
   rmdir "$LOCK_DIR" 2>/dev/null || true
 }
@@ -72,13 +76,11 @@ fi
 
 log "Syncing repository"
 "$GIT" fetch origin --prune
-
-if [ -n "${AGP_GIT_REF:-}" ]; then
-  "$GIT" checkout --detach "$AGP_GIT_REF"
-else
-  "$GIT" switch master
-  "$GIT" pull --ff-only origin master
-fi
+"$GIT" fetch origin master
+deploy_commit="$("$GIT" rev-parse --verify "${AGP_GIT_REF:-origin/master}^{commit}")"
+"$GIT" merge-base --is-ancestor "$deploy_commit" origin/master ||
+  fail "deployment commit is not included in origin/master: $deploy_commit"
+"$GIT" checkout --detach "$deploy_commit"
 
 set +u
 set -a
@@ -90,7 +92,7 @@ set -u
 COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-cedar}"
 AGP_CONTAINER_PREFIX="${AGP_CONTAINER_PREFIX:-cedar}"
 AGP_IMAGE_REGISTRY="${AGP_IMAGE_REGISTRY:-ghcr.io}"
-AGP_IMAGE_TAG="${AGP_IMAGE_TAG:-$("$GIT" rev-parse HEAD)}"
+AGP_IMAGE_TAG="${AGP_IMAGE_TAG:-$deploy_commit}"
 
 github_path="$(lower "$(github_path_from_origin)")"
 AGP_IMAGE_OWNER="${AGP_IMAGE_OWNER:-${github_path%%/*}}"
@@ -113,7 +115,7 @@ compose_args=(
   -f "$COMPOSE_FILE"
 )
 
-log "Pulling prebuilt images for $AGP_IMAGE_TAG"
+log "Pulling prebuilt images for commit $deploy_commit (tag $AGP_IMAGE_TAG)"
 if ! docker_cmd compose "${compose_args[@]}" pull backend frontend; then
   cat >&2 <<EOF
 
@@ -128,8 +130,29 @@ EOF
   exit 1
 fi
 
+verified_image_id() {
+  local image="$1" image_id revision
+  image_id="$(docker_cmd image inspect --format '{{.Id}}' "$image")"
+  [[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]] || fail "invalid image ID: $image"
+  revision="$(docker_cmd image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$image_id")"
+  [ "$revision" = "$deploy_commit" ] ||
+    fail "image revision does not match commit $deploy_commit: $image"
+  printf '%s\n' "$image_id"
+}
+
+backend_image_id="$(verified_image_id "$AGP_BACKEND_IMAGE")"
+frontend_image_id="$(verified_image_id "$AGP_FRONTEND_IMAGE")"
+# Pin the exact images inspected above, including when a custom Compose file is used.
+IMAGE_COMPOSE="$(mktemp /tmp/cedar-images-compose.XXXXXX)"
+{
+  printf 'services:\n  backend:\n    image: "%s"\n  frontend:\n    image: "%s"\n' \
+    "$backend_image_id" "$frontend_image_id"
+} >"$IMAGE_COMPOSE"
+compose_args+=(-f "$IMAGE_COMPOSE")
+log "Verified commit=$deploy_commit backend=$backend_image_id frontend=$frontend_image_id"
+
 log "Starting containers without rebuilding"
-docker_cmd compose "${compose_args[@]}" up -d --no-build backend frontend
+docker_cmd compose "${compose_args[@]}" up -d --no-build --pull never backend frontend
 
 log "Current containers"
 docker_cmd ps --filter "name=${AGP_CONTAINER_PREFIX}-" --format '{{.Names}} {{.Status}} {{.Image}}'

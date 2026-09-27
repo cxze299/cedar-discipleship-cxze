@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -122,10 +121,7 @@ func ResolveFileInRoot(root, path string) (string, string, error) {
 	if strings.TrimSpace(root) == "" {
 		return "", "", errors.New("empty_root")
 	}
-	decoded, err := url.PathUnescape(strings.TrimSpace(path))
-	if err == nil && decoded != "" {
-		path = decoded
-	}
+	// Storage keys are literal filesystem names, not escaped URLs.
 	clean := filepath.Clean(strings.TrimPrefix(path, "/"))
 	full := filepath.Join(root, clean)
 	absRoot, _ := filepath.Abs(root)

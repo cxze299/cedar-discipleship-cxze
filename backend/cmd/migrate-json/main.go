@@ -25,6 +25,8 @@ import (
 	"strings"
 	"time"
 
+	"agp/backend/internal/learning"
+
 	_ "github.com/go-sql-driver/mysql"
 )
 
@@ -129,6 +131,7 @@ type oldRecord struct {
 type migrationReport struct {
 	GeneratedAt string            `json:"generated_at"`
 	DryRun      bool              `json:"dry_run"`
+	Outcome     string            `json:"outcome"`
 	Inputs      map[string]string `json:"inputs"`
 	Group       groupReport       `json:"group"`
 	Members     counterReport     `json:"members"`
@@ -382,6 +385,10 @@ func run(opt options) error {
 
 	if opt.dryRun {
 		planDryRun(cfg, records, usernameMap, opt, &state, &report)
+		report.Outcome = "planned"
+		if len(report.Failures) > 0 {
+			report.Outcome = "blocked"
+		}
 		return writeAndPrintReport(opt, report)
 	}
 	if opt.dsn == "" {
@@ -411,9 +418,17 @@ func run(opt options) error {
 	}
 	report.Warnings = append(report.Warnings, state.warnings...)
 	report.Failures = append(report.Failures, state.failures...)
+	if len(report.Failures) > 0 {
+		if err := tx.Rollback(); err != nil {
+			return fmt.Errorf("rollback failed migration: %w", err)
+		}
+		report.Outcome = "rolled_back"
+		return writeAndPrintReport(opt, report)
+	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+	report.Outcome = "committed"
 	return writeAndPrintReport(opt, report)
 }
 
@@ -572,7 +587,7 @@ func importConfig(ctx context.Context, tx *sql.Tx, cfg oldConfig, usernameMap ma
 			continue
 		}
 		if !created {
-			if err := deleteWeekTasks(ctx, tx, groupID, weekID); err != nil {
+			if err := learning.DeleteWeekTasksTx(ctx, tx, groupID, weekID); err != nil {
 				return err
 			}
 		}
@@ -1209,16 +1224,6 @@ func ensureTaskAsset(ctx context.Context, tx *sql.Tx, groupID, taskID, assetID u
 	return affected > 0, nil
 }
 
-func deleteWeekTasks(ctx context.Context, tx *sql.Tx, groupID, weekID uint64) error {
-	if _, err := tx.ExecContext(ctx, `DELETE ta FROM task_assets ta
-		JOIN study_tasks st ON st.id=ta.task_id
-		WHERE st.group_id=? AND st.week_id=?`, groupID, weekID); err != nil {
-		return err
-	}
-	_, err := tx.ExecContext(ctx, "DELETE FROM study_tasks WHERE group_id=? AND week_id=?", groupID, weekID)
-	return err
-}
-
 func loadMembers(ctx context.Context, tx *sql.Tx, groupID uint64, out map[string]uint64) error {
 	rows, err := tx.QueryContext(ctx, "SELECT user_id, member_name FROM group_members WHERE group_id=? AND status=1", groupID)
 	if err != nil {
@@ -1539,6 +1544,9 @@ func writeAndPrintReport(opt options, report migrationReport) error {
 	fmt.Printf("migration report: %s\n", file)
 	fmt.Printf("dry_run=%v members=%+v weeks=%+v tasks=%+v assets=%+v checkins=%+v failures=%d warnings=%d\n",
 		report.DryRun, report.Members, report.Weeks, report.Tasks, report.Assets, report.Checkins, len(report.Failures), len(report.Warnings))
+	if len(report.Failures) > 0 {
+		return fmt.Errorf("migration %s: %d failures; no changes committed (see %s)", report.Outcome, len(report.Failures), file)
+	}
 	return nil
 }
 
