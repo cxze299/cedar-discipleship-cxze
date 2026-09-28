@@ -44,15 +44,32 @@ func TestTenantHTTPIsolationAndAdministration(t *testing.T) {
 	}
 	create := func(name, group string, adminID uint64) (uint64, uint64) {
 		t.Helper()
-		body := fmt.Sprintf(`{"name":%q,"group_name":%q,"admin_user_id":%d}`, name, group, adminID)
-		status, data := call(http.MethodPost, "/api/super-admin/tenants", 1, 0, body)
+		status, data := call(http.MethodPost, "/api/super-admin/tenants", 1, 0, fmt.Sprintf(`{"name":%q}`, name))
 		if status != http.StatusCreated {
 			t.Fatalf("create tenant %s: %d %v", name, status, data)
 		}
-		return uint64(data["id"].(float64)), uint64(data["group_id"].(float64))
+		tenantID := uint64(data["id"].(float64))
+		var groupID uint64
+		if group != "" {
+			status, data = call(http.MethodPost, fmt.Sprintf("/api/tenants/%d/groups", tenantID), 1, 0, fmt.Sprintf(`{"name":%q}`, group))
+			if status != http.StatusCreated {
+				t.Fatalf("create group %s: %d %v", group, status, data)
+			}
+			groupID = uint64(data["id"].(float64))
+		}
+		if adminID != 0 {
+			testdb.Exec(t, db, `INSERT INTO tenant_members(tenant_id,user_id,role,status,created_at,updated_at) VALUES(?,?,'admin',1,NOW(),NOW())`, tenantID, adminID)
+		}
+		return tenantID, groupID
 	}
 	tenantA, groupA := create("主体 A", "共同组名", 2)
 	tenantB, groupB := create("主体 B", "另一组", 3)
+	if status, _ := call(http.MethodPut, fmt.Sprintf("/api/tenants/%d/groups/%d/leaders/4", tenantA, groupA), 1, 0, ""); status != http.StatusNotFound {
+		t.Fatalf("tenant group leader assignment still available: %d", status)
+	}
+	if status, _ := call(http.MethodPost, fmt.Sprintf("/api/super-admin/groups/%d/leaders", groupA), 1, 0, `{"user_id":4}`); status != http.StatusNotFound {
+		t.Fatalf("super group leader assignment still available: %d", status)
+	}
 	testdb.Exec(t, db, `INSERT INTO users(id,username,display_name,name_pinyin,created_at,updated_at) VALUES(4,'membera','Member A','membera',NOW(),NOW())`)
 	testdb.Exec(t, db, `INSERT INTO tenant_members(tenant_id,user_id,role,status,created_at,updated_at) VALUES(?,4,'member',1,NOW(),NOW())`, tenantA)
 	testdb.Exec(t, db, `INSERT INTO group_members(group_id,user_id,member_name,joined_at,created_at,updated_at) VALUES(?,4,'Member A',NOW(),NOW(),NOW())`, groupA)
@@ -85,14 +102,14 @@ func TestTenantHTTPIsolationAndAdministration(t *testing.T) {
 	if status, _ := call(http.MethodGet, path(tenantB, "groups"), 2, groupA, ""); status != http.StatusForbidden {
 		t.Fatalf("other tenant groups: %d", status)
 	}
-	if status, _ := call(http.MethodPut, path(tenantB, "members"), 2, groupA, `{"user_id":2,"role":"admin"}`); status != http.StatusForbidden {
-		t.Fatalf("other tenant members: %d", status)
+	if status, data := call(http.MethodGet, path(tenantA, "admins"), 2, groupA, ""); status != http.StatusOK || len(data["admins"].([]any)) != 1 {
+		t.Fatalf("ordinary member included among admins: %d %v", status, data)
 	}
-	if status, _ := call(http.MethodPut, path(tenantA, "members"), 2, groupA, `{"user_id":3,"role":"admin"}`); status != http.StatusForbidden {
-		t.Fatalf("tenant admin invited external account: %d", status)
+	if status, _ := call(http.MethodGet, path(tenantB, "admins"), 2, groupA, ""); status != http.StatusForbidden {
+		t.Fatalf("other tenant admins visible: %d", status)
 	}
-	if status, _ := call(http.MethodPut, path(tenantA, "members"), 2, groupA, `{"user_id":2,"role":"member"}`); status != http.StatusConflict {
-		t.Fatalf("last admin demotion: %d", status)
+	if status, _ := call(http.MethodPost, fmt.Sprintf("/api/super-admin/tenants/%d/admins", tenantA), 2, groupA, `{"username":"forbidden","display_name":"Forbidden"}`); status != http.StatusForbidden {
+		t.Fatalf("tenant admin created another admin: %d", status)
 	}
 	if status, data := call(http.MethodPost, path(tenantA, "groups"), 2, groupA, `{"name":"第二组"}`); status != http.StatusCreated {
 		t.Fatalf("tenant admin create group: %d %v", status, data)
@@ -103,18 +120,14 @@ func TestTenantHTTPIsolationAndAdministration(t *testing.T) {
 	if status, data := call(http.MethodPut, path(tenantA, fmt.Sprintf("groups/%d", groupA)), 2, groupA, `{"name":"另一组"}`); status != http.StatusOK {
 		t.Fatalf("same name in other tenant blocked: %d %v", status, data)
 	}
-	if status, _ := call(http.MethodPut, path(tenantA, "members"), 1, 0, `{"user_id":3,"role":"member"}`); status != http.StatusOK {
-		t.Fatalf("super add shared account: %d", status)
+	if status, _ := call(http.MethodDelete, path(tenantA, "members/3"), 1, 0, ""); status != http.StatusNotFound {
+		t.Fatalf("obsolete member removal endpoint remains: %d", status)
 	}
-	if status, _ := call(http.MethodDelete, path(tenantA, "members/3"), 2, groupA, ""); status != http.StatusOK {
-		t.Fatalf("tenant admin remove member: %d", status)
-	}
-	shared, err := a.users.CurrentUser(t.Context(), 3, groupB)
-	if err != nil || shared.CurrentGroupID != groupB || shared.CurrentTenantID != tenantB {
-		t.Fatalf("other tenant after removal: %+v %v", shared, err)
+	if status, _ := call(http.MethodPut, path(tenantA, "members"), 1, 0, `{"user_id":4,"role":"admin"}`); status != http.StatusNotFound {
+		t.Fatalf("obsolete member assignment endpoint remains: %d", status)
 	}
 	if status, _ := call(http.MethodGet, path(tenantA, "groups"), 3, groupB, ""); status != http.StatusForbidden {
-		t.Fatalf("removed member still sees A: %d", status)
+		t.Fatalf("other tenant admin sees A: %d", status)
 	}
 	if status, _ := call(http.MethodPut, fmt.Sprintf("/api/super-admin/tenants/%d", tenantA), 2, groupA, `{"name":"非法修改"}`); status != http.StatusForbidden {
 		t.Fatalf("tenant admin updated tenant: %d", status)
@@ -131,16 +144,70 @@ func TestTenantHTTPIsolationAndAdministration(t *testing.T) {
 	if status, _ := call(http.MethodDelete, "/api/super-admin/tenants/1", 1, 0, ""); status != http.StatusConflict {
 		t.Fatalf("deleted original tenant: %d", status)
 	}
-	if status, data := call(http.MethodPost, "/api/super-admin/users", 1, 0, `{"username":"newadmin","display_name":"New Admin"}`); status != http.StatusCreated {
-		t.Fatalf("create new account: %d %v", status, data)
+	if status, _ := call(http.MethodPost, fmt.Sprintf("/api/super-admin/tenants/%d/admins", tenantB), 1, 0, `{"username":"newadmin","display_name":"New Admin"}`); status != http.StatusBadRequest {
+		t.Fatal("created admin without chosen password")
+	}
+	if status, data := call(http.MethodPost, fmt.Sprintf("/api/super-admin/tenants/%d/admins", tenantB), 1, 0, `{"username":"newadmin","display_name":"New Admin","password":"chosen-pass-1"}`); status != http.StatusCreated || data["initial_password"] != nil {
+		t.Fatalf("create virtual tenant admin: %d %v", status, data)
 	} else {
 		newAdminID := uint64(data["id"].(float64))
-		body := fmt.Sprintf(`{"user_id":%d,"role":"admin"}`, newAdminID)
-		if status, _ := call(http.MethodPut, path(tenantB, "members"), 1, 0, body); status != http.StatusOK {
-			t.Fatalf("assign new tenant admin: %d", status)
+		var passwordHash string
+		if err := db.QueryRow(`SELECT password_hash FROM users WHERE id=?`, newAdminID).Scan(&passwordHash); err != nil || !verifyPassword("chosen-pass-1", passwordHash) {
+			t.Fatalf("chosen password not saved: %v", err)
+		}
+		testdb.Exec(t, db, `INSERT INTO refresh_sessions(user_id,token_hash,csrf_hash,expires_at,created_at,updated_at)
+			VALUES(?,?,?,DATE_ADD(NOW(),INTERVAL 1 DAY),NOW(),NOW())`, newAdminID, tokenHash("admin-token"), tokenHash("admin-csrf"))
+		updatePath := fmt.Sprintf("/api/super-admin/tenants/%d/admins/%d", tenantB, newAdminID)
+		if status, _ := call(http.MethodPut, updatePath, 3, groupB, `{"display_name":"Hacked","password":"hacked-pass"}`); status != http.StatusForbidden {
+			t.Fatalf("tenant admin edited account: %d", status)
+		}
+		if status, _ := call(http.MethodPut, fmt.Sprintf("/api/super-admin/tenants/%d/admins/%d", tenantA, newAdminID), 1, 0, `{"display_name":"Hacked"}`); status != http.StatusNotFound {
+			t.Fatalf("edited admin through other tenant: %d", status)
+		}
+		if status, _ := call(http.MethodPut, fmt.Sprintf("/api/super-admin/tenants/%d/admins/4", tenantA), 1, 0, `{"display_name":"Hacked"}`); status != http.StatusNotFound {
+			t.Fatalf("edited ordinary member as admin: %d", status)
+		}
+		if status, _ := call(http.MethodPut, updatePath, 1, 0, `{"display_name":"Renamed Admin"}`); status != http.StatusOK {
+			t.Fatalf("rename admin: %d", status)
+		}
+		var revoked bool
+		if err := db.QueryRow(`SELECT revoked_at IS NOT NULL FROM refresh_sessions WHERE user_id=?`, newAdminID).Scan(&revoked); err != nil || revoked {
+			t.Fatalf("name-only edit revoked session: %v %v", revoked, err)
+		}
+		if status, _ := call(http.MethodPut, updatePath, 1, 0, `{"display_name":"Renamed Admin","password":"short"}`); status != http.StatusBadRequest {
+			t.Fatalf("accepted short admin password: %d", status)
+		}
+		if status, _ := call(http.MethodPut, updatePath, 1, 0, `{"display_name":"Renamed Admin","password":"chosen-pass-2"}`); status != http.StatusOK {
+			t.Fatalf("update admin password: %d", status)
+		}
+		var displayName string
+		if err := db.QueryRow(`SELECT display_name,password_hash FROM users WHERE id=?`, newAdminID).Scan(&displayName, &passwordHash); err != nil || displayName != "Renamed Admin" || !verifyPassword("chosen-pass-2", passwordHash) || verifyPassword("chosen-pass-1", passwordHash) {
+			t.Fatalf("admin update not saved: %q %v", displayName, err)
+		}
+		if err := db.QueryRow(`SELECT revoked_at IS NOT NULL FROM refresh_sessions WHERE user_id=?`, newAdminID).Scan(&revoked); err != nil || !revoked {
+			t.Fatalf("password edit did not revoke session: %v %v", revoked, err)
+		}
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM group_members WHERE user_id=?`, newAdminID).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("virtual admin became check-in member: %d %v", count, err)
+		}
+		if status, _ := call(http.MethodPost, "/api/admin/members", 3, groupB, fmt.Sprintf(`{"create_user":false,"user_id":%d,"display_name":"New Admin"}`, newAdminID)); status != http.StatusConflict {
+			t.Fatalf("tenant admin added as check-in member: %d", status)
+		}
+		if status, _ := call(http.MethodPost, fmt.Sprintf("/api/super-admin/groups/%d/members", groupA), 1, 0, fmt.Sprintf(`{"user_id":%d,"member_name":"New Admin"}`, newAdminID)); status != http.StatusConflict {
+			t.Fatalf("super admin added virtual admin as check-in member: %d", status)
+		}
+		if status, data := call(http.MethodGet, path(tenantB, "admins"), 1, 0, ""); status != http.StatusOK || len(data["admins"].([]any)) != 2 {
+			t.Fatalf("admin-only listing: %d %v", status, data)
 		}
 		if status, _ := call(http.MethodGet, path(tenantA, "groups"), newAdminID, groupB, ""); status != http.StatusForbidden {
 			t.Fatalf("new admin accessed other tenant: %d", status)
+		}
+		if current, err := a.users.CurrentUser(t.Context(), newAdminID, groupB); err != nil || !current.IsTenantAdmin || current.CurrentTenantID != tenantB {
+			t.Fatalf("virtual admin cannot manage own tenant: %+v %v", current, err)
+		}
+		if status, _ := call(http.MethodPost, fmt.Sprintf("/api/super-admin/tenants/%d/admins", tenantA), 1, 0, `{"username":"newadmin","display_name":"Duplicate","password":"chosen-pass-3"}`); status != http.StatusConflict {
+			t.Fatalf("existing account promoted through create endpoint: %d", status)
 		}
 	}
 	if status, _ := call(http.MethodPut, fmt.Sprintf("/api/super-admin/groups/%d/tenant", groupA), 3, groupB, fmt.Sprintf(`{"tenant_id":%d}`, tenantB)); status != http.StatusForbidden {
@@ -154,12 +221,12 @@ func TestTenantHTTPIsolationAndAdministration(t *testing.T) {
 	}
 	testdb.Exec(t, db, `INSERT INTO asset_dependencies(consumer_group_id,consumer_asset_id,provider_group_id,provider_asset_id,dependency_type,status,created_at,updated_at)
 		VALUES(?,9001,?,9002,'import','active',NOW(),NOW())`, groupA, groupB)
-	if status, _ := call(http.MethodPut, fmt.Sprintf("/api/super-admin/groups/%d/tenant", groupA), 1, 0, fmt.Sprintf(`{"tenant_id":%d}`, tenantB)); status != http.StatusConflict {
-		t.Fatalf("moved group with cross-group resource dependency: %d", status)
-	}
-	testdb.Exec(t, db, `DELETE FROM asset_dependencies WHERE consumer_asset_id=9001`)
 	if status, _ := call(http.MethodPut, fmt.Sprintf("/api/super-admin/groups/%d/tenant", groupA), 1, 0, fmt.Sprintf(`{"tenant_id":%d}`, tenantB)); status != http.StatusOK {
-		t.Fatalf("move group: %d", status)
+		t.Fatalf("move group with existing import: %d", status)
+	}
+	var dependencyActive bool
+	if err := db.QueryRow(`SELECT EXISTS(SELECT 1 FROM asset_dependencies WHERE consumer_group_id=? AND consumer_asset_id=9001 AND status='active')`, groupA).Scan(&dependencyActive); err != nil || !dependencyActive {
+		t.Fatalf("existing import relationship lost after move: active=%v err=%v", dependencyActive, err)
 	}
 	if status, _ := call(http.MethodGet, path(tenantA, "groups"), 2, groupA, ""); status != http.StatusForbidden {
 		t.Fatalf("source admin retained moved group: %d", status)
@@ -179,12 +246,31 @@ func TestTenantHTTPIsolationAndAdministration(t *testing.T) {
 	if status, _ := call(http.MethodDelete, fmt.Sprintf("/api/super-admin/tenants/%d", tenantB), 3, groupB, ""); status != http.StatusForbidden {
 		t.Fatalf("tenant admin deleted tenant: %d", status)
 	}
-	tenantC, _ := create("空主体", "临时组", 0)
-	testdb.Exec(t, db, `DELETE FROM study_groups WHERE tenant_id=?`, tenantC)
+	tenantC, _ := create("空主体", "", 0)
 	if status, _ := call(http.MethodDelete, fmt.Sprintf("/api/super-admin/tenants/%d", tenantC), 1, 0, ""); status != http.StatusOK {
 		t.Fatalf("delete empty tenant: %d", status)
 	}
 	if status, data := call(http.MethodGet, "/api/tenants", 1, 0, ""); status != http.StatusOK || len(data["tenants"].([]any)) != 3 {
 		t.Fatalf("deleted tenant remains visible: %d %v", status, data)
+	}
+	if status, _ := call(http.MethodPost, "/api/super-admin/tenants", 1, 0, `{"name":"  "}`); status != http.StatusBadRequest {
+		t.Fatalf("created tenant without name: %d", status)
+	}
+	status, emptyTenant := call(http.MethodPost, "/api/super-admin/tenants", 1, 0, `{"name":"仅主体名称"}`)
+	if status != http.StatusCreated || emptyTenant["group_id"] != nil || emptyTenant["default_password"] != nil {
+		t.Fatalf("create tenant without group: %d %v", status, emptyTenant)
+	}
+	emptyTenantID := uint64(emptyTenant["id"].(float64))
+	if status, data := call(http.MethodGet, path(emptyTenantID, "groups"), 1, 0, ""); status != http.StatusOK || len(data["study_groups"].([]any)) != 0 {
+		t.Fatalf("new tenant unexpectedly has a group: %d %v", status, data)
+	}
+	if status, data := call(http.MethodPost, fmt.Sprintf("/api/super-admin/tenants/%d/admins", emptyTenantID), 1, 0, `{"username":"emptyadmin","display_name":"Empty Admin","password":"chosen-pass-4"}`); status != http.StatusCreated || data["initial_password"] != nil {
+		t.Fatalf("create admin before group: %d %v", status, data)
+	}
+	if status, data := call(http.MethodGet, path(emptyTenantID, "admins"), 1, 0, ""); status != http.StatusOK || len(data["admins"].([]any)) != 1 {
+		t.Fatalf("new tenant admin missing: %d %v", status, data)
+	}
+	if status, data := call(http.MethodPost, path(emptyTenantID, "groups"), 1, 0, `{"name":"稍后创建的小组"}`); status != http.StatusCreated || data["default_password"] == nil {
+		t.Fatalf("create group after tenant: %d %v", status, data)
 	}
 }

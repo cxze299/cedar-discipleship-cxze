@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode"
 )
 
 type tenantItem struct {
@@ -39,28 +40,6 @@ func (a *app) requireCurrentTenantAdmin(next http.HandlerFunc) http.HandlerFunc 
 	}
 }
 
-func (a *app) handleTenantLeader(w http.ResponseWriter, r *http.Request) {
-	groupID := a.tenantGroupID(w, r)
-	if groupID == 0 {
-		return
-	}
-	userID := pathUint64(r, "user_id")
-	if userID == 0 {
-		writeError(w, http.StatusBadRequest, "user_id_required")
-		return
-	}
-	var member bool
-	if err := a.db.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM group_members WHERE group_id=? AND user_id=? AND status=1)`, groupID, userID).Scan(&member); err != nil || !member {
-		writeError(w, http.StatusNotFound, "member_not_found")
-		return
-	}
-	if err := a.users.SetUserRole(r.Context(), groupID, userID, "group_leader", r.Method == http.MethodPut, time.Now().UTC()); err != nil {
-		writeError(w, http.StatusInternalServerError, "role_save_failed")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-}
-
 func (a *app) handleTenants(w http.ResponseWriter, r *http.Request) {
 	u := mustUser(r)
 	query := `SELECT t.id,t.name,COALESCE(tm.role,''),t.status,
@@ -91,74 +70,28 @@ func (a *app) handleTenants(w http.ResponseWriter, r *http.Request) {
 
 func (a *app) handleCreateTenant(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name        string `json:"name"`
-		GroupName   string `json:"group_name"`
-		AdminUserID uint64 `json:"admin_user_id"`
+		Name string `json:"name"`
 	}
 	if !readJSON(w, r, &req) {
 		return
 	}
 	req.Name = strings.TrimSpace(req.Name)
-	req.GroupName = strings.TrimSpace(req.GroupName)
-	if req.Name == "" || req.GroupName == "" || len([]rune(req.Name)) > 128 || len([]rune(req.GroupName)) > 128 {
+	if req.Name == "" || len([]rune(req.Name)) > 128 {
 		writeError(w, http.StatusBadRequest, "name_required")
 		return
 	}
-	password := randomPassword(12)
-	hash, err := hashPassword(password)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "password_failed")
-		return
-	}
-	code, err := randomURLToken(12)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "group_code_failed")
-		return
-	}
 	now := time.Now().UTC()
-	tx, err := a.db.BeginTx(r.Context(), nil)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "tenant_create_failed")
-		return
-	}
-	defer tx.Rollback()
-	res, err := tx.ExecContext(r.Context(), `INSERT INTO tenants(name,status,created_by,created_at,updated_at) VALUES(?,1,?,?,?)`, req.Name, mustUser(r).ID, now, now)
+	res, err := a.db.ExecContext(r.Context(), `INSERT INTO tenants(name,status,created_by,created_at,updated_at) VALUES(?,1,?,?,?)`, req.Name, mustUser(r).ID, now, now)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "tenant_create_failed")
 		return
 	}
 	tenantID, err := insertedID(res)
-	if err == nil {
-		res, err = tx.ExecContext(r.Context(), `INSERT INTO study_groups(tenant_id,code,name,description,default_password_hash,auto_seed_ministry_catalog,created_by,created_at,updated_at)
-			VALUES(?,?,?,'',?,0,?,?,?)`, tenantID, "group-"+strings.ToLower(code), req.GroupName, hash, mustUser(r).ID, now, now)
-	}
 	if err != nil {
-		writeError(w, http.StatusConflict, "group_create_failed")
-		return
-	}
-	groupID, err := insertedID(res)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "group_create_failed")
-		return
-	}
-	if req.AdminUserID != 0 {
-		res, err = tx.ExecContext(r.Context(), `INSERT INTO tenant_members(tenant_id,user_id,role,status,created_at,updated_at)
-			SELECT ?,u.id,'admin',1,?,? FROM users u WHERE u.id=? AND u.status=1`, tenantID, now, now, req.AdminUserID)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "tenant_admin_failed")
-			return
-		}
-		count, _ := res.RowsAffected()
-		if count != 1 {
-			writeError(w, http.StatusBadRequest, "admin_user_not_found")
-			return
-		}
-	}
-	if err := tx.Commit(); err != nil {
 		writeError(w, http.StatusInternalServerError, "tenant_create_failed")
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"id": tenantID, "group_id": groupID, "default_password": password})
+	writeJSON(w, http.StatusCreated, map[string]any{"id": tenantID})
 }
 
 func (a *app) handleUpdateTenant(w http.ResponseWriter, r *http.Request) {
@@ -277,26 +210,6 @@ func (a *app) handleMoveGroupTenant(w http.ResponseWriter, r *http.Request) {
 	}
 	if duplicate {
 		writeError(w, http.StatusConflict, "group_name_exists")
-		return
-	}
-	var linked bool
-	err = tx.QueryRowContext(r.Context(), `SELECT EXISTS(
-		SELECT 1 FROM asset_dependencies WHERE status='active' AND
-			((consumer_group_id=? AND provider_group_id<>?) OR (provider_group_id=? AND consumer_group_id<>?))
-		UNION ALL
-		SELECT 1 FROM asset_share_grants WHERE status='active' AND consumer_group_id IS NOT NULL AND
-			((owner_group_id=? AND consumer_group_id<>?) OR (consumer_group_id=? AND owner_group_id<>?))
-		UNION ALL
-		SELECT 1 FROM asset_bindings b JOIN assets source ON source.id=b.source_asset_id
-			WHERE b.deleted_at IS NULL AND
-			((b.group_id=? AND source.group_id<>?) OR (source.group_id=? AND b.group_id<>?))
-	)`, groupID, groupID, groupID, groupID, groupID, groupID, groupID, groupID, groupID, groupID, groupID, groupID).Scan(&linked)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "group_move_failed")
-		return
-	}
-	if linked {
-		writeError(w, http.StatusConflict, "group_has_cross_group_resources")
 		return
 	}
 	now := time.Now().UTC()
@@ -443,140 +356,169 @@ func (a *app) handleTenantDeleteGroup(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-func (a *app) handleTenantMembers(w http.ResponseWriter, r *http.Request) {
-	rows, err := a.db.QueryContext(r.Context(), `SELECT u.id,u.username,u.display_name,tm.role
+func (a *app) handleTenantAdmins(w http.ResponseWriter, r *http.Request) {
+	rows, err := a.db.QueryContext(r.Context(), `SELECT u.id,u.username,u.display_name
 		FROM tenant_members tm JOIN users u ON u.id=tm.user_id
-		WHERE tm.tenant_id=? AND tm.status=1 ORDER BY u.id`, pathUint64(r, "tenant_id"))
+		WHERE tm.tenant_id=? AND tm.role='admin' AND tm.status=1 AND u.status=1 ORDER BY u.id`, pathUint64(r, "tenant_id"))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "members_failed")
+		writeError(w, http.StatusInternalServerError, "admins_failed")
 		return
 	}
 	defer rows.Close()
 	items := []map[string]any{}
 	for rows.Next() {
 		var id uint64
-		var username, displayName, role string
-		if err := rows.Scan(&id, &username, &displayName, &role); err != nil {
-			writeError(w, http.StatusInternalServerError, "members_failed")
+		var username, displayName string
+		if err := rows.Scan(&id, &username, &displayName); err != nil {
+			writeError(w, http.StatusInternalServerError, "admins_failed")
 			return
 		}
-		items = append(items, map[string]any{"user_id": id, "username": username, "display_name": displayName, "role": role})
+		items = append(items, map[string]any{"user_id": id, "username": username, "display_name": displayName})
 	}
 	if rows.Err() != nil {
-		writeError(w, http.StatusInternalServerError, "members_failed")
+		writeError(w, http.StatusInternalServerError, "admins_failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"members": items})
+	writeJSON(w, http.StatusOK, map[string]any{"admins": items})
 }
 
-func (a *app) handleTenantSetMember(w http.ResponseWriter, r *http.Request) {
+func (a *app) handleCreateTenantAdmin(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		UserID uint64 `json:"user_id"`
-		Role   string `json:"role"`
+		Username    string `json:"username"`
+		DisplayName string `json:"display_name"`
+		Password    string `json:"password"`
 	}
 	if !readJSON(w, r, &req) {
 		return
 	}
-	if req.UserID == 0 || (req.Role != "admin" && req.Role != "member") {
-		writeError(w, http.StatusBadRequest, "invalid_member")
+	req.Username = strings.ToLower(strings.TrimSpace(req.Username))
+	req.DisplayName = strings.TrimSpace(req.DisplayName)
+	if req.Username == "" || len([]rune(req.Username)) > 64 || req.DisplayName == "" || len([]rune(req.DisplayName)) > 128 {
+		writeError(w, http.StatusBadRequest, "username_display_name_required")
 		return
 	}
-	u := mustUser(r)
+	if len(req.Password) < 8 {
+		writeError(w, http.StatusBadRequest, "password_too_short")
+		return
+	}
+	for _, char := range req.Username {
+		if !unicode.IsLetter(char) && !unicode.IsDigit(char) && char != '_' && char != '-' && char != '.' {
+			writeError(w, http.StatusBadRequest, "invalid_username")
+			return
+		}
+	}
+	hash, err := hashPassword(req.Password)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "password_failed")
+		return
+	}
 	tenantID := pathUint64(r, "tenant_id")
+	now := time.Now().UTC()
 	tx, err := a.db.BeginTx(r.Context(), nil)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "member_save_failed")
+		writeError(w, http.StatusInternalServerError, "tenant_admin_create_failed")
 		return
 	}
 	defer tx.Rollback()
 	var lockedTenantID uint64
 	if err := tx.QueryRowContext(r.Context(), `SELECT id FROM tenants WHERE id=? AND status=1 FOR UPDATE`, tenantID).Scan(&lockedTenantID); err != nil {
-		writeError(w, http.StatusNotFound, "tenant_not_found")
-		return
-	}
-	if !u.IsSuperAdmin {
-		var existing bool
-		if err := tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM tenant_members WHERE tenant_id=? AND user_id=? AND status=1)`, tenantID, req.UserID).Scan(&existing); err != nil || !existing {
-			writeError(w, http.StatusForbidden, "forbidden")
-			return
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "tenant_not_found")
+		} else {
+			writeError(w, http.StatusInternalServerError, "tenant_admin_create_failed")
 		}
-	}
-	var accountExists bool
-	if err := tx.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM users WHERE id=? AND status=1)`, req.UserID).Scan(&accountExists); err != nil {
-		writeError(w, http.StatusInternalServerError, "member_save_failed")
 		return
 	}
-	if !accountExists {
-		writeError(w, http.StatusNotFound, "member_not_found")
-		return
-	}
-	if req.Role == "member" {
-		var adminCount int
-		var priorRole string
-		if err := tx.QueryRowContext(r.Context(), `SELECT role FROM tenant_members WHERE tenant_id=? AND user_id=? AND status=1`, tenantID, req.UserID).Scan(&priorRole); err == nil && priorRole == "admin" {
-			if err := tx.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM tenant_members WHERE tenant_id=? AND role='admin' AND status=1`, tenantID).Scan(&adminCount); err != nil || adminCount <= 1 {
-				writeError(w, http.StatusConflict, "last_tenant_admin")
-				return
-			}
-		}
-	}
-	now := time.Now().UTC()
-	_, err = tx.ExecContext(r.Context(), `INSERT INTO tenant_members(tenant_id,user_id,role,status,created_at,updated_at)
-		VALUES(?,?,?,1,?,?)
-		ON DUPLICATE KEY UPDATE role=VALUES(role),status=1,updated_at=VALUES(updated_at)`, tenantID, req.UserID, req.Role, now, now)
+	res, err := tx.ExecContext(r.Context(), `INSERT INTO users(username,display_name,name_pinyin,password_hash,is_super_admin,created_by,created_at,updated_at)
+		VALUES(?,?,?,?,0,?,?,?)`, req.Username, req.DisplayName, req.Username, hash, mustUser(r).ID, now, now)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "member_save_failed")
+		writeError(w, http.StatusConflict, "user_create_failed")
+		return
+	}
+	adminID, err := insertedID(res)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "tenant_admin_create_failed")
+		return
+	}
+	if _, err := tx.ExecContext(r.Context(), `INSERT INTO tenant_members(tenant_id,user_id,role,status,created_at,updated_at)
+		VALUES(?,?,'admin',1,?,?)`, tenantID, adminID, now, now); err != nil {
+		writeError(w, http.StatusInternalServerError, "tenant_admin_create_failed")
 		return
 	}
 	if err := tx.Commit(); err != nil {
-		writeError(w, http.StatusInternalServerError, "member_save_failed")
+		writeError(w, http.StatusInternalServerError, "tenant_admin_create_failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	a.audit(0, mustUser(r).ID, "create_tenant_admin", "users", adminID, nil, map[string]any{"tenant_id": tenantID}, r)
+	writeJSON(w, http.StatusCreated, map[string]any{"id": adminID})
 }
 
-func (a *app) handleTenantRemoveMember(w http.ResponseWriter, r *http.Request) {
-	u := mustUser(r)
-	tenantID := pathUint64(r, "tenant_id")
-	userID := pathUint64(r, "user_id")
-	if userID == u.ID {
-		writeError(w, http.StatusBadRequest, "cannot_remove_self")
+func (a *app) handleUpdateTenantAdmin(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		DisplayName string `json:"display_name"`
+		Password    string `json:"password"`
+	}
+	if !readJSON(w, r, &req) {
 		return
 	}
-	tx, err := a.db.BeginTx(r.Context(), nil)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "member_remove_failed")
+	req.DisplayName = strings.TrimSpace(req.DisplayName)
+	if req.DisplayName == "" || len([]rune(req.DisplayName)) > 128 {
+		writeError(w, http.StatusBadRequest, "display_name_required")
 		return
 	}
-	defer tx.Rollback()
-	var lockedTenantID uint64
-	if err := tx.QueryRowContext(r.Context(), `SELECT id FROM tenants WHERE id=? AND status=1 FOR UPDATE`, tenantID).Scan(&lockedTenantID); err != nil {
-		writeError(w, http.StatusNotFound, "tenant_not_found")
+	if req.Password != "" && len(req.Password) < 8 {
+		writeError(w, http.StatusBadRequest, "password_too_short")
 		return
 	}
-	var role string
-	if err := tx.QueryRowContext(r.Context(), `SELECT role FROM tenant_members WHERE tenant_id=? AND user_id=? AND status=1 FOR UPDATE`, tenantID, userID).Scan(&role); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			writeError(w, http.StatusNotFound, "member_not_found")
-		} else {
-			writeError(w, http.StatusInternalServerError, "member_remove_failed")
-		}
-		return
-	}
-	if role == "admin" {
-		var count int
-		if err := tx.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM tenant_members WHERE tenant_id=? AND role='admin' AND status=1`, tenantID).Scan(&count); err != nil || count <= 1 {
-			writeError(w, http.StatusConflict, "last_tenant_admin")
+	var hash string
+	if req.Password != "" {
+		var err error
+		hash, err = hashPassword(req.Password)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "password_failed")
 			return
 		}
 	}
-	if _, err := tx.ExecContext(r.Context(), `UPDATE tenant_members SET status=0,updated_at=? WHERE tenant_id=? AND user_id=?`, time.Now().UTC(), tenantID, userID); err != nil {
-		writeError(w, http.StatusInternalServerError, "member_remove_failed")
+	tenantID, adminID := pathUint64(r, "tenant_id"), pathUint64(r, "user_id")
+	now := time.Now().UTC()
+	tx, err := a.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "tenant_admin_update_failed")
 		return
+	}
+	defer tx.Rollback()
+	var lockedID uint64
+	err = tx.QueryRowContext(r.Context(), `SELECT u.id FROM users u
+		JOIN tenant_members tm ON tm.user_id=u.id
+		WHERE u.id=? AND u.status=1 AND u.is_super_admin=0
+		AND tm.tenant_id=? AND tm.role='admin' AND tm.status=1 FOR UPDATE`, adminID, tenantID).Scan(&lockedID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "tenant_admin_not_found")
+		} else {
+			writeError(w, http.StatusInternalServerError, "tenant_admin_update_failed")
+		}
+		return
+	}
+	if hash == "" {
+		_, err = tx.ExecContext(r.Context(), `UPDATE users SET display_name=?,updated_at=? WHERE id=?`, req.DisplayName, now, adminID)
+	} else {
+		_, err = tx.ExecContext(r.Context(), `UPDATE users SET display_name=?,password_hash=?,must_change_password=0,updated_at=? WHERE id=?`, req.DisplayName, hash, now, adminID)
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "tenant_admin_update_failed")
+		return
+	}
+	if hash != "" {
+		if _, err := tx.ExecContext(r.Context(), `UPDATE refresh_sessions SET revoked_at=?,updated_at=? WHERE user_id=? AND revoked_at IS NULL`, now, now, adminID); err != nil {
+			writeError(w, http.StatusInternalServerError, "tenant_admin_update_failed")
+			return
+		}
 	}
 	if err := tx.Commit(); err != nil {
-		writeError(w, http.StatusInternalServerError, "member_remove_failed")
+		writeError(w, http.StatusInternalServerError, "tenant_admin_update_failed")
 		return
 	}
+	a.audit(0, mustUser(r).ID, "update_tenant_admin", "users", adminID, nil, map[string]any{"tenant_id": tenantID, "display_name": req.DisplayName, "password_changed": hash != ""}, r)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

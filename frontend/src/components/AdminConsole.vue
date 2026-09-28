@@ -233,19 +233,6 @@ async function deleteCurrentGroup() {
   }
 }
 
-async function setMemberLeader(member, grant) {
-  const tenantID = Number(user.value?.current_tenant_id || 0);
-  if (!tenantID || !currentGroupID.value) return;
-  try {
-    await api(`/tenants/${tenantID}/groups/${currentGroupID.value}/leaders/${member.user_id}`, {
-      method: grant ? 'PUT' : 'DELETE',
-    });
-    await reloadApp();
-  } catch (error) {
-    showToast(error.message);
-  }
-}
-
 async function createMember() {
   const displayName = memberName.value.trim();
   const username = memberUsername.value.trim();
@@ -556,7 +543,6 @@ async function runLocalBackupImport() {
     <div class="pagehead spread admin-pagehead">
       <div>
         <h1>管理工作台</h1>
-        <p class="muted">安排学习内容，管理小组资料</p>
       </div>
     </div>
 
@@ -611,7 +597,7 @@ async function runLocalBackupImport() {
         :tabindex="adminSection === 'tenant' ? 0 : -1"
         @click="setAdminSection('tenant')"
       >
-        主体管理
+        小家管理
       </button>
       <button
         v-if="canManageMinistryCatalog"
@@ -625,7 +611,7 @@ async function runLocalBackupImport() {
         专项小组
       </button>
       <button
-        v-if="user?.is_super_admin"
+        v-if="user?.is_super_admin || user?.is_tenant_admin"
         :class="adminSection === 'bot' ? 'primary' : 'quiet'"
         type="button"
         role="tab"
@@ -652,7 +638,6 @@ async function runLocalBackupImport() {
       <div class="section-title admin-section-title">
         <div>
           <h2>成员与小组</h2>
-          <p class="muted">管理当前小组的人员、权限和基本信息</p>
         </div>
       </div>
 
@@ -716,14 +701,6 @@ async function runLocalBackupImport() {
                 {{ roleLabel(member) }}
               </span>
               <button
-                v-if="user?.is_tenant_admin && member.user_id !== user?.id && !member.is_super_admin"
-                class="quiet"
-                type="button"
-                @click="setMemberLeader(member, !member.roles?.includes('group_leader'))"
-              >
-                {{ member.roles?.includes('group_leader') ? '取消组长' : '设为组长' }}
-              </button>
-              <button
                 v-if="canManageRoles && !member.is_super_admin && !member.roles?.includes('group_leader')"
                 :class="member.roles?.includes('group_admin') ? 'secondary' : 'ok'"
                 type="button"
@@ -748,7 +725,7 @@ async function runLocalBackupImport() {
 
     <TenantManagement v-else-if="adminSection === 'tenant' && (user?.is_super_admin || user?.is_tenant_admin)" />
     <MinistryCatalogAdmin v-else-if="adminSection === 'ministry' && canManageMinistryCatalog" />
-    <BotManagementAdmin v-else-if="adminSection === 'bot' && user?.is_super_admin" />
+    <BotManagementAdmin v-else-if="adminSection === 'bot' && (user?.is_super_admin || user?.is_tenant_admin)" />
     <ReciteHistoryAdmin v-else-if="adminSection === 'recite-history' && (user?.is_super_admin || user?.is_tenant_admin)" :group-id="currentGroupID" :members="members" />
 
     <section v-else-if="adminSection === 'learning'">
@@ -1071,7 +1048,6 @@ async function runLocalBackupImport() {
 .admin-wrapper :where(.card, .empty) { border-radius: var(--cd-radius-card); }
 .admin-wrapper .empty { padding: 32px 20px; text-align: center; }
 .admin-section-title { margin-top: 0; }
-.admin-section-title p { margin: 6px 0 0; }
 .admin-member-settings { margin-bottom: 24px; }
 .admin-members-section { min-width: 0; }
 .admin-member-list-title { margin-top: 0; }

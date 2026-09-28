@@ -11,17 +11,19 @@ const managedTenantID = ref(0);
 const selectedTenant = computed(() => tenants.value.find((item) => Number(item.id) === managedTenantID.value));
 const tenantName = ref('');
 const editTenantName = ref('');
-const firstGroupName = ref('');
-const firstAdminID = ref('');
 const adminUsername = ref('');
 const adminDisplayName = ref('');
-const newMemberID = ref('');
-const newMemberRole = ref('member');
+const adminPassword = ref('');
+const adminPasswordConfirm = ref('');
+const editingAdminID = ref(0);
+const editAdminName = ref('');
+const editAdminPassword = ref('');
+const editAdminPasswordConfirm = ref('');
+const savingAdmin = ref(false);
 const groupName = ref('');
 const tenants = ref([]);
 const groups = ref([]);
-const members = ref([]);
-const users = ref([]);
+const admins = ref([]);
 const moveTargets = ref({});
 const loading = ref(false);
 let loadVersion = 0;
@@ -29,22 +31,19 @@ let loadVersion = 0;
 async function load() {
   const version = ++loadVersion;
   const selectedTenantID = managedTenantID.value;
-  const selectedSuper = isSuper.value;
   loading.value = true;
   groups.value = [];
-  members.value = [];
+  admins.value = [];
   try {
-    const [tenantResult, groupResult, memberResult, userResult] = await Promise.all([
+    const [tenantResult, groupResult, adminResult] = await Promise.all([
       api('/tenants'),
       selectedTenantID ? api(`/tenants/${selectedTenantID}/groups`) : Promise.resolve({ study_groups: [] }),
-      selectedTenantID ? api(`/tenants/${selectedTenantID}/members`) : Promise.resolve({ members: [] }),
-      selectedSuper ? api('/super-admin/users') : Promise.resolve({ users: [] }),
+      selectedTenantID ? api(`/tenants/${selectedTenantID}/admins`) : Promise.resolve({ admins: [] }),
     ]);
     if (version !== loadVersion || selectedTenantID !== managedTenantID.value) return;
     tenants.value = tenantResult.tenants || [];
     groups.value = groupResult.study_groups || [];
-    members.value = memberResult.members || [];
-    users.value = userResult.users || [];
+    admins.value = adminResult.admins || [];
     moveTargets.value = Object.fromEntries(groups.value.map((group) => [group.id, selectedTenantID]));
     editTenantName.value = selectedTenant.value?.name || '';
   } catch (error) {
@@ -57,26 +56,20 @@ async function load() {
 watch(tenantID, (id) => {
   if (!isSuper.value || !managedTenantID.value) managedTenantID.value = id;
 }, { immediate: true });
+watch(managedTenantID, () => { editingAdminID.value = 0; });
 watch([managedTenantID, isSuper], load, { immediate: true });
 
 async function createTenant() {
-  if (!tenantName.value.trim() || !firstGroupName.value.trim()) return;
+  if (!tenantName.value.trim()) return;
   try {
     const result = await api('/super-admin/tenants', {
       method: 'POST',
-      body: JSON.stringify({
-        name: tenantName.value.trim(),
-        group_name: firstGroupName.value.trim(),
-        admin_user_id: Number(firstAdminID.value || 0),
-      }),
+      body: JSON.stringify({ name: tenantName.value.trim() }),
     });
     tenantName.value = '';
-    firstGroupName.value = '';
-    firstAdminID.value = '';
-    await alertDialog({ title: '主体已创建', message: `首个小组的默认密码：${result.default_password}` });
     managedTenantID.value = Number(result.id);
-    await switchGroup(result.group_id);
     await load();
+    toast('小家已创建');
   } catch (error) {
     toast(error.message);
   }
@@ -98,43 +91,6 @@ async function createGroup() {
   }
 }
 
-async function setRole(member, role) {
-  try {
-    await api(`/tenants/${managedTenantID.value}/members`, {
-      method: 'PUT',
-      body: JSON.stringify({ user_id: Number(member.user_id), role }),
-    });
-    await reloadApp();
-    await load();
-  } catch (error) {
-    toast(error.message);
-  }
-}
-
-async function addMemberToTenant() {
-  if (!newMemberID.value) return;
-  try {
-    await api(`/tenants/${managedTenantID.value}/members`, {
-      method: 'PUT',
-      body: JSON.stringify({ user_id: Number(newMemberID.value), role: newMemberRole.value }),
-    });
-    newMemberID.value = '';
-    await load();
-  } catch (error) {
-    toast(error.message);
-  }
-}
-
-async function removeMember(member) {
-  if (!await confirmDialog({ title: '移出主体', message: `将 ${member.display_name} 移出当前主体？该账号在其他主体的权限不受影响。`, tone: 'danger' })) return;
-  try {
-    await api(`/tenants/${managedTenantID.value}/members/${member.user_id}`, { method: 'DELETE' });
-    await load();
-  } catch (error) {
-    toast(error.message);
-  }
-}
-
 async function updateTenant() {
   if (!selectedTenant.value || !editTenantName.value.trim()) return;
   try {
@@ -143,7 +99,7 @@ async function updateTenant() {
     });
     await reloadApp();
     await load();
-    toast('主体名称已更新');
+    toast('小家名称已更新');
   } catch (error) {
     toast(error.message);
   }
@@ -152,15 +108,15 @@ async function updateTenant() {
 async function deleteTenant() {
   if (!selectedTenant.value) return;
   if (selectedTenant.value.group_count) {
-    toast('请先转移或删除本主体的全部小组');
+    toast('请先转移或删除本小家的全部小组');
     return;
   }
-  if (!await confirmDialog({ title: '删除主体', message: `确定删除「${selectedTenant.value.name}」？`, tone: 'danger' })) return;
+  if (!await confirmDialog({ title: '删除小家', message: `确定删除「${selectedTenant.value.name}」？`, tone: 'danger' })) return;
   try {
     await api(`/super-admin/tenants/${managedTenantID.value}`, { method: 'DELETE' });
     managedTenantID.value = tenantID.value === managedTenantID.value ? 0 : tenantID.value;
     await load();
-    toast('主体已删除');
+    toast('小家已删除');
   } catch (error) {
     toast(error.message);
   }
@@ -172,7 +128,7 @@ async function moveGroup(group) {
   const target = tenants.value.find((item) => Number(item.id) === targetID);
   const confirmed = await confirmDialog({
     title: '调整小组归属',
-    message: `将「${group.name}」及组内学习数据转至「${target?.name}」？本组成员会加入目标主体；已有跨小组资源关联时无法转移。`,
+    message: `将「${group.name}」及组内学习数据从「${selectedTenant.value?.name}」转至「${target?.name}」？本组成员会加入目标小家；已导入的资料仍可使用，未导入的跨小家资料将不再显示。`,
     tone: 'danger',
   });
   if (!confirmed) {
@@ -183,37 +139,60 @@ async function moveGroup(group) {
     await api(`/super-admin/groups/${group.id}/tenant`, {
       method: 'PUT', body: JSON.stringify({ tenant_id: targetID }),
     });
-    managedTenantID.value = targetID;
     await reloadApp();
     await load();
     toast('小组归属已更新');
   } catch (error) {
     moveTargets.value[group.id] = managedTenantID.value;
-    toast(error.message === 'group_has_cross_group_resources' ? '请先解除该小组的跨小组资源分享和导入关联' : error.message);
+    toast(error.message);
   }
 }
 
 async function createAdmin() {
   if (!adminUsername.value.trim() || !adminDisplayName.value.trim() || !managedTenantID.value) return;
-  let created;
+  if (adminPassword.value.length < 8) { toast('密码至少需要 8 位'); return; }
+  if (adminPassword.value !== adminPasswordConfirm.value) { toast('两次输入的密码不一致'); return; }
   try {
-    created = await api('/super-admin/users', {
+    await api(`/super-admin/tenants/${managedTenantID.value}/admins`, {
       method: 'POST',
-      body: JSON.stringify({ username: adminUsername.value.trim(), display_name: adminDisplayName.value.trim() }),
-    });
-    await api(`/tenants/${managedTenantID.value}/members`, {
-      method: 'PUT', body: JSON.stringify({ user_id: Number(created.id), role: 'admin' }),
+      body: JSON.stringify({ username: adminUsername.value.trim(), display_name: adminDisplayName.value.trim(), password: adminPassword.value }),
     });
     adminUsername.value = '';
     adminDisplayName.value = '';
+    adminPassword.value = '';
+    adminPasswordConfirm.value = '';
     await load();
-    await alertDialog({ title: '主体管理员已创建', message: `初始密码：${created.initial_password}` });
+    toast('小家管理员已创建');
   } catch (error) {
-    if (created) {
-      await load();
-      await alertDialog({ title: '账号已创建，管理员授权失败', message: `请使用上方“添加现有账号”重试授权。初始密码：${created.initial_password}` });
-    }
     toast(error.message);
+  }
+}
+
+function editAdmin(member) {
+  editingAdminID.value = Number(member.user_id);
+  editAdminName.value = member.display_name;
+  editAdminPassword.value = '';
+  editAdminPasswordConfirm.value = '';
+}
+
+async function updateAdmin(member) {
+  if (savingAdmin.value) return;
+  if (!editAdminName.value.trim()) { toast('管理员名称不能为空'); return; }
+  if (editAdminPassword.value && editAdminPassword.value.length < 8) { toast('密码至少需要 8 位'); return; }
+  if (editAdminPassword.value !== editAdminPasswordConfirm.value) { toast('两次输入的密码不一致'); return; }
+  savingAdmin.value = true;
+  try {
+    await api(`/super-admin/tenants/${managedTenantID.value}/admins/${member.user_id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ display_name: editAdminName.value.trim(), password: editAdminPassword.value }),
+    });
+    editingAdminID.value = 0;
+    await load();
+    toast('小家管理员已更新');
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    savingAdmin.value = false;
   }
 }
 </script>
@@ -221,81 +200,96 @@ async function createAdmin() {
 <template>
   <section>
     <div class="section-title admin-section-title">
-      <div><h2>主体管理</h2><p class="muted">主体之间的数据与权限独立</p></div>
+      <h2>小家管理</h2>
     </div>
 
     <div v-if="isSuper" class="card">
-      <h2>创建主体</h2>
+      <h2>创建小家</h2>
       <div class="form-stack">
-        <input v-model.trim="tenantName" aria-label="主体名称" placeholder="主体名称" />
-        <input v-model.trim="firstGroupName" aria-label="首个学习小组" placeholder="首个学习小组名称" />
-        <select v-model="firstAdminID" aria-label="首位主体管理员">
-          <option value="">稍后指定管理员</option>
-          <option v-for="account in users" :key="account.id" :value="account.id">{{ account.display_name }}（{{ account.username }}）</option>
-        </select>
-        <div class="form-actions"><button type="button" @click="createTenant">创建主体</button></div>
+        <input v-model.trim="tenantName" aria-label="小家名称" placeholder="小家名称" />
+        <div class="form-actions"><button type="button" @click="createTenant">创建小家</button></div>
       </div>
     </div>
 
     <div v-if="isSuper" class="card">
-      <h2>管理主体</h2>
+      <h2>管理小家</h2>
       <div class="form-stack">
-        <select v-model.number="managedTenantID" aria-label="选择要管理的主体">
-          <option :value="0">选择主体</option>
+        <select v-model.number="managedTenantID" aria-label="选择要管理的小家">
+          <option :value="0">选择小家</option>
           <option v-for="tenant in tenants" :key="tenant.id" :value="Number(tenant.id)">{{ tenant.name }}（{{ tenant.group_count }} 个小组）</option>
         </select>
         <template v-if="selectedTenant">
-          <input v-model.trim="editTenantName" aria-label="修改主体名称" placeholder="主体名称" />
+          <input v-model.trim="editTenantName" aria-label="修改小家名称" placeholder="小家名称" />
           <div class="form-actions">
             <button type="button" @click="updateTenant">保存名称</button>
-            <button v-if="Number(selectedTenant.id) !== 1" class="danger" type="button" @click="deleteTenant">删除主体</button>
+            <button v-if="Number(selectedTenant.id) !== 1" class="danger" type="button" @click="deleteTenant">删除小家</button>
           </div>
         </template>
       </div>
     </div>
 
     <div v-if="managedTenantID" class="card">
-      <h2>主体小组：{{ selectedTenant?.name || '加载中' }}</h2>
+      <h2>小家小组：{{ selectedTenant?.name || '加载中' }}</h2>
       <p v-if="loading" class="muted">正在加载…</p>
       <div class="form-stack">
         <input v-model.trim="groupName" aria-label="新学习小组名称" placeholder="新学习小组名称" @keyup.enter="createGroup" />
         <div class="form-actions"><button type="button" @click="createGroup">创建学习小组</button></div>
       </div>
-      <div v-for="group in groups" :key="group.id" class="spread">
-        <span>{{ group.name }}</span>
-        <span>
-          <button v-if="Number(group.id) !== Number(app.user?.current_group_id)" class="quiet" type="button" @click="switchGroup(group.id)">进入</button>
-          <select v-if="isSuper" v-model.number="moveTargets[group.id]" :aria-label="`设置 ${group.name} 所属主体`" @change="moveGroup(group)">
+      <div class="home-group-list">
+        <div v-for="group in groups" :key="group.id" class="home-group-row" :class="{ 'home-group-row--readonly': !isSuper }">
+          <strong>{{ group.name }}</strong>
+          <select v-if="isSuper" v-model.number="moveTargets[group.id]" :aria-label="`设置 ${group.name} 所属小家`" @change="moveGroup(group)">
             <option v-for="tenant in tenants" :key="tenant.id" :value="Number(tenant.id)">{{ tenant.name }}</option>
           </select>
-        </span>
+        </div>
       </div>
     </div>
 
     <div v-if="managedTenantID" class="card">
-      <h2>主体成员与管理员</h2>
+      <h2>小家管理员</h2>
       <div v-if="isSuper" class="form-stack">
         <input v-model.trim="adminUsername" aria-label="新管理员用户名" placeholder="新管理员用户名" />
         <input v-model.trim="adminDisplayName" aria-label="新管理员姓名" placeholder="新管理员姓名" />
-        <div class="form-actions"><button type="button" @click="createAdmin">创建主体管理员账号</button></div>
-        <select v-model="newMemberID" aria-label="添加现有账号">
-          <option value="">选择要加入本主体的现有账号</option>
-          <option v-for="account in users.filter((item) => !members.some((member) => Number(member.user_id) === Number(item.id)))" :key="account.id" :value="account.id">{{ account.display_name }}（{{ account.username }}）</option>
-        </select>
-        <select v-model="newMemberRole" aria-label="主体角色">
-          <option value="member">主体成员</option>
-          <option value="admin">主体管理员</option>
-        </select>
-        <div class="form-actions"><button type="button" @click="addMemberToTenant">添加账号</button></div>
+        <input v-model="adminPassword" type="password" minlength="8" autocomplete="new-password" aria-label="新管理员密码" placeholder="密码（至少 8 位）" />
+        <input v-model="adminPasswordConfirm" type="password" minlength="8" autocomplete="new-password" aria-label="确认新管理员密码" placeholder="确认密码" />
+        <div class="form-actions"><button type="button" @click="createAdmin">创建小家管理员账号</button></div>
       </div>
-      <div v-for="member in members" :key="member.user_id" class="spread">
-        <span>{{ member.display_name }}（{{ member.username }}）</span>
-        <span>
-          <button v-if="member.role !== 'admin'" class="quiet" type="button" @click="setRole(member, 'admin')">设为主体管理员</button>
-          <button v-else-if="Number(member.user_id) !== Number(app.user?.id)" class="quiet" type="button" @click="setRole(member, 'member')">取消主体管理员</button>
-          <button v-if="Number(member.user_id) !== Number(app.user?.id)" class="danger" type="button" @click="removeMember(member)">移出主体</button>
-        </span>
+      <div v-for="member in admins" :key="member.user_id" class="home-admin-row">
+        <div class="spread">
+          <span>{{ member.display_name }}（{{ member.username }}）</span>
+          <button v-if="isSuper" class="quiet" type="button" @click="editingAdminID === Number(member.user_id) ? editingAdminID = 0 : editAdmin(member)">{{ editingAdminID === Number(member.user_id) ? '取消' : '修改' }}</button>
+        </div>
+        <div v-if="isSuper && editingAdminID === Number(member.user_id)" class="form-stack home-admin-edit">
+          <input v-model.trim="editAdminName" aria-label="修改管理员名称" placeholder="管理员名称" />
+          <input v-model="editAdminPassword" type="password" minlength="8" autocomplete="new-password" aria-label="修改管理员密码" placeholder="新密码（不修改请留空）" />
+          <input v-model="editAdminPasswordConfirm" type="password" minlength="8" autocomplete="new-password" aria-label="确认修改管理员密码" placeholder="确认新密码" />
+          <div class="form-actions"><button type="button" :disabled="savingAdmin" @click="updateAdmin(member)">保存修改</button></div>
+        </div>
       </div>
+      <p v-if="!loading && !admins.length" class="muted">暂无小家管理员</p>
     </div>
   </section>
 </template>
+
+<style scoped>
+.home-group-list { display: grid; gap: 8px; margin-top: 18px; }
+.home-group-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(140px, 220px);
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--cd-border);
+  border-radius: var(--cd-radius-base);
+  background: var(--cd-surface-subtle);
+}
+.home-group-row strong { min-width: 0; overflow-wrap: anywhere; }
+.home-group-row--readonly { grid-template-columns: 1fr; }
+.home-group-row select { width: 100%; min-width: 0; }
+.home-admin-row { border-top: 1px solid var(--cd-border); padding: 10px 0; }
+.home-admin-row .spread { min-height: 44px; }
+.home-admin-edit { margin-top: 8px; }
+@media (max-width: 560px) {
+  .home-group-row { grid-template-columns: minmax(0, 1fr) minmax(130px, 45%); }
+}
+</style>
