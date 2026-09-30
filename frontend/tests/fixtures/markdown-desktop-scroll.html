@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Markdown scroll fixture</title>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module">
+    import { createApp } from 'vue';
+    import { createPinia } from 'pinia';
+    import ContentViewer from '/src/components/ContentViewer.vue';
+    import { useContentViewerStore } from '/src/stores/contentViewer.js';
+    import '/src/styles.css';
+    import '/src/styles/fonts.css';
+    import '/src/styles/tokens.css';
+    import '/src/styles/base.css';
+    import '/src/styles/layout.css';
+    import '/src/styles/composition.css';
+
+    const pinia = createPinia();
+    createApp(ContentViewer).use(pinia).mount('#app');
+    const count = new URLSearchParams(location.search).has('short') ? 1 : 60;
+    useContentViewerStore(pinia).setViewer({
+      type: 'markdown',
+      title: 'Markdown 阅读滚动测试',
+      html: '<h2>当日灵修</h2>' + Array.from({ length: count }, (_, index) => (
+        `<p>第 ${index + 1} 段。这是用于验证桌面和手机阅读滚动的正文，正文应在弹窗内部滚动，阅读进度随滚动变化。</p>`
+      )).join(''),
+      relatedSections: [],
+    });
+  </script>
+</body>
+</html>
