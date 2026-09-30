@@ -148,6 +148,19 @@ describe('content runtime helpers', () => {
       .toEqual(['# 九月二十二日', '正文', '九月二十三章讲到恩典，不是日期标题', '仍属正文']);
   });
 
+  it('separates legacy month-end dates without returning adjacent days or the full file', () => {
+    const markdown = '九月二十八日\n二十八日正文。\n九月廿九日\n二十九日正文。九月卅日「三十日经文」三十日正文。\n十月一日\n十月正文';
+    expect(extractMarkdownSectionForDate(markdown, '2026-09-29', 1).join('\n'))
+      .toBe('九月廿九日\n二十九日正文。\n');
+    expect(extractMarkdownSectionForDate(markdown, '2026-09-30', 1).join('\n'))
+      .toBe('九月卅日\n\n「三十日经文」三十日正文。');
+    expect(extractMarkdownSectionForDate(markdown, '2026-09-27', 1)).toEqual([]);
+    expect(extractMarkdownSectionForDate('三月三日\n三日\n三月三十日\n三十日\n三月三十一日\n三十一日', '2026-03-03', 1))
+      .toEqual(['三月三日', '三日']);
+    expect(extractMarkdownSectionForDate('三月三日\n三日\n三月三十日\n三十日\n三月三十一日\n三十一日', '2026-03-31', 1))
+      .toEqual(['三月三十一日', '三十一日']);
+  });
+
   it('recognizes same-origin protected API URLs', () => {
     expect(sameOriginAPIPath('/api/assets/12/range?pages=10-11', 'http://localhost:5114')).toBe('/api/assets/12/range?pages=10-11');
     expect(sameOriginAPIPath('http://localhost:5114/api/assets/12/range?pages=10-11', 'http://localhost:5114')).toBe('/api/assets/12/range?pages=10-11');

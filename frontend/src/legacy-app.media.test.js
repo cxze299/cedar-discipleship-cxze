@@ -176,6 +176,29 @@ describe('video learning related resources', () => {
   });
 });
 
+describe('dated devotion reading', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it.each(['/api/assets/5/download', 'https://example.com/Kuangye.md'])('keeps the selected date through %s', async (url) => {
+    setActivePinia(createPinia());
+    vi.stubGlobal('window', { location: { origin: 'https://example.com' } });
+    vi.stubGlobal('document', { cookie: '' });
+    const markdown = '九月廿九日\n昨日正文。九月卅日「今日经文」今日正文。\n十月一日\n明日正文';
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      blob: async () => new Blob([markdown], { type: 'text/markdown' }),
+      text: async () => markdown,
+    }));
+
+    await openContentTarget({ url, type: 'markdown', date: '2026-09-30', section: 1 });
+    const html = useContentViewerStore().viewer.html;
+    expect(html).toContain('今日正文');
+    expect(html).not.toContain('昨日正文');
+    expect(html).not.toContain('明日正文');
+  });
+});
+
 describe('inline reading content', () => {
   it('preserves configured recitation line breaks without changing ordinary markdown flow', async () => {
     setActivePinia(createPinia());
