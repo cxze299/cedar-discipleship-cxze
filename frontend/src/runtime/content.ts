@@ -363,7 +363,13 @@ function sameMarkdownDate(left: MarkdownDateHeading, right: MarkdownDateHeading)
 
 /** Match a date heading first, then fall back to the configured numbered section. */
 export function extractMarkdownSectionForDate(value: unknown, date: unknown, number: unknown): string[] {
-  const lines = String(value || '').replace(/\r/g, '').split('\n');
+  // Some legacy files join the next day's date and opening quotation to the
+  // previous paragraph. Only split at this unambiguous devotion boundary.
+  const source = String(value || '').replace(/\r/g, '').replace(
+    /([。！？!?」”])[ \t]*((?:[0-9一二三四五六七八九十]+)月(?:[0-9一二三四五六七八九十廿卅]+)日)(?=[「“])/g,
+    '$1\n\n$2\n\n',
+  );
+  const lines = source.split('\n');
   const targetMatch = String(date || '').match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
   if (!targetMatch) return extractNumberedMarkdownSection(lines.join('\n'), number);
   const target: MarkdownDateHeading = {
@@ -375,7 +381,7 @@ export function extractMarkdownSectionForDate(value: unknown, date: unknown, num
     .map((line, index) => ({ index, date: markdownDateHeading(line) }))
     .filter((item): item is { index: number; date: MarkdownDateHeading } => item.date !== null);
   const matchIndex = dateHeadingIndexes.findIndex((item) => sameMarkdownDate(item.date, target));
-  if (matchIndex < 0) return extractNumberedMarkdownSection(lines.join('\n'), number);
+  if (matchIndex < 0) return dateHeadingIndexes.length ? [] : extractNumberedMarkdownSection(lines.join('\n'), number);
   const start = dateHeadingIndexes[matchIndex].index;
   const end = dateHeadingIndexes[matchIndex + 1]?.index ?? lines.length;
   return lines.slice(start, end);
