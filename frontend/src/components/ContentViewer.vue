@@ -556,6 +556,10 @@ function openAdjacentItem(item) {
   overflow: hidden;
   padding: 14px;
 }
+:global(.viewer-modal-reading .viewer-body) {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+}
 :global(.viewer-modal .viewer-body.viewer-body-split) {
   grid-template-columns: minmax(230px, 280px) minmax(0, 1fr);
   align-items: stretch;
