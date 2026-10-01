@@ -23,6 +23,7 @@ const statuses = [
 const statusFilter = ref('');
 const items = ref([]);
 const selected = ref(null);
+const openingID = ref(0);
 const loading = ref(false);
 const detailLoading = ref(false);
 const savingStatus = ref(false);
@@ -39,6 +40,34 @@ const selectedErrorMuted = computed(() => (
   selectedErrorType.value
   && automaticSettings.value.muted_error_types.includes(selectedErrorType.value)
 ));
+const semanticDiagnosticKeys = new Set([
+  'business_action',
+  'resource_title',
+  'task_title',
+  'logical_date',
+  'group_name',
+  'user_display_name',
+]);
+const selectedContext = computed(() => {
+  const item = selected.value || {};
+  const diagnostics = item.diagnostics || {};
+  return {
+    group: item.group_name || diagnostics.group_name || '',
+    user: item.member_name || diagnostics.user_display_name
+      || item.display_name || item.legacy_name || item.username || '',
+    action: diagnostics.business_action || '',
+    content: diagnostics.resource_title || diagnostics.task_title || '',
+    date: diagnostics.logical_date || '',
+  };
+});
+const technicalDiagnostics = computed(() => Object.fromEntries(
+  Object.entries(selected.value?.diagnostics || {})
+    .filter(([key]) => !semanticDiagnosticKeys.has(key)),
+));
+const selectedDetailRow = computed(() => {
+  const index = items.value.findIndex((item) => item.id === openingID.value);
+  return Math.max(index, 0) * 2 + 2;
+});
 
 function statusLabel(status) {
   return statuses.find(([value]) => value === status)?.[1] || status;
@@ -62,6 +91,16 @@ function diagnosticLabel(key) {
     request_path: '请求路径',
     http_status: '状态码',
     error_code: '错误码',
+    business_action: '业务动作',
+    resource_title: '资源名称',
+    task_title: '任务名称',
+    logical_date: '业务日期',
+    script_url: '脚本地址',
+    line: '行号',
+    column: '列号',
+    event_target: '事件目标',
+    group_name: '小组',
+    user_display_name: '用户',
   }[key] || key;
 }
 
@@ -89,7 +128,10 @@ async function loadList(preferredID = 0) {
     items.value = data.items || [];
     const targetID = preferredID || selected.value?.id || items.value[0]?.id;
     if (targetID && items.value.some((item) => item.id === targetID)) await openItem(targetID);
-    else selected.value = null;
+    else {
+      selected.value = null;
+      openingID.value = 0;
+    }
   } catch (error) {
     toast(error.message);
   } finally {
@@ -162,6 +204,7 @@ async function loadAttachmentPreviews(detail) {
 }
 
 async function openItem(id) {
+  openingID.value = id;
   detailLoading.value = true;
   try {
     const data = await api(`/super-admin/feedback/${id}`);
@@ -170,6 +213,7 @@ async function openItem(id) {
       attachments: await loadAttachmentPreviews(data.feedback),
     };
   } catch (error) {
+    openingID.value = selected.value?.id || 0;
     toast(error.message);
   } finally {
     detailLoading.value = false;
@@ -272,30 +316,37 @@ onBeforeUnmount(clearDetailURLs);
         <div v-if="loading && !items.length" class="empty">正在加载...</div>
         <div v-else-if="!items.length" class="empty">当前没有反馈</div>
         <button
-          v-for="item in items"
+          v-for="(item, index) in items"
           v-else
           :key="item.id"
           type="button"
-          :class="{ active: selected?.id === item.id }"
+          :class="{ active: openingID === item.id }"
+          :style="{ gridRow: index * 2 + 1 }"
           @click="openItem(item.id)"
         >
           <span class="feedback-admin__list-main">
-            <strong>#{{ item.id }} · {{ item.display_name || item.legacy_name || item.username || '历史用户' }}</strong>
+            <strong>#{{ item.id }} · {{ item.member_name || item.display_name || item.legacy_name || item.username || '历史用户' }}</strong>
             <span>{{ item.message }}</span>
-            <small class="muted">{{ item.source === 'automatic' ? '自动上报 · ' : '' }}{{ formatDate(item.updated_at) }}</small>
+            <small class="muted">
+              {{ item.source === 'automatic' ? '自动上报 · ' : '' }}{{ item.group_name ? `${item.group_name} · ` : '' }}{{ formatDate(item.updated_at) }}
+            </small>
           </span>
           <span class="pill" :class="`status-${item.status}`">{{ statusLabel(item.status) }}</span>
-          <ChevronRight :size="17" />
+          <ChevronRight :size="17" :class="{ expanded: openingID === item.id }" />
         </button>
       </aside>
 
-      <section class="panel feedback-admin__detail">
+      <section
+        v-if="openingID"
+        class="panel feedback-admin__detail"
+        :style="{ gridRow: selectedDetailRow }"
+      >
         <div v-if="detailLoading" class="empty">正在加载详情...</div>
-        <div v-else-if="!selected" class="empty">选择一条反馈查看详情</div>
+        <div v-else-if="!selected || selected.id !== openingID" class="empty">详情加载失败</div>
         <template v-else>
           <header class="feedback-admin__detail-head">
             <div>
-              <h3>{{ selected.display_name || selected.legacy_name || selected.username || '历史用户' }}</h3>
+              <h3>{{ selected.member_name || selected.display_name || selected.legacy_name || selected.username || '历史用户' }}</h3>
               <p class="small muted">{{ selected.source === 'automatic' ? '自动上报 · ' : '' }}{{ formatDate(selected.created_at) }}</p>
             </div>
             <select aria-label="处理状态" :value="selected.status" :disabled="savingStatus" @change="updateStatus($event.target.value)">
@@ -304,6 +355,16 @@ onBeforeUnmount(clearDetailURLs);
           </header>
 
           <p class="feedback-admin__message">{{ selected.message }}</p>
+          <section v-if="selected.source === 'automatic'" class="feedback-admin__context" aria-label="自动反馈业务概览">
+            <h3>业务概览</h3>
+            <dl>
+              <template v-if="selectedContext.group"><dt>小组</dt><dd>{{ selectedContext.group }}</dd></template>
+              <template v-if="selectedContext.user"><dt>用户</dt><dd>{{ selectedContext.user }}</dd></template>
+              <template v-if="selectedContext.action"><dt>动作</dt><dd>{{ selectedContext.action }}</dd></template>
+              <template v-if="selectedContext.content"><dt>内容</dt><dd>{{ selectedContext.content }}</dd></template>
+              <template v-if="selectedContext.date"><dt>日期</dt><dd>{{ selectedContext.date }}</dd></template>
+            </dl>
+          </section>
           <div v-if="selected.attachments?.length" class="feedback-admin__images">
             <a v-for="image in selected.attachments" :key="image.id" :href="image.url" target="_blank" rel="noopener">
               <img :src="image.url" :alt="image.original_name" />
@@ -328,9 +389,9 @@ onBeforeUnmount(clearDetailURLs);
             <dl>
               <dt>Log ID</dt><dd class="feedback-admin__log-id">{{ selected.log_id || '未记录' }}</dd>
               <dt>账号</dt><dd>{{ selected.username || '历史记录未绑定账号' }}<template v-if="selected.user_id"> (#{{ selected.user_id }})</template></dd>
-              <dt>小组 ID</dt><dd>{{ selected.group_id || '无' }}</dd>
-              <template v-if="Object.keys(selected.diagnostics || {}).length">
-                <template v-for="(value, key) in selected.diagnostics" :key="key">
+              <dt>小组</dt><dd>{{ selected.group_name || '无' }}<template v-if="selected.group_id"> (#{{ selected.group_id }})</template></dd>
+              <template v-if="Object.keys(technicalDiagnostics).length">
+                <template v-for="(value, key) in technicalDiagnostics" :key="key">
                   <dt>{{ diagnosticLabel(key) }}</dt><dd>{{ value }}</dd>
                 </template>
               </template>
@@ -376,16 +437,23 @@ onBeforeUnmount(clearDetailURLs);
 .feedback-admin__muted-item { display: inline-flex; align-items: center; gap: 2px; padding-left: 8px; border: 1px solid var(--cd-border); border-radius: var(--cd-radius-base); }
 .feedback-admin__muted-item code { overflow-wrap: anywhere; }
 .feedback-admin__muted-item button { width: 30px; height: 30px; min-height: 30px; padding: 0; }
-.feedback-admin__workspace { display: grid; grid-template-columns: minmax(280px, .8fr) minmax(0, 1.4fr); gap: 18px; align-items: start; }
-.feedback-admin__list { min-width: 0; border-top: 1px solid var(--cd-border); }
+.feedback-admin__workspace { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr); align-items: start; border-top: 1px solid var(--cd-border); }
+.feedback-admin__list { display: contents; }
 .feedback-admin__list > button { display: grid; width: 100%; min-height: 82px; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 12px 4px; border: 0; border-bottom: 1px solid var(--cd-border); border-radius: 0; background: transparent; color: var(--cd-text); text-align: left; box-shadow: none; }
 .feedback-admin__list > button.active { color: var(--cd-primary); }
+.feedback-admin__list > button svg { transition: transform .16s ease; }
+.feedback-admin__list > button svg.expanded { transform: rotate(90deg); }
 .feedback-admin__list-main { display: grid; min-width: 0; gap: 3px; }
 .feedback-admin__list-main span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.feedback-admin__detail { min-width: 0; }
+.feedback-admin__detail { min-width: 0; margin: -1px 0 14px; border-top: 2px solid var(--cd-primary); }
 .feedback-admin__detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .feedback-admin__detail-head h3, .feedback-admin__detail-head p { margin: 0; }
 .feedback-admin__message { margin: 18px 0; white-space: pre-wrap; line-height: 1.7; }
+.feedback-admin__context { margin: 18px 0; padding: 14px 0; border-top: 1px solid var(--cd-border); border-bottom: 1px solid var(--cd-border); }
+.feedback-admin__context h3 { margin: 0 0 10px; font-size: 16px; }
+.feedback-admin__context dl { display: grid; grid-template-columns: 80px minmax(0, 1fr); gap: 6px 12px; margin: 0; }
+.feedback-admin__context dt { color: var(--cd-muted); }
+.feedback-admin__context dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
 .feedback-admin__images { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; }
 .feedback-admin__images a { aspect-ratio: 4 / 3; overflow: hidden; border-radius: var(--cd-radius-base); }
 .feedback-admin__images img { display: block; width: 100%; height: 100%; object-fit: cover; }
@@ -406,14 +474,12 @@ onBeforeUnmount(clearDetailURLs);
 .status-pending { color: var(--cd-warning); }
 .status-processing, .status-needs_info { color: var(--cd-primary); }
 .status-resolved { color: var(--cd-success); }
-@media (max-width: 900px) {
-  .feedback-admin__workspace { grid-template-columns: 1fr; }
-}
 @media (max-width: 600px) {
   .feedback-admin__title { align-items: stretch; flex-direction: column; }
   .feedback-admin__title .inline { display: grid; grid-template-columns: minmax(0, 1fr) 44px; }
   .feedback-admin__automation { align-items: flex-start; flex-direction: column; gap: 8px; }
   .feedback-admin__metadata dl { grid-template-columns: 1fr; gap: 3px; }
+  .feedback-admin__context dl { grid-template-columns: 64px minmax(0, 1fr); }
   .feedback-admin__metadata dd { margin-bottom: 7px; }
   .feedback-admin__reply button { width: 100%; min-height: 48px; }
 }
