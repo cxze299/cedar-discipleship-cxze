@@ -1,6 +1,6 @@
 import { createPinia, setActivePinia } from 'pinia';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { login, logout, selectWeekDraft, setSelectedDate, setStatsDateRange, setTab, switchGroup, toast, updateLearningValue, updateWeekBinding } from './legacy-app';
+import { login, logout, selectWeekDraft, setSelectedDate, setStatsDateRange, setTab, switchGroup, toast, toggleCheckin, updateLearningValue, updateWeekBinding } from './legacy-app';
 import { useCheckinWorkbenchStore } from './stores/checkinWorkbench';
 import { useAppStateStore } from './stores/appState';
 import { useDashboardStore } from './stores/dashboard';
@@ -175,5 +175,78 @@ describe('main data context', () => {
     expect(useCheckinWorkbenchStore().tasks[0].contentLinks[0]).toMatchObject({
       title: '历史灵修', url: '/api/assets/99/download', type: 'pdf', pageRange: '2-4',
     });
+  });
+
+  it('reports the original checkin date after the selected date changes', async () => {
+    await login('member', 'password');
+    await setSelectedDate('2026-08-01');
+    vi.stubGlobal('window', {
+      location: { origin: 'https://cedar.example.test', hostname: 'cedar.example.test', pathname: '/', search: '' },
+      screen: { width: 390, height: 844 },
+    });
+    vi.stubGlobal('navigator', { userAgent: 'Test Browser' });
+    const request = fetch.getMockImplementation();
+    let finishCheckin;
+    let finishReport;
+    const reporting = new Promise((resolve) => { finishReport = resolve; });
+    vi.stubGlobal('fetch', vi.fn(async (url, options) => {
+      if (url === '/api/checkins') {
+        return new Promise((resolve) => { finishCheckin = resolve; });
+      }
+      if (url === '/api/feedback/automatic-settings') return Response.json({ settings: { enabled: true } });
+      if (url === '/api/feedback/automatic') {
+        finishReport(JSON.parse(options.body.get('diagnostics')));
+        return new Response(null, { status: 201 });
+      }
+      return request(url, options);
+    }));
+
+    const checkin = toggleCheckin({ type: 'daily_devotion', title: '每日阅读' });
+    await setSelectedDate('2026-08-02');
+    finishCheckin(Response.json({ error: 'checkin_save_failed' }, { status: 500 }));
+    await checkin;
+
+    expect(await reporting).toMatchObject({ logical_date: '2026-08-01', task_title: '每日阅读' });
+    expect(useCheckinWorkbenchStore().selectedDate).toBe('2026-08-02');
+  });
+
+  it.each([
+    ['complete', 200], ['cancel', 200], ['complete', 500], ['cancel', 500],
+  ])('preserves %s checkin behavior on HTTP %s when feedback title collection throws', async (action, status) => {
+    await login('member', 'password');
+    await setSelectedDate('2026-08-01');
+    vi.stubGlobal('window', { location: {
+      origin: 'https://cedar.example.test', hostname: 'cedar.example.test',
+    } });
+    vi.stubGlobal('navigator', { userAgent: 'Test Browser' });
+    const request = fetch.getMockImplementation();
+    const writes = [];
+    vi.stubGlobal('fetch', vi.fn(async (url, options) => {
+      if (url === '/api/checkins' || url === '/api/checkins/17') {
+        writes.push({ url, options });
+        return Response.json(status === 200 ? {} : { error: 'checkin_save_failed' }, { status });
+      }
+      return request(url, options);
+    }));
+    const title = vi.fn(() => { throw new Error('feedback_title_failed'); });
+    const task = {
+      type: 'daily_devotion', detail: '每日阅读', part: 'devotion',
+      get title() { return title(); },
+      ownRecord: action === 'cancel' ? { id: 17 } : null,
+    };
+
+    await toggleCheckin(task);
+
+    expect(writes).toHaveLength(1);
+    expect(writes[0].url).toBe(action === 'cancel' ? '/api/checkins/17' : '/api/checkins');
+    expect(writes[0].options.method).toBe(action === 'cancel' ? 'DELETE' : 'POST');
+    if (action === 'complete') {
+      expect(JSON.parse(writes[0].options.body)).toMatchObject({
+        task_type: 'daily_devotion', detail: '每日阅读', logical_date: '2026-08-01',
+      });
+    }
+    expect(useAppStateStore().toast).toBe(status === 500
+      ? 'checkin_save_failed' : action === 'cancel' ? '已取消完成记录' : '学习已完成');
+    if (status === 200) expect(title).not.toHaveBeenCalled();
   });
 });
